@@ -1,9 +1,10 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 00-overview/roadmap.md
+  - ADR-008
   - 08-operations/backup-restore.md
 ---
 
@@ -11,7 +12,8 @@ related:
 
 ## 기능
 
-- 두 사용자가 각자 로그인하고 같은 Household 데이터를 본다.
+- Cloudflare Access에서 허용된 두 사용자가 각자 인증되고 같은 Household 데이터를 본다.
+- 검증된 Access identity가 내부 활성 User에 매핑되지 않으면 접근이 거부된다.
 - 수입·지출·이체를 생성·수정·삭제할 수 있다.
 - 치호 개인, 여자친구 개인, 공동 필터가 달력·목록·통계에서 일관된다.
 - 카드 지출과 카드대금 납부가 중복 소비로 잡히지 않는다.
@@ -26,15 +28,20 @@ related:
 
 - 모든 재무 불변식 테스트 통과
 - 다른 Household 접근 테스트 통과
+- Access JWT 서명·issuer·audience·만료 검증 테스트 통과
+- production profile에서 개발용 identity 우회가 비활성임을 검증
 - Flyway clean database 적용 통과
 - backend/frontend build와 lint/test 통과
 - 핵심 모바일 E2E 통과
-- API 응답에 secret·stack trace 없음
+- API 응답과 로그에 secret·Access JWT·Access cookie·stack trace 없음
 
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
-- 외부 공개 경로는 Cloudflare Tunnel 사용
+- 외부 공개 경로는 Cloudflare Access + Cloudflare Tunnel 사용
+- Cloudflare Access Allow 정책이 실제 사용자 두 이메일로 제한됨
+- `cloudflared` Access JWT 검증이 활성화됨
+- Access를 우회해 origin에 접근 가능한 공용 경로가 없음
 - DB 포트 직접 공개 없음
 - 자동 backup 성공 확인
 - 별도 환경에서 restore drill 1회 성공
@@ -42,6 +49,6 @@ related:
 
 ## 문서
 
-- API, ERD, 운영 문서가 실제 구현과 일치
+- API, ERD, 인증, 인가, 운영 문서가 실제 구현과 일치
 - production 환경 변수 목록과 secret 주입 방식 기록
 - 미결정 운영 정책이 production gate 전에 해소
