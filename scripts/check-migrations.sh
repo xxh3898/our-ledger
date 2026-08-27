@@ -5,19 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIGRATION_DIR="$ROOT_DIR/backend/src/main/resources/db/migration"
 
 if [[ ! -d "$MIGRATION_DIR" ]]; then
-  echo "Flyway migration 디렉터리가 아직 없어 검사를 건너뜁니다."
-  exit 0
-fi
-
-mapfile_supported=true
-if ! command -v mapfile >/dev/null 2>&1; then
-  mapfile_supported=false
+  echo "Flyway migration 디렉터리가 없습니다." >&2
+  exit 1
 fi
 
 files=()
 while IFS= read -r file; do
   files+=("$file")
 done < <(find "$MIGRATION_DIR" -maxdepth 1 -type f -name 'V*.sql' | sort)
+
+if [[ ${#files[@]} -eq 0 ]]; then
+  echo "Flyway migration 파일이 없습니다." >&2
+  exit 1
+fi
 
 seen_versions="|"
 for file in "${files[@]}"; do

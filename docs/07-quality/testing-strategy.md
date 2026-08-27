@@ -10,6 +10,18 @@ related:
 
 # 테스트 전략
 
+## Foundation
+
+- bootstrap class의 Spring Boot 구성 단위 테스트
+- PostgreSQL 18.6 Testcontainers 기반 Spring context 기동
+- clean database의 Flyway `V1__foundation.sql` 적용
+- JPA `ddl-auto=validate` 계약
+- `/actuator/health` HTTP `200`과 `UP` 응답
+- React 기본 화면 component test
+- ESLint, TypeScript typecheck, Vite production build
+
+host에 Java/Node가 없는 local 환경은 Docker socket mount 없이 격리 external PostgreSQL과 build container를 사용한다. Hosted Backend CI는 기본 Testcontainers mode를 실행해 container 기반 연결 경로를 반드시 보완한다. 두 경로에서 같은 Flyway, JPA, health 관찰 결과를 검증한다.
+
 ## Backend
 
 ### 단위 테스트
@@ -79,7 +91,7 @@ Cloudflare 외부 서비스에 의존하지 않도록 테스트용 signing key/J
 
 ## 계약 테스트
 
-OpenAPI 또는 REST Docs 중 하나를 bootstrap 단계에서 선택해 API 구현과 문서를 동기화한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
+Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. Foundation에서는 `/actuator/health` snippet만 생성하고 업무 API 문서는 해당 Slice의 request/response test와 함께 추가한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
 ## 회귀 우선순위
 

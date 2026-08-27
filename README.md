@@ -6,8 +6,9 @@
 
 ## 현재 상태
 
-- 단계: 제품·도메인 설계 및 프로젝트 하네스 초기화
-- 구현 코드: 아직 없음
+- 단계: Slice 0 — Foundation
+- 구현 코드: Spring Boot backend와 React frontend bootstrap
+- 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
 - 코드 식별자, API 경로, DB 컬럼, enum, 기술 고유명사: 영어
@@ -51,6 +52,8 @@
 
 세부 패치 버전은 프로젝트 bootstrap PR에서 lockfile과 wrapper로 고정한다. Spring 생태계 하위 의존성은 가능한 한 Spring Boot dependency management에 위임한다.
 
+현재 bootstrap은 Spring Boot `4.1.1`, Gradle `9.7.1`, React `19.2.8`, TypeScript `6.0.3`, Vite `8.2.2`, Node.js `24.20.0`을 project file에 고정한다. PostgreSQL 개발·테스트 image는 `18.6`을 사용한다.
+
 production 접근은 Cloudflare Access에서 허용된 두 사용자만 통과시키고, `cloudflared`와 Spring Security가 Access JWT를 검증한다. 애플리케이션 자체 사용자 비밀번호는 저장하지 않는다. 세부 계약은 [`ADR-008`](docs/09-decisions/ADR-008-cloudflare-access-authentication.md)과 [`docs/06-security/authentication.md`](docs/06-security/authentication.md)를 따른다.
 
 ## 저장소 구조
@@ -59,11 +62,13 @@ production 접근은 Cloudflare Access에서 허용된 두 사용자만 통과�
 our-ledger/
 ├─ AGENTS.md
 ├─ README.md
-├─ backend/
-├─ frontend/
-├─ infra/
-├─ docs/
-├─ scripts/
+├─ backend/             # Spring Boot API, Flyway, Gradle Wrapper
+├─ frontend/            # React/TypeScript/Vite, npm lockfile
+├─ infra/               # production 자산은 후속 Slice에서 추가
+├─ docs/                # 제품·domain·data·quality 계약
+├─ scripts/             # local/CI 검증 진입점
+├─ compose.dev.yaml     # local 개발 전용
+├─ compose.verify.yaml  # host runtime이 없을 때의 격리 검증
 └─ .github/
 ```
 
@@ -83,13 +88,40 @@ Issue 설계
 
 기본 원칙은 **Issue 1개 = Pull Request 1개**다. `main`과 `dev`에 직접 push하거나 에이전트가 직접 merge하지 않는다.
 
+## 로컬 실행
+
+개발용 PostgreSQL만 실행하려면 sample을 복사하고 placeholder password를 로컬 값으로 바꾼다. `.env.dev.local`은 Git에서 제외된다.
+
+```bash
+cp .env.example .env.dev.local
+docker compose --env-file .env.dev.local -f compose.dev.yaml up -d --wait postgres
+```
+
+Java/Node를 host에 설치하지 않고 전체 애플리케이션을 실행하려면 개발 profile을 사용한다. API와 frontend port는 loopback에만 bind된다.
+
+```bash
+docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app up
+```
+
+- Frontend: `http://127.0.0.1:5173`
+- Backend health: `http://127.0.0.1:8080/actuator/health`
+- PostgreSQL: `127.0.0.1:${POSTGRES_PORT}`
+
+종료할 때는 개발 data와 dependency cache를 보존하는 일반 `down`을 사용한다.
+
+```bash
+docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app down
+```
+
 ## 로컬 검증
 
 ```bash
 ./scripts/verify.sh
 ```
 
-구현 전인 backend/frontend는 자동으로 건너뛴다. 해당 영역에 빌드 파일이 생긴 뒤에는 검증 도구 누락을 실패로 처리한다.
+이 명령은 repository/docs/Flyway/Compose 검사, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build를 순서대로 실행한다.
+
+host에 Java 25 또는 Node.js 24가 없으면 `compose.verify.yaml`의 격리 container를 사용한다. 이 fallback은 운영 resource나 Docker socket을 참조하지 않으며 검증 PostgreSQL data는 container 종료와 함께 사라지고 dependency cache volume은 보존된다. Hosted Backend CI는 기본 Testcontainers 경로를 사용한다.
 
 ## 범위 밖
 

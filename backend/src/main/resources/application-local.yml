@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DB:our_ledger}
+    username: ${POSTGRES_USER:our_ledger}
+    password: ${POSTGRES_PASSWORD}

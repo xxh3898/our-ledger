@@ -6,6 +6,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 required_paths=(
   "README.md"
   "AGENTS.md"
+  ".env.example"
+  "compose.dev.yaml"
+  "compose.verify.yaml"
+  "backend/build.gradle.kts"
+  "backend/gradlew"
+  "backend/src/main/resources/db/migration/V1__foundation.sql"
+  "frontend/package.json"
+  "frontend/package-lock.json"
   "docs/README.md"
   ".github/PULL_REQUEST_TEMPLATE.md"
   ".github/ISSUE_TEMPLATE/feature.yml"
@@ -21,6 +29,10 @@ done
 
 for script in "$ROOT_DIR"/scripts/*.sh; do
   bash -n "$script"
+  if [[ ! -x "$script" ]]; then
+    echo "실행 권한이 없는 shell script입니다: ${script#$ROOT_DIR/}" >&2
+    exit 1
+  fi
 done
 
 forbidden_names=(".env" "id_rsa" "id_ed25519")

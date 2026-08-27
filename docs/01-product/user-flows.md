@@ -1,22 +1,26 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 05-frontend/quick-entry.md
   - 02-domain/goal.md
+  - ADR-008
 ---
 
 # 주요 사용자 흐름
 
 ## 최초 설정
 
-1. 첫 사용자가 로그인한다.
-2. Household 이름, 통화 `KRW`, 시간대 `Asia/Seoul`을 확인한다.
-3. 두 번째 사용자를 등록 또는 초대한다.
-4. 개인·공동 Account와 opening balance를 등록한다.
-5. 기본 Category를 확인하고 필요한 그룹·카테고리를 추가한다.
-6. 결혼자금 Account와 Goal은 해당 Slice 이후 연결한다.
+V1 production에서는 실제 사용 전에 두 내부 User와 Household membership을 별도 bootstrap/provision 절차로 준비한다. 애플리케이션은 공개 회원가입이나 사용자 초대 기능을 제공하지 않는다.
+
+1. Cloudflare Access에서 허용된 사용자가 OTP 또는 연결된 IdP로 인증한다.
+2. 애플리케이션이 Access JWT를 검증하고 email claim을 내부 활성 User에 매핑한다.
+3. User의 활성 Household membership을 확인한다.
+4. Household 이름, 통화 `KRW`, 시간대 `Asia/Seoul`을 확인한다.
+5. 개인·공동 Account와 opening balance를 등록한다.
+6. 기본 Category를 확인하고 필요한 그룹·카테고리를 추가한다.
+7. 결혼자금 Account와 Goal은 해당 Slice 이후 연결한다.
 
 ## 빠른 지출 입력
 
@@ -72,4 +76,4 @@ Goal에 기여금을 별도로 입력하지 않는다.
 1. 기간과 거래 필터를 선택한다.
 2. 미리보기 건수와 컬럼을 확인한다.
 3. CSV를 내려받는다.
-4. 파일에는 비밀번호, 전체 계좌번호, 내부 session 정보가 포함되지 않는다.
+4. 파일에는 Access JWT·cookie 등 인증정보, 전체 계좌번호, 내부 기술 식별정보가 포함되지 않는다.

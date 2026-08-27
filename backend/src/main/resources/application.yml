@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: our-ledger-backend
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+server:
+  shutdown: graceful

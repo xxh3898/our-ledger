@@ -1,10 +1,10 @@
 ---
 status: active
-version: 0.1
+version: 0.3
 last_updated: 2026-08-27
 related:
   - 04-api/error-contract.md
-  - ADR-007
+  - ADR-008
 ---
 
 # API 규칙
@@ -18,10 +18,11 @@ related:
 - 금액: JSON 정수
 - ID: JSON number 또는 문자열 변환 정책을 frontend와 일관되게 유지
 
+`/actuator/health`는 업무 API가 아니라 container와 CI가 사용하는 management endpoint이므로 `/api/v1` prefix의 예외다. Foundation에서는 `health`만 노출하고 detail과 다른 actuator endpoint는 공개하지 않는다.
+
 ## 주요 리소스
 
 ```text
-/api/v1/auth
 /api/v1/me
 /api/v1/households/current
 /api/v1/accounts
@@ -40,9 +41,11 @@ related:
 
 성공 응답을 불필요한 `success/data` envelope로 감싸지 않는다. 생성은 `201 Created`, 조회·수정은 `200 OK`, 삭제는 `204 No Content`를 기본으로 한다.
 
-## 세션과 CSRF
+애플리케이션 자체 로그인·로그아웃·비밀번호 API는 제공하지 않는다. `/api/v1/me`는 검증된 Access identity에 매핑된 내부 User와 현재 Household 정보를 반환한다.
 
-Cookie 기반 인증을 사용하므로 상태 변경 요청은 CSRF 보호를 적용한다. frontend는 credential을 포함하고 CSRF 계약을 따른다.
+## 인증 상태와 CSRF
+
+production 요청은 Cloudflare Access를 통과한 뒤 Spring Security가 `Cf-Access-Jwt-Assertion`을 다시 검증한다. 브라우저의 Access 인증 상태가 cookie로 유지되므로 상태 변경 요청의 CSRF 또는 동등한 Origin 보호를 제거하지 않는다. frontend는 same-origin 요청과 확정된 CSRF 계약을 따른다.
 
 ## 동시 수정
 
@@ -57,3 +60,5 @@ Transaction 등 충돌 가능 리소스는 version을 요청에 포함한다. �
 ## 검증
 
 field validation과 도메인 validation을 구분한다. HTTP status만으로 원인을 표현하지 않고 안정적인 error code를 제공한다.
+
+API 계약 문서화 도구는 Spring REST Docs를 사용한다. request/response test가 생성한 snippet을 canonical API 문서에 조립하며, test를 통과하지 않은 hand-written response 예시만으로 구현 완료를 주장하지 않는다.
