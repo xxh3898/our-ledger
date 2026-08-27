@@ -1,9 +1,10 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 03-data/erd.md
+  - ADR-008
   - AGENTS.md
 ---
 
@@ -17,6 +18,23 @@ related:
 - 월: 해당 월 1일의 `DATE`
 - enum 성격: PostgreSQL ENUM 대신 `VARCHAR + CHECK`
 - optimistic lock: `version BIGINT`
+
+## User identity
+
+V1 production 인증은 Cloudflare Access를 사용하므로 `users`는 애플리케이션 자체 비밀번호를 저장하지 않는다.
+
+최소 User 계약:
+
+- `id`
+- `email`
+- `display_name`
+- `status`
+- `created_at`
+- `updated_at`
+
+`password_hash`, 비밀번호 복구 token, 로그인 실패 횟수 같은 자체 credential 컬럼은 V1 스키마에 두지 않는다.
+
+`users.email`은 Cloudflare Access의 검증된 email claim과 내부 User를 매핑하기 위한 식별자이며 `LOWER(email)` 기준 unique를 유지한다. 실제 User 생성은 별도 bootstrap/provision 절차로 수행하고 Access 인증 성공만으로 자동 생성하지 않는다.
 
 ## Household 경계
 
