@@ -1,10 +1,11 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 06-security/privacy-model.md
   - 08-operations/backup-restore.md
+  - ADR-008
 ---
 
 # 데이터 보존과 삭제
@@ -31,8 +32,8 @@ Account, Category, Category Group은 거래가 연결되면 archive한다. archi
 ## 민감정보
 
 - 전체 계좌번호·카드번호 미저장
-- 비밀번호 hash만 저장
-- 세션 ID와 CSRF token 로그 금지
+- 애플리케이션 사용자 비밀번호와 `password_hash` 미저장
+- `Cf-Access-Jwt-Assertion`, `CF_Authorization` cookie, CSRF credential 미저장·로그 금지
 - CSV에 내부 기술 식별정보를 최소화
 
 ## 실제 삭제

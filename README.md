@@ -45,7 +45,7 @@
 | Database | PostgreSQL 18.6, Flyway, Spring Data JPA |
 | Frontend | React 19.2, TypeScript 6.0, Vite 8.x |
 | Runtime | Node.js 24 LTS |
-| 인증 | Spring Security, 서버 세션, Secure/HttpOnly Cookie |
+| 인증 | Cloudflare Access, Access JWT 검증, Spring Security 내부 인가 |
 | 테스트 | JUnit, Testcontainers, Frontend 단위·컴포넌트·E2E 테스트 |
 | 배포 | Docker Compose, Mac mini, Nginx, Cloudflare Tunnel |
 | 운영 접근 | Tailscale 기반 관리 접근 |
@@ -53,6 +53,8 @@
 세부 패치 버전은 프로젝트 bootstrap PR에서 lockfile과 wrapper로 고정한다. Spring 생태계 하위 의존성은 가능한 한 Spring Boot dependency management에 위임한다.
 
 현재 bootstrap은 Spring Boot `4.1.1`, Gradle `9.7.1`, React `19.2.8`, TypeScript `6.0.3`, Vite `8.2.2`, Node.js `24.20.0`을 project file에 고정한다. PostgreSQL 개발·테스트 image는 `18.6`을 사용한다.
+
+production 접근은 Cloudflare Access에서 허용된 두 사용자만 통과시키고, `cloudflared`와 Spring Security가 Access JWT를 검증한다. 애플리케이션 자체 사용자 비밀번호는 저장하지 않는다. 세부 계약은 [`ADR-008`](docs/09-decisions/ADR-008-cloudflare-access-authentication.md)과 [`docs/06-security/authentication.md`](docs/06-security/authentication.md)를 따른다.
 
 ## 저장소 구조
 

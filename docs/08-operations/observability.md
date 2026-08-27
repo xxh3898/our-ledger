@@ -1,9 +1,10 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 06-security/privacy-model.md
+  - ADR-008
 ---
 
 # 관측성
@@ -36,8 +37,9 @@ related:
 금지 정보:
 
 - password
-- session/cookie
-- CSRF token
+- `Cf-Access-Jwt-Assertion`
+- `CF_Authorization` 및 기타 cookie
+- OTP와 CSRF credential
 - 전체 request body
 - 전체 계좌·카드 식별정보
 

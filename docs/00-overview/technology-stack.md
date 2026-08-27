@@ -1,10 +1,11 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - README.md
   - 08-operations/deployment.md
+  - ADR-008
 ---
 
 # 기술 스택과 버전 정책
@@ -25,7 +26,7 @@ related:
 | ORM | Spring Data JPA. 복잡 집계는 명시적 query 사용 가능 |
 | Frontend | React 19.2.8, TypeScript 6.0.3, Vite 8.2.2 |
 | Node | Node.js 24.20.0 LTS (`.nvmrc`, Hosted CI) |
-| 인증 | Spring Security + 서버 세션 |
+| 인증 | Cloudflare Access + Access JWT 검증 + Spring Security 내부 인가 |
 | 배포 | Docker Compose + Nginx + Cloudflare Tunnel |
 
 ## 선택 원칙

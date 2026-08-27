@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 06-security/authentication.md
@@ -24,7 +24,7 @@ related:
 캐시 금지 또는 network-only:
 
 - `/api/**`의 재무 응답
-- 인증·세션 응답
+- 인증·인가 및 Access 재인증 관련 응답
 - CSV export
 
 Service Worker가 오래된 거래·잔액·목표 금액을 보여주지 않게 한다.
