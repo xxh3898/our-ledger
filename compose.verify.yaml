@@ -1,0 +1,68 @@
+name: dev-our-ledger-verify
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.23
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: our_ledger_test
+      POSTGRES_USER: our_ledger_test
+      POSTGRES_PASSWORD: local-test-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U our_ledger_test -d our_ledger_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    tmpfs:
+      - /var/lib/postgresql
+
+  backend:
+    image: gradle:9.7.1-jdk25-alpine
+    cpus: 2.0
+    mem_limit: 2g
+    working_dir: /workspace
+    user: gradle
+    environment:
+      GRADLE_USER_HOME: /home/gradle/.gradle
+      OUR_LEDGER_TEST_DATABASE: external
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/our_ledger_test
+      SPRING_DATASOURCE_USERNAME: our_ledger_test
+      SPRING_DATASOURCE_PASSWORD: local-test-only
+    command:
+      - /bin/sh
+      - -c
+      - cp -R /source/. /workspace && ./gradlew --no-daemon clean check
+    volumes:
+      - ./backend:/source:ro
+      - backend-gradle-cache:/home/gradle/.gradle
+    tmpfs:
+      - /workspace:exec,mode=1777
+
+  frontend:
+    image: node:24-bookworm-slim
+    cpus: 2.0
+    mem_limit: 1536m
+    working_dir: /workspace
+    user: root
+    environment:
+      NPM_CONFIG_CACHE: /home/node/.npm
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        chown node:node /home/node/.npm &&
+        exec runuser -u node -- /bin/sh -c
+        'cp -R /source/. /workspace && npm ci && npm run lint && npm run typecheck && npm run test:run && npm run build'
+    volumes:
+      - ./frontend:/source:ro
+      - frontend-npm-cache:/home/node/.npm
+    tmpfs:
+      - /workspace:exec,mode=1777
+
+volumes:
+  backend-gradle-cache:
+    name: dev-our-ledger-verify-gradle-cache
+  frontend-npm-cache:
+    name: dev-our-ledger-verify-npm-cache

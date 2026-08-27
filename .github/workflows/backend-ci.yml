@@ -20,6 +20,9 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: gradle
+          cache-dependency-path: |
+            backend/*.gradle.kts
+            backend/gradle/wrapper/gradle-wrapper.properties
 
       - name: Backend 검증
         run: ./scripts/verify-backend.sh

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 04-api/error-contract.md
@@ -17,6 +17,8 @@ related:
 - 시각: ISO 8601 offset 포함
 - 금액: JSON 정수
 - ID: JSON number 또는 문자열 변환 정책을 frontend와 일관되게 유지
+
+`/actuator/health`는 업무 API가 아니라 container와 CI가 사용하는 management endpoint이므로 `/api/v1` prefix의 예외다. Foundation에서는 `health`만 노출하고 detail과 다른 actuator endpoint는 공개하지 않는다.
 
 ## 주요 리소스
 
@@ -57,3 +59,5 @@ Transaction 등 충돌 가능 리소스는 version을 요청에 포함한다. �
 ## 검증
 
 field validation과 도메인 validation을 구분한다. HTTP status만으로 원인을 표현하지 않고 안정적인 error code를 제공한다.
+
+API 계약 문서화 도구는 Spring REST Docs를 사용한다. request/response test가 생성한 snippet을 canonical API 문서에 조립하며, test를 통과하지 않은 hand-written response 예시만으로 구현 완료를 주장하지 않는다.
