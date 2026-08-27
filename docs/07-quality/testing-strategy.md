@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.4
-last_updated: 2026-08-27
+version: 0.5
+last_updated: 2026-08-28
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -44,17 +44,18 @@ PostgreSQL Testcontainers를 사용한다.
 - 동시 수정 version 충돌
 - 반복 생성 idempotency
 
-Basic Ledger Slice는 추가로 다음을 PostgreSQL에서 검증한다.
+Transfer/Card Ledger Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
-- Flyway V1→V4 clean 적용과 JPA `ddl-auto=validate`
-- Account PERSONAL/SHARED CHECK, Member composite FK, KRW/last-four/savings 제약
+- Flyway V1→V5 clean 적용과 JPA `ddl-auto=validate`
+- Account PERSONAL/SHARED CHECK, Member composite FK, KRW/last-four/savings, CREDIT_CARD/LIABILITY 제약
 - Category Group/type composite FK와 active case-insensitive name unique
 - Transaction positive amount/scope/category CHECK, Member/Category/audit composite FK
 - Entry의 Transaction/Account composite FK, nonzero delta, duplicate PRIMARY unique
-- INCOME `+100000`, EXPENSE `-12000`, Transaction당 Entry 1개
-- update 후 expected delta로 갱신되고 이전 delta가 누적되지 않음
+- INCOME `+100000`, ASSET EXPENSE `-12000`, 카드 EXPENSE `+amount`
+- ASSET→ASSET SOURCE `-amount`/DESTINATION `+amount`, ASSET→LIABILITY 양쪽 `-amount`
+- update 후 PRIMARY 또는 SOURCE/DESTINATION exact set으로 교체되고 stale role/delta가 남지 않음
 - logical delete 후 목록/detail/잔액 제외, stale version `409`
-- archived reference, unsupported posting, cross-household reference 거부와 atomic rollback
+- same/archived/unsupported/foreign transfer, invalid stored Entry set 거부와 atomic rollback
 
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
@@ -107,7 +108,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
 
-`App.test.tsx`는 Slice 2에서 identity loading/401/403을 보존하며 Account/Category 설정, 빠른 거래 생성, 서버 validation 실패 입력 보존, 최근 목록 edit/delete를 mock HTTP 경계에서 검증한다.
+`App.test.tsx`는 identity loading/401/403을 보존하며 Account/Category 설정, current user 기본값, 수입·지출·이체와 카드 posting, 서버 validation 실패 입력 보존, 최근 목록 edit/delete를 mock HTTP 경계에서 검증한다.
 
 ## Production 보안 검증
 

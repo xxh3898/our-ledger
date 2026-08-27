@@ -318,6 +318,14 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.field-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #6c7771;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .reference-list,
 .transaction-list {
   display: grid;
@@ -373,7 +381,7 @@ button:focus-visible {
 
 .segmented-control {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.35rem;
   padding: 0.3rem;
   border-radius: 0.9rem;
@@ -457,6 +465,11 @@ button:focus-visible {
   color: #9a4436;
 }
 
+.transaction-sign--transfer {
+  background: rgb(139 81 44 / 10%);
+  color: #8b512c;
+}
+
 .transaction-copy {
   display: grid;
   min-width: 0;
@@ -503,6 +516,8 @@ button:focus-visible {
 }
 
 .transaction-details dd {
+  display: grid;
+  gap: 0.15rem;
   margin-top: 0.25rem;
   font-size: 0.78rem;
 }

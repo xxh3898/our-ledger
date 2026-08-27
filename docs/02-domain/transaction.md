@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-28
 related:
   - ADR-002
   - ADR-003
@@ -25,7 +25,7 @@ related:
 - `PERSONAL`: `owner_member_id` 필수
 - `SHARED`: `owner_member_id` 없음
 
-`TRANSFER`에는 Scope, Owner, Category가 없다.
+`TRANSFER`에는 Scope, Owner, Payer, Category와 PRIMARY Account가 없고 `sourceAccountId`, `destinationAccountId`가 필수다.
 
 ## Owner와 Payer
 
@@ -58,12 +58,13 @@ REFUND는 원 거래 `reverses_transaction_id`를 필수로 참조한다. 원 �
 
 `occurred_at`은 `TIMESTAMPTZ`로 저장한다. 월·일 계산은 Household timezone인 `Asia/Seoul` 기준으로 한다.
 
-## Slice 2 실행 계약
+## Slice 3 실행 계약
 
-- API/Service는 `INCOME`, `EXPENSE`와 `adjustment_type=NORMAL`만 생성·수정한다.
-- `TRANSFER`, `REFUND`, CREDIT_CARD/LIABILITY posting은 schema enum으로 표현될 수 있어도 stable `422` error code로 거부한다.
+- API/Service는 `INCOME`, `EXPENSE`, `TRANSFER`와 `adjustment_type=NORMAL`을 생성·수정한다.
+- REFUND와 LIABILITY source TRANSFER는 stable `422` error code로 거부한다.
 - INCOME에는 payer를 지정하지 않고 EXPENSE payer는 nullable이다.
+- update는 지원 유형 사이의 변경을 허용하며 기존 Entry를 expected role set으로 완전히 교체한다.
 - 생성자·수정자·삭제자 audit ID는 요청을 수행한 current HouseholdMember ID다.
 - PATCH와 DELETE는 현재 `version`을 요구한다. stale version은 `409 TRANSACTION_VERSION_CONFLICT`로 거부한다.
 - 기본 목록은 논리삭제를 제외하고 `occurred_at DESC, id DESC`로 정렬한다.
-- 목록 필터는 `from`, `to`, `type`, `scope`, `ownerMemberId`, `categoryId`, `accountId`다. `from`/`to`는 current Household timezone의 날짜 경계를 포함한다.
+- 목록 필터는 `from`, `to`, `type`, `scope`, `ownerMemberId`, `categoryId`, `accountId`다. `accountId`는 PRIMARY/SOURCE/DESTINATION 중 하나라도 일치하면 선택하며 `from`/`to`는 current Household timezone의 날짜 경계를 포함한다.

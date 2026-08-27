@@ -173,6 +173,12 @@ public class AccountService {
             validator.check(nature == AccountNature.ASSET, "savingsEnabled", "assetOnly", "ASSET Account에만 설정할 수 있습니다.");
         }
         validator.throwIfInvalid();
+        if (type == AccountType.CREDIT_CARD && nature != AccountNature.LIABILITY) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.CREDIT_CARD_NATURE_REQUIRED
+            );
+        }
     }
 
     private void requireOwner(

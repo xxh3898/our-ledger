@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-28
 related:
   - ADR-002
   - 02-domain/account.md
@@ -63,12 +63,15 @@ Transaction과 모든 Entry는 하나의 DB transaction에서 저장한다. 일�
 
 거래 수정 시 기존 Entry를 임의 누적하지 않는다. 계산된 expected entry set으로 교체하거나 명확한 갱신 전략을 사용하고, 변경 전후 잔액 회귀를 테스트한다.
 
-Slice 2는 PRIMARY Entry row를 그대로 갱신해 Account와 delta를 expected state로 맞춘다. 이전 delta를 새 delta에 더하지 않으며 `(transaction_id, entry_role)` unique가 중복 PRIMARY를 차단한다.
+Slice 3는 기존 Entry set을 제거한 뒤 계산한 expected Entry set을 다시 저장한다. 이전 delta를 새 delta에 더하지 않으며 `(transaction_id, entry_role)` unique가 역할 중복을 차단한다.
 
-## Slice 2 제한
+## Slice 3 실행 범위
 
 - INCOME: active ASSET Account에 PRIMARY 1개, `balance_delta=+amount`
 - EXPENSE NORMAL: active ASSET Account에 PRIMARY 1개, `balance_delta=-amount`
-- CREDIT_CARD/LIABILITY, REFUND, TRANSFER posting은 후속 Slice까지 생성하지 않는다.
-- Transaction과 Entry insert/update는 하나의 Spring transaction이다. 참조 검증이 실패하면 두 row 모두 남지 않는다.
+- CREDIT_CARD/LIABILITY EXPENSE NORMAL: PRIMARY 1개, `balance_delta=+amount`
+- ASSET→ASSET TRANSFER: SOURCE `-amount`, DESTINATION `+amount`
+- ASSET→LIABILITY TRANSFER: SOURCE `-amount`, DESTINATION `-amount`
+- LIABILITY source와 REFUND는 후속 Slice까지 생성하지 않는다.
+- Transaction과 Entry insert/update는 하나의 Spring transaction이다. 참조 검증이 실패하면 Transaction과 모든 Entry가 남지 않는다.
 - 논리삭제는 Transaction의 `deleted_at/deleted_by`를 기록하고 Entry는 검산 근거로 보존한다. 잔액 query는 삭제된 Transaction의 Entry를 제외한다.

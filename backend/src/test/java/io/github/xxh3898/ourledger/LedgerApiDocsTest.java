@@ -32,7 +32,6 @@ import io.github.xxh3898.ourledger.identity.UserRepository;
 import io.github.xxh3898.ourledger.security.CurrentHousehold;
 import io.github.xxh3898.ourledger.security.LocalIdentityAuthenticationFilter;
 import io.github.xxh3898.ourledger.transaction.AdjustmentType;
-import io.github.xxh3898.ourledger.transaction.EntryRole;
 import io.github.xxh3898.ourledger.transaction.LedgerTransaction;
 import io.github.xxh3898.ourledger.transaction.LedgerTransactionRepository;
 import io.github.xxh3898.ourledger.transaction.TransactionAccountEntryRepository;
@@ -309,8 +308,11 @@ class LedgerApiDocsTest {
                                 incomeCategory.getId(), account.id(), "2026-08-27T01:00:00Z", "급여"
                         )))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.entry.role").value("PRIMARY"))
-                .andExpect(jsonPath("$.entry.balanceDelta").value(100_000))
+                .andExpect(jsonPath("$.entries[0].role").value("PRIMARY"))
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(100_000))
+                .andExpect(jsonPath("$.entries[0].account.id").value(account.id()))
+                .andExpect(jsonPath("$.account").doesNotExist())
+                .andExpect(jsonPath("$.entry").doesNotExist())
                 .andExpect(jsonPath("$.version").value(0))
                 .andDo(document("ledger-transaction-create"));
 
@@ -324,7 +326,7 @@ class LedgerApiDocsTest {
                                 expenseCategory.getId(), account.id(), "2026-08-27T02:00:00Z", "점심"
                         )))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.entry.balanceDelta").value(-12_000));
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(-12_000));
 
         var transactions = transactionRepository.findAll();
         assertThat(transactions).hasSize(2);
@@ -366,7 +368,7 @@ class LedgerApiDocsTest {
                                 """.formatted(partnerMemberId, expenseCategory.getId(), account.id())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.amount").value(20_000))
-                .andExpect(jsonPath("$.entry.balanceDelta").value(-20_000))
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(-20_000))
                 .andExpect(jsonPath("$.version").value(1))
                 .andDo(document("ledger-transaction-update"));
 
@@ -428,6 +430,71 @@ class LedgerApiDocsTest {
                         .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void should_documentTransferAndCardPosting_when_cardExpenseAndPaymentAreCreated()
+            throws Exception {
+        AccountResponse checking = createAccount(50_000);
+        AccountResponse card = accountService.create(
+                currentHousehold,
+                new AccountCreateRequest(
+                        "생활 카드",
+                        null,
+                        AccountType.CREDIT_CARD,
+                        AccountNature.LIABILITY,
+                        AccountOwnership.PERSONAL,
+                        ownerMemberId,
+                        0L,
+                        LocalDate.of(2026, 8, 1),
+                        "KRW",
+                        "1234",
+                        false,
+                        1
+                )
+        );
+        Category expenseCategory = createCategory(CategoryType.EXPENSE, "카드 식비");
+        Cookie csrf = csrfCookie();
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transactionJson(
+                                "EXPENSE", 12_000, "PERSONAL", ownerMemberId, ownerMemberId,
+                                expenseCategory.getId(), card.id(),
+                                "2026-08-27T03:00:00Z", "카드 결제"
+                        )))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.entries[0].role").value("PRIMARY"))
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(12_000))
+                .andExpect(jsonPath("$.entries[0].account.id").value(card.id()))
+                .andDo(document("ledger-card-expense-create"));
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferJson(5_000, checking.id(), card.id())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.scope").isEmpty())
+                .andExpect(jsonPath("$.category").isEmpty())
+                .andExpect(jsonPath("$.entries[0].role").value("SOURCE"))
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(-5_000))
+                .andExpect(jsonPath("$.entries[1].role").value("DESTINATION"))
+                .andExpect(jsonPath("$.entries[1].balanceDelta").value(-5_000))
+                .andDo(document("ledger-transfer-create"));
+
+        assertThat(currentBalance(checking.id())).isEqualTo(45_000);
+        assertThat(currentBalance(card.id())).isEqualTo(7_000);
+        mockMvc.perform(get("/api/v1/transactions")
+                        .queryParam("type", "TRANSFER")
+                        .queryParam("accountId", card.id().toString())
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].type").value("TRANSFER"));
     }
 
     @Test
@@ -508,43 +575,20 @@ class LedgerApiDocsTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("ARCHIVED_CATEGORY_NOT_ALLOWED"));
 
-        mockMvc.perform(post("/api/v1/transactions")
-                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
-                        .header("X-XSRF-TOKEN", csrf.getValue())
-                        .cookie(csrf)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "type": "TRANSFER",
-                                  "amount": 1000,
-                                  "scope": null,
-                                  "ownerMemberId": null,
-                                  "payerMemberId": null,
-                                  "categoryId": null,
-                                  "accountId": null,
-                                  "occurredAt": "2026-08-27T03:00:00Z",
-                                  "memo": null,
-                                  "adjustmentType": "NORMAL",
-                                  "reversesTransactionId": null
-                                }
-                                """))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code").value("UNSUPPORTED_TRANSACTION_TYPE"));
-
         Category activeCategory = createCategory(CategoryType.EXPENSE, "기타 지출");
         AccountResponse liabilityAccount = accountService.create(
                 currentHousehold,
                 new AccountCreateRequest(
-                        "신용카드",
+                        "기타 부채",
                         null,
-                        AccountType.CREDIT_CARD,
+                        AccountType.OTHER,
                         AccountNature.LIABILITY,
                         AccountOwnership.PERSONAL,
                         ownerMemberId,
                         0L,
                         LocalDate.of(2026, 8, 1),
                         "KRW",
-                        "1234",
+                        null,
                         false,
                         2
                 )
@@ -601,7 +645,18 @@ class LedgerApiDocsTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
 
+        mockMvc.perform(get("/api/v1/transactions"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+
         mockMvc.perform(post("/api/v1/accounts")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CSRF_TOKEN_INVALID"));
+
+        mockMvc.perform(post("/api/v1/transactions")
                         .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -733,6 +788,8 @@ class LedgerApiDocsTest {
                   "payerMemberId": %s,
                   "categoryId": %d,
                   "accountId": %d,
+                  "sourceAccountId": null,
+                  "destinationAccountId": null,
                   "occurredAt": "%s",
                   "memo": %s,
                   "adjustmentType": "NORMAL",
@@ -749,6 +806,26 @@ class LedgerApiDocsTest {
                 occurredAt,
                 memo == null ? "null" : "\"" + memo + "\""
         );
+    }
+
+    private String transferJson(long amount, Long sourceAccountId, Long destinationAccountId) {
+        return """
+                {
+                  "type": "TRANSFER",
+                  "amount": %d,
+                  "scope": null,
+                  "ownerMemberId": null,
+                  "payerMemberId": null,
+                  "categoryId": null,
+                  "accountId": null,
+                  "sourceAccountId": %d,
+                  "destinationAccountId": %d,
+                  "occurredAt": "2026-08-27T03:00:00Z",
+                  "memo": null,
+                  "adjustmentType": "NORMAL",
+                  "reversesTransactionId": null
+                }
+                """.formatted(amount, sourceAccountId, destinationAccountId);
     }
 
     private void clearDatabase() {

@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.5
-last_updated: 2026-08-27
+version: 0.6
+last_updated: 2026-08-28
 related:
   - 04-api/error-contract.md
   - ADR-008
@@ -118,22 +118,22 @@ PATCH  /api/v1/transactions/{transactionId}
 DELETE /api/v1/transactions/{transactionId}?version={version}
 ```
 
-POST는 `type`, positive `amount`, `scope`, nullable `ownerMemberId/payerMemberId`, `categoryId`, `accountId`, ISO 8601 `occurredAt`, nullable `memo`, `adjustmentType`, nullable `reversesTransactionId`를 받는다. Slice 2에서 `type` 은 INCOME/EXPENSE, `adjustmentType` 은 NORMAL만 허용한다. PATCH는 같은 필드와 현재 `version`을 요구한다.
+POST의 공통 필드는 `type`, positive `amount`, ISO 8601 `occurredAt`, nullable `memo`, `adjustmentType=NORMAL`, nullable `reversesTransactionId=null`이다. INCOME/EXPENSE는 `scope`, nullable `ownerMemberId/payerMemberId`, `categoryId`, `accountId`를 사용하고 source/destination은 null이다. TRANSFER는 scope/owner/payer/category/account가 null이고 `sourceAccountId`, `destinationAccountId`가 필수다. PATCH는 같은 필드와 현재 `version`을 요구한다.
 
-response는 owner/payer, Category, Account reference와 PRIMARY Entry `role/balanceDelta`, `version`을 포함한다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
+response는 nullable owner/payer/Category, `version`, canonical `entries[]`를 포함한다. 각 Entry는 `id`, `role`, `balanceDelta`, Account reference를 제공하며 최상위 단일 `account`/`entry`는 제공하지 않는다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
 
 목록은 `occurred_at DESC, id DESC`로 정렬하고 다음 optional query를 고정한다.
 
 | query | 의미 |
 |---|---|
 | `from`, `to` | Household timezone 기준 포함 날짜 `YYYY-MM-DD` |
-| `type` | `INCOME` 또는 `EXPENSE` |
+| `type` | `INCOME`, `EXPENSE`, `TRANSFER` |
 | `scope` | `PERSONAL` 또는 `SHARED` |
 | `ownerMemberId` | PERSONAL owner Member ID |
 | `categoryId` | Category ID |
-| `accountId` | PRIMARY Entry Account ID |
+| `accountId` | PRIMARY/SOURCE/DESTINATION 중 일치하는 Entry Account ID |
 
-`from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` snippet으로 검증한다.
+`from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*`, `ledger-card-expense-*`, `ledger-transfer-*` snippet으로 검증한다.
 
 ## 인증 상태와 CSRF
 

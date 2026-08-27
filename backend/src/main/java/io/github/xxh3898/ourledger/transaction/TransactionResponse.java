@@ -5,6 +5,7 @@ import io.github.xxh3898.ourledger.account.AccountType;
 import io.github.xxh3898.ourledger.category.CategoryType;
 
 import java.time.Instant;
+import java.util.List;
 
 public record TransactionResponse(
         Long id,
@@ -14,12 +15,11 @@ public record TransactionResponse(
         Member owner,
         Member payer,
         CategoryReference category,
-        AccountReference account,
         Instant occurredAt,
         String memo,
         AdjustmentType adjustmentType,
         long version,
-        Entry entry,
+        List<Entry> entries,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -39,6 +39,11 @@ public record TransactionResponse(
     ) {
     }
 
-    public record Entry(Long id, EntryRole role, long balanceDelta) {
+    public record Entry(
+            Long id,
+            EntryRole role,
+            long balanceDelta,
+            AccountReference account
+    ) {
     }
 }

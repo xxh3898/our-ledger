@@ -19,9 +19,12 @@ public enum ApiErrorCode {
     ARCHIVED_CATEGORY_NOT_ALLOWED("보관된 Category는 새 거래에 사용할 수 없습니다."),
     TRANSACTION_INVALID_SCOPE("Transaction scope와 owner 조합이 올바르지 않습니다."),
     TRANSACTION_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 거래를 다시 조회해야 합니다."),
-    UNSUPPORTED_TRANSACTION_TYPE("현재 Slice에서 지원하지 않는 Transaction 유형입니다."),
+    TRANSACTION_ENTRY_SET_INVALID("Transaction의 Account Entry 구성이 올바르지 않습니다."),
+    TRANSFER_SAME_ACCOUNT_NOT_ALLOWED("이체 source와 destination은 달라야 합니다."),
+    UNSUPPORTED_TRANSFER_SOURCE("LIABILITY Account에서는 이체를 시작할 수 없습니다."),
+    CREDIT_CARD_NATURE_REQUIRED("CREDIT_CARD Account의 nature는 LIABILITY여야 합니다."),
     UNSUPPORTED_ADJUSTMENT_TYPE("현재 Slice에서 지원하지 않는 adjustment입니다."),
-    UNSUPPORTED_ACCOUNT_POSTING("현재 Slice에서 ASSET Account만 posting할 수 있습니다.");
+    UNSUPPORTED_ACCOUNT_POSTING("이 Transaction 유형에서 지원하지 않는 Account posting입니다.");
 
     private final String message;
 
