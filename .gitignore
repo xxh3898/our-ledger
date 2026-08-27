@@ -1,0 +1,52 @@
+# 운영체제
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# 환경 변수와 secret
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# 로그와 임시 파일
+*.log
+logs/
+tmp/
+.cache/
+
+# Java / Gradle
+.gradle/
+**/build/
+**/out/
+*.class
+
+# Node / Frontend
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+*.tsbuildinfo
+
+# 테스트·도구
+playwright-report/
+test-results/
+
+# 데이터베이스와 백업
+*.sql.gz
+*.dump
+*.backup
+backups/
+
+# 로컬 Docker override
+docker-compose.override.yml

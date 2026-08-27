@@ -1,0 +1,23 @@
+name: Frontend CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 24 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Frontend 검증
+        run: ./scripts/verify-frontend.sh

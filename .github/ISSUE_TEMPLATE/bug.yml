@@ -1,0 +1,51 @@
+name: 버그 보고
+about: 재현 가능한 결함과 회귀 테스트 요구를 기록합니다.
+title: "[버그] "
+labels:
+  - 버그
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 현상
+      description: 실제로 관찰된 동작을 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 절차
+      description: 데이터 조건과 순서를 포함합니다.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 결과
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 영향
+      description: 잔액, 통계, 보안, 데이터 손상 가능성을 구분합니다.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 증거
+      description: 오류 코드, 로그, 스크린샷, query 결과를 secret 없이 첨부합니다.
+  - type: textarea
+    id: regression
+    attributes:
+      label: 회귀 테스트
+      description: 수정 후 반드시 추가할 테스트를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: documents
+    attributes:
+      label: 관련 문서와 불변식
+    validations:
+      required: true

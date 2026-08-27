@@ -1,0 +1,37 @@
+name: Full CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 저장소 구조 검사
+        run: ./scripts/check-repo.sh
+
+      - name: 문서 검사
+        run: ./scripts/check-docs.sh
+
+      - name: Flyway migration 검사
+        run: ./scripts/check-migrations.sh
+
+  backend:
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend:
+    uses: ./.github/workflows/frontend-ci.yml

@@ -1,0 +1,76 @@
+name: 기능 작업
+about: 기능, 개선, 리팩터링을 한 Pull Request 크기로 정의합니다.
+title: "[기능] "
+labels:
+  - 기능
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issue 1개는 Pull Request 1개에 대응합니다. 구현 전에 관련 docs와 ADR을 연결하세요.
+  - type: textarea
+    id: goal
+    attributes:
+      label: 목표
+      description: 이 작업이 완료되면 무엇이 가능해야 합니까?
+    validations:
+      required: true
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 현재 문제와 작업이 필요한 이유를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: in_scope
+    attributes:
+      label: IN
+      description: 이번 Issue에서 구현할 범위를 항목별로 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: out_scope
+    attributes:
+      label: OUT
+      description: 명시적으로 제외할 범위를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 수용 기준
+      description: 테스트하거나 관찰할 수 있는 완료 조건을 적습니다.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: 도메인·데이터·API 영향
+      description: 재무 불변식, migration, API, 보안 영향이 있으면 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: documents
+    attributes:
+      label: 관련 문서와 ADR
+      description: 저장소 경로 또는 ADR 번호를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 검증 요구사항
+      description: 추가할 단위·통합·E2E·migration 테스트를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: 중단 조건
+      description: 제품·아키텍처·데이터·보안 결정이 필요해지는 조건을 적습니다.
+    validations:
+      required: true

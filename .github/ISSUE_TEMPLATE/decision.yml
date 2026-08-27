@@ -1,0 +1,49 @@
+name: 결정 필요
+about: 제품·아키텍처·데이터·보안 결정을 요청합니다.
+title: "[결정] "
+labels:
+  - 결정필요
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 결정 영역
+      options:
+        - 제품
+        - 아키텍처
+        - 데이터
+        - 보안
+        - 운영
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 현재 상황
+    validations:
+      required: true
+  - type: textarea
+    id: blocker
+    attributes:
+      label: 막힌 이유
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: 선택지와 영향
+      description: 각 선택지의 장점, 비용, migration 영향을 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: 권장안
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 관련 Issue·PR·문서
+    validations:
+      required: true
