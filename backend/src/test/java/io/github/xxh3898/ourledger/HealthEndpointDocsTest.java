@@ -54,7 +54,7 @@ class HealthEndpointDocsTest {
     void should_applyFoundationMigration_when_applicationStartsWithCleanDatabase() {
         assertThat(flyway.info().applied())
                 .extracting(info -> info.getVersion().toString())
-                .containsExactly("1");
+                .containsExactly("1", "2");
     }
 
     @Test

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - ADR-008
@@ -44,6 +44,15 @@ PostgreSQL Testcontainers를 사용한다.
 - 동시 수정 version 충돌
 - 반복 생성 idempotency
 
+Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
+
+- Flyway V1/V2 clean 적용과 JPA schema validate
+- email normalization과 case-insensitive duplicate 차단
+- Household `KRW`/`Asia/Seoul` 기본값
+- duplicate membership과 second OWNER DB 차단
+- locked service transaction의 third Member 차단
+- bootstrap exact rerun no-op과 partial/conflicting state fail-fast
+
 ### 인증·인가 테스트
 
 production 인증 계약은 Cloudflare Access이므로 다음을 자동 검증한다.
@@ -53,13 +62,17 @@ production 인증 계약은 Cloudflare Access이므로 다음을 자동 검증�
 - 잘못된 issuer(`iss`) 거부
 - 잘못된 audience(`aud`) 거부
 - 만료 token 거부
+- future `nbf` token과 missing email claim 거부
 - 내부 User 미존재/비활성 상태 거부
+- Household membership 없음 또는 ambiguous 상태 거부
 - 다른 Household 리소스 접근 거부
 - 일반 이메일 헤더만으로 인증할 수 없음
 - production profile에서 개발용 identity adapter가 비활성
 - state-changing 요청의 CSRF 또는 동등한 Origin 보호
 
 Cloudflare 외부 서비스에 의존하지 않도록 테스트용 signing key/JWK와 test principal을 사용하되 production credential은 사용하지 않는다.
+
+production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생성한 RSA private key로 실제 RS256 token을 서명한다. repository에는 private key 파일이나 token fixture를 저장하지 않는다. production filter chain에 local identity filter가 없는지도 filter 목록과 HTTP 요청으로 확인한다.
 
 ### API 테스트
 
@@ -68,8 +81,13 @@ Cloudflare 외부 서비스에 의존하지 않도록 테스트용 signing key/J
 - filter 조합
 - 삭제 후 계산 제외
 
+`AuthHouseholdDocsTest`는 `/api/v1/me`, `/api/v1/households/current`, 401/403 error code, 임의 Household ID 비권한성, `XSRF-TOKEN`/`X-XSRF-TOKEN` 계약을 검증한다. test-only POST fixture는 token 없는 unsafe 요청을 403으로 거부하고 GET에서 받은 cookie token을 header로 보낸 요청만 허용한다.
+
 ## Frontend
 
+- `/api/v1/me` loading과 정상 User/Household/role 렌더링
+- 401 Cloudflare Access 인증 필요 상태
+- 403 내부 User 미등록 상태
 - 금액·날짜·필터 변환 단위 테스트
 - 빠른 입력 form 컴포넌트 테스트
 - 달력·예산·자산 상태 테스트
@@ -91,7 +109,7 @@ Cloudflare 외부 서비스에 의존하지 않도록 테스트용 signing key/J
 
 ## 계약 테스트
 
-Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. Foundation에서는 `/actuator/health` snippet만 생성하고 업무 API 문서는 해당 Slice의 request/response test와 함께 추가한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
+Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
 ## 회귀 우선순위
 

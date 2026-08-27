@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - ADR-001
@@ -54,6 +54,26 @@ erDiagram
 - Transaction은 경제 사건이고 Entry는 계좌 변화다.
 - Goal은 Account를 연결하며 별도 잔액을 갖지 않는다.
 - Recurring 규칙은 실제 Transaction을 생성하기 전까지 잔액에 영향을 주지 않는다.
+
+## Slice 1 물리 schema
+
+`V2__users_households.sql`은 다음 세 table만 구현한다.
+
+```text
+users
+  id, email, display_name, status, created_at, updated_at
+
+households
+  id, name, base_currency, timezone, created_at, updated_at
+
+household_members
+  id, household_id, user_id, role, joined_at
+```
+
+- `users.email`은 저장 시 normalized lower-case이며 `LOWER(email)` unique index를 가진다.
+- `household_members`는 `(household_id, user_id)` unique와 `role = 'OWNER'` partial unique index를 가진다.
+- V1의 최대 2명 규칙은 다중 행 제약이므로 locked service transaction과 PostgreSQL 통합 테스트로 보완한다.
+- password, 자체 credential, Account/Transaction table은 V2에 없다.
 
 ## 구현 순서
 

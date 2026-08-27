@@ -11,7 +11,7 @@
 }
 
 .hero,
-.foundation {
+.identity {
   width: min(100%, 72rem);
   margin: 0 auto;
 }
@@ -22,7 +22,8 @@
 
 .eyebrow,
 .section-kicker,
-.foundation-card p {
+.identity-copy p,
+dt {
   margin: 0;
   color: #8b512c;
   font-size: 0.78rem;
@@ -48,37 +49,18 @@ h1 {
   line-height: 0.88;
 }
 
-.hero-copy {
-  max-width: 36rem;
+.hero-copy,
+.section-copy {
   color: #526159;
-  font-size: clamp(1rem, 2.5vw, 1.25rem);
   line-height: 1.75;
 }
 
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 1.5rem;
-  padding: 0.65rem 0.9rem;
-  border: 1px solid rgb(23 61 45 / 16%);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 55%);
-  color: #294c3c;
-  font-size: 0.9rem;
-  font-weight: 700;
-  backdrop-filter: blur(12px);
+.hero-copy {
+  max-width: 38rem;
+  font-size: clamp(1rem, 2.5vw, 1.25rem);
 }
 
-.status-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: #4e9b66;
-  box-shadow: 0 0 0 0.25rem rgb(78 155 102 / 14%);
-}
-
-.foundation {
+.identity {
   display: grid;
   gap: 2rem;
   padding-top: 2rem;
@@ -94,53 +76,120 @@ h2 {
   letter-spacing: -0.045em;
 }
 
-.foundation-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.85rem;
+.section-copy {
+  max-width: 24rem;
+  margin-top: 1rem;
 }
 
-.foundation-card {
-  min-height: 10rem;
-  padding: 1.25rem;
+.identity-card,
+.identity-state {
   border: 1px solid rgb(23 61 45 / 12%);
-  border-radius: 1.25rem;
-  background: rgb(255 255 255 / 52%);
+  border-radius: 1.5rem;
+  background: rgb(255 255 255 / 58%);
   box-shadow: 0 1rem 3rem rgb(69 81 70 / 8%);
+  backdrop-filter: blur(12px);
 }
 
-.foundation-card strong,
-.foundation-card span {
-  display: block;
+.identity-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.25rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
 }
 
-.foundation-card strong {
-  margin-top: 1.6rem;
-  color: #173d2d;
-  font-size: 1.2rem;
+.avatar {
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  place-items: center;
+  border-radius: 1rem;
+  background: #173d2d;
+  color: #fffaf0;
+  font-size: 1.25rem;
+  font-weight: 750;
 }
 
-.foundation-card span {
-  margin-top: 0.5rem;
+.identity-copy h2 {
+  margin-top: 0.25rem;
+  font-family: inherit;
+  font-size: 1.55rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.identity-copy span {
   color: #6c7771;
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+dl {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+}
+
+dl div {
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgb(23 61 45 / 5%);
+}
+
+dd {
+  margin: 0.45rem 0 0;
+  color: #173d2d;
+  font-weight: 750;
+}
+
+.identity-state {
+  display: flex;
+  min-height: 12rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  padding: 2rem;
+  color: #294c3c;
+  text-align: center;
+}
+
+.identity-state--error {
+  flex-direction: column;
+  color: #713d2e;
+}
+
+.identity-state span {
+  line-height: 1.6;
+}
+
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #4e9b66;
+  box-shadow: 0 0 0 0.25rem rgb(78 155 102 / 14%);
+}
+
+.status-dot--loading {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 @media (min-width: 860px) {
-  .foundation {
-    grid-template-columns: 0.75fr 2fr;
+  .identity {
+    grid-template-columns: 0.8fr 1.4fr;
     align-items: start;
   }
 }
 
-@media (max-width: 680px) {
-  .foundation-grid {
+@media (max-width: 540px) {
+  dl {
     grid-template-columns: 1fr;
-  }
-
-  .foundation-card {
-    min-height: auto;
   }
 }
 
@@ -149,5 +198,9 @@ h2 {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+
+  .status-dot--loading {
+    animation: none;
   }
 }

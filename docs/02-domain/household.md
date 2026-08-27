@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - ADR-001
@@ -30,6 +30,27 @@ related:
 - 내부 User는 별도 bootstrap/provision 절차로 생성하고 활성 상태를 관리한다.
 - 검증된 Access identity와 일치하는 활성 User가 없으면 접근을 거부한다.
 - Access 인증과 Household membership은 별도 검증한다.
+
+## 현재 Household 계약
+
+- V1 API는 인증된 User의 membership이 정확히 하나일 때만 current Household를 만든다.
+- membership이 없으면 `HOUSEHOLD_MEMBERSHIP_REQUIRED`, 둘 이상이면 `HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`로 fail-closed한다.
+- current Household ID는 검증된 내부 principal에서만 가져오며 path, query, 일반 header로 선택하지 않는다.
+- `HouseholdMember`에는 별도 활성 상태가 없다. V1에서는 존재하는 membership row가 참여 상태다.
+
+## 2인 불변식
+
+- `(household_id, user_id)` 중복과 하나의 Household에 두 번째 `OWNER`가 생기는 경우는 PostgreSQL unique 제약으로 차단한다.
+- 3번째 Member는 `Household` row를 잠근 service transaction에서 count를 확인해 차단한다.
+- direct SQL은 2명 service 불변식을 우회할 수 있으므로 membership 생성은 애플리케이션 service 또는 검증된 bootstrap 경로만 사용한다.
+
+## 초기 Bootstrap
+
+- 기본값은 비활성이며 `our-ledger.bootstrap.enabled=true`일 때만 startup runner가 실행된다.
+- Household 이름, owner/member email과 표시명은 외부 설정으로 주입하며 저장소 sample은 `example.test`만 사용한다.
+- clean 상태에는 ACTIVE User 두 명, `KRW`/`Asia/Seoul` Household 한 개, `OWNER`/`MEMBER` membership을 한 transaction으로 만든다.
+- 정확히 같은 상태의 재실행은 no-op이다. 부분 생성, 추가 data, 다른 표시명·상태·role·Household는 덮어쓰지 않고 fail-fast한다.
+- 실제 production DB provision은 별도 운영 gate다.
 
 ## 불변 조건
 
