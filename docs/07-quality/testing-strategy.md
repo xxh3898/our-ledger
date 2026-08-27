@@ -1,8 +1,9 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
+  - ADR-008
   - 07-quality/financial-invariants.md
   - AGENTS.md
 ---
@@ -31,9 +32,26 @@ PostgreSQL Testcontainers를 사용한다.
 - 동시 수정 version 충돌
 - 반복 생성 idempotency
 
+### 인증·인가 테스트
+
+production 인증 계약은 Cloudflare Access이므로 다음을 자동 검증한다.
+
+- 유효한 Access JWT가 내부 활성 User에 매핑됨
+- 잘못된 서명 거부
+- 잘못된 issuer(`iss`) 거부
+- 잘못된 audience(`aud`) 거부
+- 만료 token 거부
+- 내부 User 미존재/비활성 상태 거부
+- 다른 Household 리소스 접근 거부
+- 일반 이메일 헤더만으로 인증할 수 없음
+- production profile에서 개발용 identity adapter가 비활성
+- state-changing 요청의 CSRF 또는 동등한 Origin 보호
+
+Cloudflare 외부 서비스에 의존하지 않도록 테스트용 signing key/JWK와 test principal을 사용하되 production credential은 사용하지 않는다.
+
 ### API 테스트
 
-- 인증·CSRF
+- 인증·인가·CSRF/Origin 보호
 - validation과 error code
 - filter 조합
 - 삭제 후 계산 제외
@@ -43,8 +61,21 @@ PostgreSQL Testcontainers를 사용한다.
 - 금액·날짜·필터 변환 단위 테스트
 - 빠른 입력 form 컴포넌트 테스트
 - 달력·예산·자산 상태 테스트
+- 인증되지 않은 상태와 Access 재인증 이동 처리
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
+
+## Production 보안 검증
+
+배포 Gate에서는 자동 테스트 외에 다음을 확인한다.
+
+- Access Allow 정책이 두 사용자 이메일만 허용
+- `cloudflared` Access 검증 활성
+- origin/API/DB 공용 포트 비노출
+- Access를 우회하는 public hostname 부재
+- 인증 token/cookie가 애플리케이션 로그에 남지 않음
+
+실제 Cloudflare 설정 변경은 에이전트가 수행하지 않는다.
 
 ## 계약 테스트
 
