@@ -1,10 +1,11 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
+  - ADR-008
 ---
 
 # 개발 로드맵
@@ -14,7 +15,7 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | Slice | 목표 | 출시 가능한 결과 |
 |---|---|---|
 | 0. Foundation | Java/Spring/React/PostgreSQL/Flyway/Docker/CI bootstrap | 로컬·CI에서 health check 성공 |
-| 1. Auth/Household | 로그인, 세션, 사용자 2명, Household 경계 | 인증 후 Household 진입 가능 |
+| 1. Auth/Household | Cloudflare Access identity 검증, 내부 User 매핑, 사용자 2명, Household 경계 | Access 인증 후 내부 User/Household 진입 가능 |
 | 2. Basic Ledger | Account, Category, 수입·지출, 빠른 입력, 목록 | 실제 가계부 최소 사용 가능 |
 | 3. Transfer/Card | Account Entry, 이체, 신용카드, 카드대금 | 잔액·부채 계산 가능 |
 | 4. Calendar | 월 달력, 일별 내역, 개인/공동 필터 | Weple형 메인 사용 흐름 완성 |
@@ -23,14 +24,15 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 7. Recurring | 월급·구독·적금 자동 생성 | 반복 입력 감소 |
 | 8. Marriage Goal | Goal/Account 연결, 달성률·예상일 | 결혼자금 추적 가능 |
 | 9. Assets | 자산·부채·순자산·월 추이 | 재무 상태 확인 가능 |
-| 10. Production | PWA, CSV, backup, Mac mini 배포 | 실제 2인 운영 시작 |
+| 10. Production | PWA, CSV, backup, Cloudflare Access/Tunnel, Mac mini 배포 | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Release Gate
 
 - `dev`는 검증된 Slice를 누적한다.
 - `dev → main`은 의미 있는 사용자 흐름이 완료됐을 때만 진행한다.
-- Production credential, 실제 DB migration, 배포는 별도 운영 Gate를 통과해야 한다.
+- Production credential, 실제 DB migration, Cloudflare Access/Tunnel 설정, 배포는 별도 운영 Gate를 통과해야 한다.
 - 재무 불변식 테스트가 실패하면 release할 수 없다.
+- production에서 Access JWT 검증 우회 경로가 존재하면 release할 수 없다.
 
 ## 출시 전 결정 항목
 
@@ -41,3 +43,5 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 - 실제 결혼자금 목표 금액과 목표일
 - 운영 백업 보관기간과 외부 백업 위치
 - 실제 도메인과 Cloudflare route
+- Cloudflare Access session duration
+- 내부 User bootstrap/provision 운영 절차
