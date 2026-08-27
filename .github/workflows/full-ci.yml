@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 저장소 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 저장소 구조 검사
         run: ./scripts/check-repo.sh
@@ -29,6 +29,9 @@ jobs:
 
       - name: Flyway migration 검사
         run: ./scripts/check-migrations.sh
+
+      - name: Docker Compose 검사
+        run: ./scripts/verify-compose.sh
 
   backend:
     uses: ./.github/workflows/backend-ci.yml
