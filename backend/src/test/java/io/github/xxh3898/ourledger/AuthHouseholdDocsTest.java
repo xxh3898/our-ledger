@@ -132,6 +132,7 @@ class AuthHouseholdDocsTest {
                                 fieldWithPath("name").description("Household 이름"),
                                 fieldWithPath("baseCurrency").description("기준 통화"),
                                 fieldWithPath("timezone").description("Household timezone"),
+                                fieldWithPath("members[].memberId").description("Household Member ID"),
                                 fieldWithPath("members[].userId").description("Member의 내부 User ID"),
                                 fieldWithPath("members[].displayName").description("Member 표시명"),
                                 fieldWithPath("members[].role").description("Member role")

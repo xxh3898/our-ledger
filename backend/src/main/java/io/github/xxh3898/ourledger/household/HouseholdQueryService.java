@@ -20,6 +20,7 @@ public class HouseholdQueryService {
                 .findAllByHousehold_IdOrderByJoinedAtAscIdAsc(householdId)
                 .stream()
                 .map(member -> new HouseholdMemberSummary(
+                        member.getId(),
                         member.getUser().getId(),
                         member.getUser().getDisplayName(),
                         member.getRole()

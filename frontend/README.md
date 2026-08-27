@@ -33,4 +33,6 @@ npm run build
 
 repository root에서는 `./scripts/verify-frontend.sh`가 같은 순서를 실행하며 Node.js 24가 없으면 격리된 verification container를 사용한다.
 
-`App.test.tsx`는 `/api/v1/me`의 loading, 정상 User/Household/role, 401 인증 필요, 403 미등록 User 상태를 검증한다. 애플리케이션 자체 로그인·OTP 화면은 제공하지 않는다.
+`App.test.tsx`는 `/api/v1/me`의 loading, 정상 User/Household/role, 401 인증 필요, 403 미등록 User 상태를 보존한다. Slice 2에서는 Account/Category 설정, INCOME/EXPENSE 빠른 입력, 실패 시 form 보존, 최근 거래 edit/delete를 추가로 검증한다. 애플리케이션 자체 로그인·OTP 화면은 제공하지 않는다.
+
+Ledger request helper는 same-origin cookie를 유지하고 unsafe request에 `XSRF-TOKEN` cookie의 값을 `X-XSRF-TOKEN` header로 보낸다. 인증이 성공한 뒤에만 current Household의 Member, Account, Category, Transaction을 불러오며 client Household ID를 생성하지 않는다.

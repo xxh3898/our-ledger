@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-27
 related:
   - 04-api/error-contract.md
@@ -66,6 +66,7 @@ related:
   "timezone": "Asia/Seoul",
   "members": [
     {
+      "memberId": 100,
       "userId": 1,
       "displayName": "Owner",
       "role": "OWNER"
@@ -75,6 +76,64 @@ related:
 ```
 
 두 API의 ID는 server가 검증한 current Household principal에서만 나온다. 클라이언트가 query나 일반 header로 보낸 Household ID는 current 선택 또는 권한 근거가 아니다. 실제 response field는 `AuthHouseholdDocsTest`가 생성하는 `current-user`, `current-household` Spring REST Docs snippet으로 검증한다.
+
+`members[]`는 `memberId`, `userId`, `displayName`, `role`을 반환한다. Ledger owner/payer 요청은 `memberId`를 사용한다.
+
+## Basic Ledger API
+
+모든 endpoint는 `CurrentHousehold.householdId`를 서버에서 적용하며 request body/query에 `householdId`를 받지 않는다. `PATCH`는 정의된 수정 필드를 전부 받는다. omitted/null 의미가 필요한 필드는 별도로 문서화한다.
+
+### Account
+
+```text
+GET   /api/v1/accounts?includeArchived=false
+POST  /api/v1/accounts
+PATCH /api/v1/accounts/{accountId}
+```
+
+create/update는 `name`, nullable `institution`, `type`, `nature`, `ownership`, nullable `ownerMemberId`, `openingBalance`, `openingBalanceAsOf`, `currency`, nullable `lastFour`, `savingsEnabled`, `sortOrder`를 사용한다. update는 `archived` boolean을 추가로 요구한다. response는 해당 필드와 owner reference, `currentBalance`, `archived`, timestamp를 반환한다.
+
+### Category Group / Category
+
+```text
+GET   /api/v1/category-groups?includeArchived=false
+POST  /api/v1/category-groups
+PATCH /api/v1/category-groups/{groupId}
+GET   /api/v1/categories?includeArchived=false
+POST  /api/v1/categories
+PATCH /api/v1/categories/{categoryId}
+```
+
+Group create는 `name`, `type`, `sortOrder`, update는 immutable type을 제외한 `name`, `sortOrder`, `archived`를 받는다. Category create는 nullable `groupId`, `name`, `type`, nullable `iconKey/colorKey`, `sortOrder`, update는 immutable type을 제외한 같은 편집 필드와 `archived`를 받는다.
+
+active-only가 기본이며 `includeArchived=true`는 보관 row와 Group의 archive 상태를 반환한다. archived Group 소속 Category는 기본 선택 목록에서 제외한다.
+
+### Transaction
+
+```text
+GET    /api/v1/transactions
+GET    /api/v1/transactions/{transactionId}
+POST   /api/v1/transactions
+PATCH  /api/v1/transactions/{transactionId}
+DELETE /api/v1/transactions/{transactionId}?version={version}
+```
+
+POST는 `type`, positive `amount`, `scope`, nullable `ownerMemberId/payerMemberId`, `categoryId`, `accountId`, ISO 8601 `occurredAt`, nullable `memo`, `adjustmentType`, nullable `reversesTransactionId`를 받는다. Slice 2에서 `type` 은 INCOME/EXPENSE, `adjustmentType` 은 NORMAL만 허용한다. PATCH는 같은 필드와 현재 `version`을 요구한다.
+
+response는 owner/payer, Category, Account reference와 PRIMARY Entry `role/balanceDelta`, `version`을 포함한다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
+
+목록은 `occurred_at DESC, id DESC`로 정렬하고 다음 optional query를 고정한다.
+
+| query | 의미 |
+|---|---|
+| `from`, `to` | Household timezone 기준 포함 날짜 `YYYY-MM-DD` |
+| `type` | `INCOME` 또는 `EXPENSE` |
+| `scope` | `PERSONAL` 또는 `SHARED` |
+| `ownerMemberId` | PERSONAL owner Member ID |
+| `categoryId` | Category ID |
+| `accountId` | PRIMARY Entry Account ID |
+
+`from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` snippet으로 검증한다.
 
 ## 인증 상태와 CSRF
 

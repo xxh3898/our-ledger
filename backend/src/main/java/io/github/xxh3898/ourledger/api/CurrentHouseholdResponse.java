@@ -26,10 +26,15 @@ public record CurrentHouseholdResponse(
         );
     }
 
-    public record Member(Long userId, String displayName, String role) {
+    public record Member(Long memberId, Long userId, String displayName, String role) {
 
         static Member from(HouseholdMemberSummary member) {
-            return new Member(member.userId(), member.displayName(), member.role().name());
+            return new Member(
+                    member.memberId(),
+                    member.userId(),
+                    member.displayName(),
+                    member.role().name()
+            );
         }
     }
 }

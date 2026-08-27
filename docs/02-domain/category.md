@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 03-data/schema-rules.md
@@ -36,9 +36,18 @@ Group 없이 Category만 둘 수도 있다. Group과 Category는 `INCOME` 또는
 
 기본 Category도 Household 소유 데이터로 생성해 사용자가 보관·수정할 수 있게 한다.
 
+Slice 2는 예시 목록을 자동 seed하지 않는다. 사용자가 current Household에 Category를 직접 만들어 거래에 사용한다.
+
 ## 제약
 
 - 활성 상태에서 Household·type·이름의 대소문자 무시 중복을 막는다.
 - Category type과 Group type은 일치해야 한다.
 - 거래가 연결된 Category는 물리삭제하지 않는다.
 - 보관된 Category는 과거 거래 조회에서 표시한다.
+
+## Slice 2 수정과 보관
+
+- Group과 Category의 `type`은 생성 후 immutable이다. 연결된 과거 Transaction의 type 계약을 유지하기 위해 이름, Group 이동, key, 순서, archive만 수정한다.
+- Group을 archive해도 child Category row를 일괄 수정하지 않는다. active 목록과 신규 Transaction 검증에서 archived Group의 Category를 실효적으로 보관 상태로 처리한다.
+- Category 목록은 active-only가 기본이고 `includeArchived=true`일 때 보관 Category와 Group 상태를 함께 반환한다.
+- 활성 Category 이름은 `(household_id, type, lower(name))` 기준으로 중복할 수 없다. API는 이름 양끝 공백을 제거한다.

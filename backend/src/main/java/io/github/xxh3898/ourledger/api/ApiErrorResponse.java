@@ -12,6 +12,10 @@ public record ApiErrorResponse(
         return new ApiErrorResponse(code.name(), code.message(), List.of());
     }
 
+    public static ApiErrorResponse of(ApiErrorCode code, List<FieldError> fieldErrors) {
+        return new ApiErrorResponse(code.name(), code.message(), List.copyOf(fieldErrors));
+    }
+
     public record FieldError(String field, String code, String message) {
     }
 }
