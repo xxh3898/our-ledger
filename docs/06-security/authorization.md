@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-27
 related:
   - ADR-001
@@ -63,6 +63,8 @@ Cloudflare Access 정책 자체의 변경은 애플리케이션 권한이 아니
 다른 Household의 ID를 요청해도 데이터 내용, 존재 여부, 이름을 노출하지 않는다. Repository method부터 Household 조건을 포함한다.
 
 `GET /api/v1/households/current`는 Household ID parameter를 받지 않는다. 알 수 없는 `householdId` query가 함께 오더라도 current principal의 Household만 반환하며 해당 값을 권한 근거로 사용하지 않는다.
+
+Basic Ledger controller는 request에 `householdId`를 받지 않고 `CurrentHousehold`를 service에 전달한다. Account, Category Group/Category, Transaction detail은 `id + household_id`로 조회하고 Member/Account/Category/Entry/audit 참조는 DB composite FK로도 같은 Household임을 강제한다. 다른 Household의 ID와 없는 ID는 모두 `404 RESOURCE_NOT_FOUND`로 응답한다.
 
 ## 인증 성공과 인가 성공의 분리
 

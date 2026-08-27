@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-27
 related:
   - ADR-008
@@ -43,6 +43,18 @@ PostgreSQL Testcontainers를 사용한다.
 - Household 격리
 - 동시 수정 version 충돌
 - 반복 생성 idempotency
+
+Basic Ledger Slice는 추가로 다음을 PostgreSQL에서 검증한다.
+
+- Flyway V1→V4 clean 적용과 JPA `ddl-auto=validate`
+- Account PERSONAL/SHARED CHECK, Member composite FK, KRW/last-four/savings 제약
+- Category Group/type composite FK와 active case-insensitive name unique
+- Transaction positive amount/scope/category CHECK, Member/Category/audit composite FK
+- Entry의 Transaction/Account composite FK, nonzero delta, duplicate PRIMARY unique
+- INCOME `+100000`, EXPENSE `-12000`, Transaction당 Entry 1개
+- update 후 expected delta로 갱신되고 이전 delta가 누적되지 않음
+- logical delete 후 목록/detail/잔액 제외, stale version `409`
+- archived reference, unsupported posting, cross-household reference 거부와 atomic rollback
 
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
@@ -95,6 +107,8 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
 
+`App.test.tsx`는 Slice 2에서 identity loading/401/403을 보존하며 Account/Category 설정, 빠른 거래 생성, 서버 validation 실패 입력 보존, 최근 목록 edit/delete를 mock HTTP 경계에서 검증한다.
+
 ## Production 보안 검증
 
 배포 Gate에서는 자동 테스트 외에 다음을 확인한다.
@@ -110,6 +124,8 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 ## 계약 테스트
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
+
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete snippet을 생성한다.
 
 ## 회귀 우선순위
 

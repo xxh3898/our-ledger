@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - 01-product/benchmark-weple-money.md
@@ -19,7 +19,19 @@ Ledger 본 화면 전에는 same-origin `/api/v1/me`로 current identity를 확�
 - 403: 내부 User 미등록·비활성 또는 Household membership 문제를 안내한다.
 - network/server error: 재시도 가능한 일반 오류로 표시한다.
 
-이 상태 화면은 Slice 1의 경계 확인용이며 거래·달력·예산 본 화면을 미리 구현하지 않는다.
+이 상태 화면은 Slice 1에서 확정한 경계를 유지한다. success일 때만 Slice 2 Basic Ledger dashboard를 로드하고 401/403/error에서는 Ledger request를 시작하지 않는다.
+
+## Slice 2 Basic Ledger
+
+최종 Home/Calendar 정보구조 전에 다음 기능 panel만 제공한다.
+
+1. current ASSET Account 잔액 요약
+2. Account 생성·active 목록·archive
+3. Category Group/Category 생성·active 목록·archive
+4. INCOME/EXPENSE NORMAL 빠른 입력
+5. 최근 거래 목록·수정·논리삭제
+
+이 panel 구조는 기능 검증용이며 하단 탐색, Calendar/Home, 캐릭터·색상 asset 계약을 확정하지 않는다.
 
 ## 하단 탐색
 

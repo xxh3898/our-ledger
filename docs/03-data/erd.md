@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - ADR-001
@@ -74,6 +74,38 @@ household_members
 - `household_members`는 `(household_id, user_id)` unique와 `role = 'OWNER'` partial unique index를 가진다.
 - V1의 최대 2명 규칙은 다중 행 제약이므로 locked service transaction과 PostgreSQL 통합 테스트로 보완한다.
 - password, 자체 credential, Account/Transaction table은 V2에 없다.
+
+## Slice 2 물리 schema
+
+`V3__accounts_categories_transactions.sql`은 다음 table을 추가한다.
+
+```text
+accounts
+  id, household_id, name, institution, type, nature, ownership,
+  owner_member_id, opening_balance, opening_balance_as_of, currency,
+  last_four, savings_enabled, sort_order, archived_at, timestamps
+
+category_groups
+  id, household_id, name, type, sort_order, archived_at, timestamps
+
+categories
+  id, household_id, group_id, name, type, icon_key, color_key,
+  sort_order, archived_at, timestamps
+
+transactions
+  id, household_id, type, amount, scope, owner_member_id, payer_member_id,
+  category_id, occurred_at, memo, adjustment_type, reverses_transaction_id,
+  version, created_at/by, updated_at/by, deleted_at/by
+```
+
+`V4__transaction_account_entries.sql`은 다음 posting table을 추가한다.
+
+```text
+transaction_account_entries
+  id, household_id, transaction_id, account_id, entry_role, balance_delta
+```
+
+Account owner, Transaction owner/payer/audit, Category Group/Category type, Transaction/Category type, Entry/Transaction/Account는 모두 `household_id`를 포함한 composite FK로 연결한다. V3는 이 target을 위해 `household_members (id, household_id)` unique를 additive로 추가한다.
 
 ## 구현 순서
 
