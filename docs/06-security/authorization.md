@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - ADR-001
@@ -27,6 +27,16 @@ frontend의 숨김 처리, 전달된 Household ID, 일반 요청 헤더를 권�
 
 V1은 인증된 User의 단일 Household를 기본으로 하되, 내부 서비스와 query는 Household ID 경계를 명시한다. 미래 다중 Household 가능성이 있어도 현재 API를 불필요하게 복잡하게 만들지 않는다.
 
+구현 순서는 다음과 같다.
+
+1. cryptographically 검증된 production email 또는 local/test 전용 email을 정규화한다.
+2. 같은 email의 ACTIVE 내부 User를 조회한다.
+3. membership이 정확히 한 건인지 확인한다.
+4. User와 Household 최소 정보만 담은 `CurrentHousehold` principal로 외부 인증 principal을 교체한다.
+5. controller와 후속 service는 이 principal의 `householdId`만 사용한다.
+
+membership 0건과 2건 이상은 모두 fail-closed하며 서로 다른 stable error code를 반환한다. raw Access JWT는 principal에 보관하지 않는다.
+
 ## 리소스 조회
 
 Account, Category, Transaction, Budget, RecurringTransaction, Goal을 조회·변경할 때:
@@ -51,6 +61,8 @@ Cloudflare Access 정책 자체의 변경은 애플리케이션 권한이 아니
 ## IDOR 방지
 
 다른 Household의 ID를 요청해도 데이터 내용, 존재 여부, 이름을 노출하지 않는다. Repository method부터 Household 조건을 포함한다.
+
+`GET /api/v1/households/current`는 Household ID parameter를 받지 않는다. 알 수 없는 `householdId` query가 함께 오더라도 current principal의 Household만 반환하며 해당 값을 권한 근거로 사용하지 않는다.
 
 ## 인증 성공과 인가 성공의 분리
 

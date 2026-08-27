@@ -1,12 +1,25 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 01-product/benchmark-weple-money.md
+  - 06-security/authentication.md
 ---
 
 # 정보구조
+
+## Auth/Household 진입 상태
+
+Ledger 본 화면 전에는 same-origin `/api/v1/me`로 current identity를 확인한다.
+
+- loading: User와 Household 확인 중임을 표시한다.
+- success: 표시명, email, Household 이름과 `OWNER`/`MEMBER` role을 표시한다.
+- 401: Cloudflare Access 인증이 필요함을 안내하되 app 자체 로그인/OTP form은 만들지 않는다.
+- 403: 내부 User 미등록·비활성 또는 Household membership 문제를 안내한다.
+- network/server error: 재시도 가능한 일반 오류로 표시한다.
+
+이 상태 화면은 Slice 1의 경계 확인용이며 거래·달력·예산 본 화면을 미리 구현하지 않는다.
 
 ## 하단 탐색
 

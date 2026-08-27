@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-27
 related:
   - 04-api/error-contract.md
@@ -43,9 +43,48 @@ related:
 
 애플리케이션 자체 로그인·로그아웃·비밀번호 API는 제공하지 않는다. `/api/v1/me`는 검증된 Access identity에 매핑된 내부 User와 현재 Household 정보를 반환한다.
 
+### `GET /api/v1/me`
+
+```json
+{
+  "userId": 1,
+  "email": "owner@example.test",
+  "displayName": "Owner",
+  "householdId": 10,
+  "householdName": "테스트 Household",
+  "role": "OWNER"
+}
+```
+
+### `GET /api/v1/households/current`
+
+```json
+{
+  "householdId": 10,
+  "name": "테스트 Household",
+  "baseCurrency": "KRW",
+  "timezone": "Asia/Seoul",
+  "members": [
+    {
+      "userId": 1,
+      "displayName": "Owner",
+      "role": "OWNER"
+    }
+  ]
+}
+```
+
+두 API의 ID는 server가 검증한 current Household principal에서만 나온다. 클라이언트가 query나 일반 header로 보낸 Household ID는 current 선택 또는 권한 근거가 아니다. 실제 response field는 `AuthHouseholdDocsTest`가 생성하는 `current-user`, `current-household` Spring REST Docs snippet으로 검증한다.
+
 ## 인증 상태와 CSRF
 
-production 요청은 Cloudflare Access를 통과한 뒤 Spring Security가 `Cf-Access-Jwt-Assertion`을 다시 검증한다. 브라우저의 Access 인증 상태가 cookie로 유지되므로 상태 변경 요청의 CSRF 또는 동등한 Origin 보호를 제거하지 않는다. frontend는 same-origin 요청과 확정된 CSRF 계약을 따른다.
+production 요청은 Cloudflare Access를 통과한 뒤 Spring Security가 `Cf-Access-Jwt-Assertion`을 다시 검증한다. 브라우저의 Access 인증 상태가 cookie로 유지되므로 상태 변경 요청의 CSRF 보호를 제거하지 않는다.
+
+- frontend와 API는 same-origin이다. wildcard CORS를 구성하지 않는다.
+- Spring Security 7 SPA mode와 `CookieCsrfTokenRepository`를 사용한다.
+- 안전한 API 응답은 readable `XSRF-TOKEN` cookie와 `X-XSRF-TOKEN` response header를 발급한다.
+- state-changing 요청은 cookie의 plain token을 `X-XSRF-TOKEN` request header로 함께 보낸다.
+- token이 없거나 다르면 `403 CSRF_TOKEN_INVALID`다.
 
 ## 동시 수정
 

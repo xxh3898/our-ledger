@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 0 — Foundation
-- 구현 코드: Spring Boot backend와 React frontend bootstrap
+- 단계: Slice 1 — Auth / Household
+- 구현 코드: Cloudflare Access JWT 검증, 내부 User/Household 경계, 조회 API와 React identity 상태
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -56,6 +56,12 @@
 
 production 접근은 Cloudflare Access에서 허용된 두 사용자만 통과시키고, `cloudflared`와 Spring Security가 Access JWT를 검증한다. 애플리케이션 자체 사용자 비밀번호는 저장하지 않는다. 세부 계약은 [`ADR-008`](docs/09-decisions/ADR-008-cloudflare-access-authentication.md)과 [`docs/06-security/authentication.md`](docs/06-security/authentication.md)를 따른다.
 
+Backend는 `Cf-Access-Jwt-Assertion`의 RS256 서명, issuer, audience, 시간, email claim을 검증한 뒤 ACTIVE 내부 User와 정확히 하나의 Household membership을 요구한다. Cloudflare 설정이 없는 default/production 실행은 fail-closed로 시작에 실패한다. 실제 값은 저장소 밖에서 다음 환경변수로 주입한다.
+
+- `CLOUDFLARE_ACCESS_ISSUER`
+- `CLOUDFLARE_ACCESS_JWK_SET_URI`
+- `CLOUDFLARE_ACCESS_AUDIENCE`
+
 ## 저장소 구조
 
 ```text
@@ -99,6 +105,8 @@ docker compose --env-file .env.dev.local -f compose.dev.yaml up -d --wait postgr
 
 Java/Node를 host에 설치하지 않고 전체 애플리케이션을 실행하려면 개발 profile을 사용한다. API와 frontend port는 loopback에만 bind된다.
 
+최초 local data가 필요하면 `.env.dev.local`의 가짜 `example.test` 값을 확인하고 `OUR_LEDGER_BOOTSTRAP_ENABLED=true`로 한 번 시작한다. 두 User와 한 Household가 생성된 뒤 다음 startup부터 다시 `false`로 둔다. 정확히 같은 입력의 재실행은 no-op이고, 부분 생성·다른 표시명·다른 membership은 덮어쓰지 않고 startup을 실패시킨다. 실제 이메일이나 production DB에는 이 절차를 실행하지 않는다.
+
 ```bash
 docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app up
 ```
@@ -106,6 +114,8 @@ docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app up
 - Frontend: `http://127.0.0.1:5173`
 - Backend health: `http://127.0.0.1:8080/actuator/health`
 - PostgreSQL: `127.0.0.1:${POSTGRES_PORT}`
+
+Vite development proxy는 `.env.dev.local`의 `OUR_LEDGER_LOCAL_IDENTITY_EMAIL`을 `X-Our-Ledger-Local-Identity`로 backend에 전달한다. 이 header filter는 `local`/`test` profile에만 존재하고 내부 User와 Household membership 검증을 그대로 거친다.
 
 종료할 때는 개발 data와 dependency cache를 보존하는 일반 `down`을 사용한다.
 

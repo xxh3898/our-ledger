@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 06-security/authorization.md
@@ -43,6 +43,11 @@ related:
 
 - `AUTHENTICATION_REQUIRED`
 - `ACCESS_DENIED`
+- `USER_NOT_REGISTERED`
+- `USER_DISABLED`
+- `HOUSEHOLD_MEMBERSHIP_REQUIRED`
+- `HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`
+- `CSRF_TOKEN_INVALID`
 - `HOUSEHOLD_MEMBER_LIMIT_REACHED`
 - `RESOURCE_NOT_FOUND`
 - `TRANSACTION_VERSION_CONFLICT`
@@ -59,3 +64,8 @@ related:
 ## 보안
 
 다른 Household의 리소스가 실제로 존재하는지 구분할 수 없도록 404 또는 일반화된 403 정책을 일관되게 적용한다. stack trace와 SQL을 응답하지 않는다.
+
+- Access JWT가 없거나 signature/issuer/audience/time/email 검증에 실패하면 `401 AUTHENTICATION_REQUIRED`다.
+- JWT가 유효하지만 내부 User가 없으면 `403 USER_NOT_REGISTERED`, 비활성이면 `403 USER_DISABLED`다.
+- ACTIVE User에게 current membership이 없으면 `403 HOUSEHOLD_MEMBERSHIP_REQUIRED`, 둘 이상이면 `403 HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`다.
+- unsafe request의 CSRF token이 없거나 다르면 `403 CSRF_TOKEN_INVALID`다.

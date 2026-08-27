@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-27
 related:
   - 03-data/erd.md
@@ -36,6 +36,18 @@ V1 production 인증은 Cloudflare Access를 사용하므로 `users`는 애플�
 
 `users.email`은 Cloudflare Access의 검증된 email claim과 내부 User를 매핑하기 위한 식별자이며 `LOWER(email)` 기준 unique를 유지한다. 실제 User 생성은 별도 bootstrap/provision 절차로 수행하고 Access 인증 성공만으로 자동 생성하지 않는다.
 
+`V2__users_households.sql`은 email이 `LOWER(BTRIM(email))`과 같은지 CHECK하고 `LOWER(email)` expression unique index를 추가한다. `status`는 `ACTIVE`, `DISABLED`만 허용한다.
+
+## Household와 Member
+
+- `households.base_currency` DB/code 기본값은 `KRW`다.
+- `households.timezone` DB/code 기본값은 `Asia/Seoul`이다.
+- `household_members.role`은 `OWNER`, `MEMBER`만 허용한다.
+- `(household_id, user_id)` unique로 같은 User의 중복 참여를 막는다.
+- `role = 'OWNER'` partial unique index로 Household당 OWNER를 한 명으로 제한한다.
+- 최대 2명은 단순 CHECK로 표현하지 않는다. `Household` row에 `PESSIMISTIC_WRITE` lock을 건 service transaction에서 현재 count를 검사한다.
+- V1 current Household resolver는 User membership이 정확히 한 건일 때만 principal을 만든다. schema 자체는 향후 다중 Household migration 가능성을 닫지 않는다.
+
 ## Household 경계
 
 주요 하위 테이블은 `(id, household_id)` 유일키를 두고 가능한 참조를 복합 FK로 연결한다. 애플리케이션 검증만으로 tenant boundary를 보장하지 않는다.
@@ -60,6 +72,7 @@ FOREIGN KEY (category_id, household_id)
 
 - User email: `LOWER(email)` unique
 - Member: `(household_id, user_id)` unique
+- Household OWNER: `household_id WHERE role = 'OWNER'` partial unique
 - 활성 Category: Household/type/lower(name) partial unique
 - Budget: PostgreSQL `UNIQUE NULLS NOT DISTINCT`로 월·scope·owner·category 중복 방지
 - 반복 생성: `(generated_from_recurring_id, recurrence_date)` partial unique
