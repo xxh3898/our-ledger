@@ -37,3 +37,8 @@ our-ledger:
     member:
       email: ${OUR_LEDGER_BOOTSTRAP_MEMBER_EMAIL:}
       display-name: ${OUR_LEDGER_BOOTSTRAP_MEMBER_DISPLAY_NAME:}
+  recurring:
+    scheduler:
+      enabled: ${OUR_LEDGER_RECURRING_SCHEDULER_ENABLED:true}
+      poll-delay-ms: ${OUR_LEDGER_RECURRING_POLL_DELAY_MS:60000}
+      batch-size: ${OUR_LEDGER_RECURRING_BATCH_SIZE:100}

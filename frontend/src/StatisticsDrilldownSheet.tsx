@@ -143,6 +143,9 @@ export function StatisticsDrilldownSheet({
                     <strong>
                       {transaction.category?.name ?? (income ? '수입' : '지출')}
                       {refund ? ' 환불' : ''}
+                      {typeof transaction.generatedFromRecurringId === 'number' && (
+                        <span className="provenance-badge">반복</span>
+                      )}
                     </strong>
                     <span>
                       {occurredOn(transaction.occurredAt, timezone)}
@@ -168,7 +171,12 @@ export function StatisticsDrilldownSheet({
             {state.activities.map((activity) => (
               <li key={activity.transactionId}>
                 <div>
-                  <strong>{activity.sourceAccount.name} → {activity.destinationAccount.name}</strong>
+                  <strong>
+                    {activity.sourceAccount.name} → {activity.destinationAccount.name}
+                    {typeof activity.generatedFromRecurringId === 'number' && (
+                      <span className="provenance-badge">반복</span>
+                    )}
+                  </strong>
                   <span>
                     {occurredOn(activity.occurredAt, timezone)}
                     {activity.memo ? ` · ${activity.memo}` : ''}

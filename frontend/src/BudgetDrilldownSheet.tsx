@@ -131,6 +131,9 @@ export function BudgetDrilldownSheet({
                   <div>
                     <strong>
                       {transaction.category?.name ?? '지출'}{refund ? ' 환불' : ''}
+                      {typeof transaction.generatedFromRecurringId === 'number' && (
+                        <span className="provenance-badge">반복</span>
+                      )}
                     </strong>
                     <span>
                       {occurredOn(transaction.occurredAt, timezone)} · {transaction.scope === 'SHARED'

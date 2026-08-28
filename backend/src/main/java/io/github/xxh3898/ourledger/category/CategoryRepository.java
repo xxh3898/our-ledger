@@ -1,6 +1,8 @@
 package io.github.xxh3898.ourledger.category;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +18,18 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     );
 
     Optional<Category> findByIdAndHouseholdId(Long id, Long householdId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT category
+            FROM Category category
+            WHERE category.id = :categoryId
+              AND category.householdId = :householdId
+            """)
+    Optional<Category> findByIdAndHouseholdIdForUpdate(
+            @Param("categoryId") Long categoryId,
+            @Param("householdId") Long householdId
+    );
 
     @Query(value = """
             SELECT EXISTS (

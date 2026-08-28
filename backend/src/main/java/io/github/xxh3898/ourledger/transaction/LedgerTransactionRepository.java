@@ -58,6 +58,11 @@ public interface LedgerTransactionRepository
             AdjustmentType adjustmentType
     );
 
+    boolean existsByGeneratedFromRecurringIdAndRecurrenceDate(
+            Long generatedFromRecurringId,
+            java.time.LocalDate recurrenceDate
+    );
+
     List<LedgerTransaction>
             findAllByHouseholdIdAndDeletedAtIsNullAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(
                     Long householdId,

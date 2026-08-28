@@ -61,6 +61,15 @@ related:
 
 Transaction과 모든 Entry는 하나의 DB transaction에서 저장한다. 일부 Entry만 저장된 상태가 발생하면 안 된다.
 
+## Recurring generated Transaction
+
+- Recurring rule은 원장이 아니라 미래 posting template과 cursor다.
+- due occurrence는 기존 INCOME/EXPENSE/TRANSFER validation과 expected Entry 계산을 그대로 사용해 일반 Transaction/Entry로 저장한다.
+- generated row는 `generated_from_recurring_id`, `recurrence_date` provenance를 가지며 나머지 금융 의미와 조회·수정·논리삭제는 일반 NORMAL Transaction과 같다.
+- generation transaction은 rule row lock 뒤 due/active/cursor를 다시 확인하고 Transaction/Entry와 다음 cursor를 함께 commit한다.
+- generated 거래의 수정은 lineage를 보존하고 rule을 변경하지 않는다. 논리삭제도 occurrence unique를 해제하지 않는다.
+- template change는 기존 generated Transaction/Entry를 재작성하지 않고 이후 occurrence부터 적용한다.
+
 ## 수정
 
 거래 수정 시 기존 Entry를 임의 누적하지 않는다. 계산된 expected entry set으로 교체하거나 명확한 갱신 전략을 사용하고, 변경 전후 잔액 회귀를 테스트한다.

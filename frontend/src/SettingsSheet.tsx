@@ -1,10 +1,13 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { todayInTimeZone } from './dateTime.ts'
+import { RecurringTransactionSheet } from './RecurringTransactionSheet.tsx'
 import {
   type Account,
   type Category,
   type CategoryGroup,
   type CurrentHousehold,
+  type RecurringTransaction,
+  type RecurringTransactionInput,
   LedgerApiError,
   archiveAccount,
   archiveCategory,
@@ -12,12 +15,183 @@ import {
   createAccount,
   createCategory,
   createCategoryGroup,
+  loadRecurringTransactions,
+  updateRecurringTransaction,
 } from './ledgerApi.ts'
 
 function errorMessage(error: unknown) {
   if (error instanceof LedgerApiError) return error.message
   if (error instanceof Error && error.message) return error.message
   return '요청을 처리하지 못했습니다.'
+}
+
+function recurringInput(recurring: RecurringTransaction): RecurringTransactionInput {
+  const account = (role: 'PRIMARY' | 'SOURCE' | 'DESTINATION') =>
+    recurring.accounts.find((item) => item.role === role)?.account.id ?? null
+  return {
+    name: recurring.name,
+    type: recurring.type,
+    amount: recurring.amount,
+    scope: recurring.scope,
+    ownerMemberId: recurring.owner?.memberId ?? null,
+    payerMemberId: recurring.payer?.memberId ?? null,
+    categoryId: recurring.category?.id ?? null,
+    accountId: account('PRIMARY'),
+    sourceAccountId: account('SOURCE'),
+    destinationAccountId: account('DESTINATION'),
+    frequency: recurring.frequency,
+    intervalValue: recurring.intervalValue,
+    startDate: recurring.startDate,
+    endDate: recurring.endDate,
+    scheduledLocalTime: recurring.scheduledLocalTime.slice(0, 5),
+    memo: recurring.memo,
+    autoPost: true,
+    active: recurring.active,
+  }
+}
+
+function scheduleText(recurring: RecurringTransaction) {
+  const unit = recurring.frequency === 'DAILY' ? '일'
+    : recurring.frequency === 'WEEKLY' ? '주'
+      : recurring.frequency === 'MONTHLY' ? '개월' : '년'
+  const every = recurring.frequency === 'DAILY' ? '매일'
+    : recurring.frequency === 'WEEKLY' ? '매주'
+      : recurring.frequency === 'MONTHLY' ? '매월' : '매년'
+  const interval = recurring.intervalValue === 1 ? every : `${recurring.intervalValue}${unit}마다`
+  const start = new Date(`${recurring.startDate}T00:00:00Z`)
+  const anchor = recurring.frequency === 'WEEKLY'
+    ? `${['일', '월', '화', '수', '목', '금', '토'][start.getUTCDay()]}요일`
+    : recurring.frequency === 'MONTHLY'
+      ? `${Number(recurring.startDate.slice(8))}일`
+      : recurring.frequency === 'YEARLY'
+        ? `${Number(recurring.startDate.slice(5, 7))}월 ${Number(recurring.startDate.slice(8))}일`
+        : ''
+  return `${interval}${anchor ? ` ${anchor}` : ''} · ${recurring.scheduledLocalTime.slice(0, 5)}`
+}
+
+function RecurringSetup({
+  currentUserId,
+  household,
+  accounts,
+  categories,
+}: {
+  currentUserId: number
+  household: CurrentHousehold
+  accounts: Account[]
+  categories: Category[]
+}) {
+  const [items, setItems] = useState<RecurringTransaction[]>([])
+  const [loading, setLoading] = useState(true)
+  const [pendingId, setPendingId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editing, setEditing] = useState<RecurringTransaction | null>(null)
+  const editorOpenerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadRecurringTransactions(controller.signal)
+      .then((data) => setItems(data))
+      .catch((loadError: unknown) => {
+        if (!(loadError instanceof DOMException && loadError.name === 'AbortError')) {
+          setError(errorMessage(loadError))
+        }
+      })
+      .finally(() => setLoading(false))
+    return () => controller.abort()
+  }, [])
+
+  function openEditor(recurring: RecurringTransaction | null, opener: HTMLElement) {
+    editorOpenerRef.current = opener
+    setEditing(recurring)
+    setEditorOpen(true)
+  }
+
+  function closeEditor() {
+    setEditorOpen(false)
+    setEditing(null)
+    window.setTimeout(() => editorOpenerRef.current?.focus(), 0)
+  }
+
+  function saved(savedItem: RecurringTransaction) {
+    setItems((current) => {
+      const exists = current.some((item) => item.id === savedItem.id)
+      return exists
+        ? current.map((item) => item.id === savedItem.id ? savedItem : item)
+        : [...current, savedItem]
+    })
+    closeEditor()
+  }
+
+  async function toggleActive(recurring: RecurringTransaction) {
+    if (pendingId !== null) return
+    setPendingId(recurring.id)
+    setError(null)
+    try {
+      const updated = await updateRecurringTransaction(
+        recurring.id,
+        recurring.version,
+        { ...recurringInput(recurring), active: !recurring.active },
+      )
+      setItems((current) => current.map((item) => item.id === updated.id ? updated : item))
+    } catch (updateError) {
+      setError(errorMessage(updateError))
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  return (
+    <section className="settings-panel recurring-settings" aria-labelledby="recurring-title">
+      <div className="panel-heading">
+        <div><p className="section-kicker">Recurring</p><h3 id="recurring-title">반복 거래</h3></div>
+        <span className="count-badge">{items.length}</span>
+      </div>
+      <p className="field-hint">
+        중지해도 이미 생성된 거래는 유지되며, 다시 시작해도 중지 기간은 소급 생성하지 않습니다.
+      </p>
+      <button className="primary-button" type="button"
+        onClick={(event) => openEditor(null, event.currentTarget)}>+ 반복 거래 추가</button>
+      {loading && <p role="status">반복 거래를 불러오고 있어요.</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!loading && items.length === 0 && <p className="list-state">등록된 반복 거래가 없어요.</p>}
+      <ul className="reference-list recurring-list">
+        {items.map((recurring) => (
+          <li key={recurring.id}>
+            <div>
+              <strong>{recurring.name}</strong>
+              <span>{recurring.amount.toLocaleString('ko-KR')}원 · {
+                recurring.type === 'INCOME' ? '수입' : recurring.type === 'EXPENSE' ? '지출' : '이체'
+              } · {recurring.scope === 'SHARED' ? '공동' : recurring.owner?.displayName ?? '계좌 간'}</span>
+              <span>{scheduleText(recurring)} · {recurring.accounts.map((item) => item.account.name).join(' → ')}</span>
+              {recurring.nextRecurrenceDate && <small>다음 {recurring.nextRecurrenceDate}</small>}
+            </div>
+            <div className="reference-actions recurring-actions">
+              <b className={`status-badge status-badge--${recurring.status.toLowerCase()}`}>
+                {recurring.status === 'ACTIVE' ? '활성' : recurring.status === 'PAUSED' ? '중지됨' : '종료됨'}
+              </b>
+              <button type="button" onClick={(event) => openEditor(recurring, event.currentTarget)}>
+                수정
+              </button>
+              {recurring.status !== 'ENDED' && <button type="button"
+                disabled={pendingId === recurring.id} onClick={() => void toggleActive(recurring)}>
+                {pendingId === recurring.id ? '반영 중…' : recurring.active ? '중지' : '재개'}
+              </button>}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {editorOpen && <RecurringTransactionSheet
+        currentUserId={currentUserId}
+        household={household}
+        accounts={accounts}
+        categories={categories}
+        editing={editing}
+        onRequestClose={closeEditor}
+        onSaved={saved}
+      />}
+    </section>
+  )
 }
 
 function AccountSetup({
@@ -399,6 +573,12 @@ export function SettingsSheet({
           </button>
         </header>
         <div className="settings-content">
+          <RecurringSetup
+            currentUserId={currentUserId}
+            household={household}
+            accounts={accounts}
+            categories={categories}
+          />
           <AccountSetup
             currentUserId={currentUserId}
             household={household}

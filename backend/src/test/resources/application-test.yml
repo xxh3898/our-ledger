@@ -5,3 +5,8 @@ spring:
 logging:
   level:
     root: warn
+
+our-ledger:
+  recurring:
+    scheduler:
+      enabled: false

@@ -126,6 +126,31 @@ budgets
 - identity는 `(household_id, budget_month, scope, owner_member_id, category_id) UNIQUE NULLS NOT DISTINCT`다.
 - Category가 나중에 archive돼도 Budget FK와 row를 유지한다.
 
+## Slice 7 물리 schema
+
+`V7__recurring_transactions.sql`은 다음 table과 additive Transaction lineage를 추가한다.
+
+```text
+recurring_transactions
+  id, household_id, name, type, amount, scope, owner_member_id,
+  payer_member_id, category_id, memo, frequency, interval_value,
+  start_date, end_date, scheduled_local_time, auto_post, active,
+  next_recurrence_date, version, created_at/by, updated_at/by
+
+recurring_transaction_accounts
+  id, household_id, recurring_transaction_id, account_id, entry_role
+
+transactions 추가
+  generated_from_recurring_id, recurrence_date
+```
+
+- Recurring/Member/Category/Account/audit reference는 Household composite FK로 tenant 경계를 강제한다.
+- INCOME/EXPENSE는 PRIMARY, TRANSFER는 SOURCE/DESTINATION template role exact set을 Service가 강제한다.
+- template Account에는 delta를 저장하지 않고 실제 Transaction 생성 시 canonical posting 규칙으로 계산한다.
+- generated lineage 두 column은 함께 null 또는 함께 값이며 generated row는 NORMAL이다.
+- `(generated_from_recurring_id, recurrence_date)` full unique는 논리삭제 row도 포함한다.
+- rule row는 ended/paused 뒤에도 history와 audit을 위해 유지한다.
+
 ## 구현 순서
 
 전체 테이블을 한 migration에 만들지 않는다. Slice별 migration으로 진화하되 최종 제약은 이 ERD와 일치해야 한다.

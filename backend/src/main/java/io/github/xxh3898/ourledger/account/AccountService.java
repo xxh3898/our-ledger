@@ -5,6 +5,7 @@ import io.github.xxh3898.ourledger.api.ApiException;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.household.HouseholdMember;
 import io.github.xxh3898.ourledger.household.HouseholdMemberResolver;
+import io.github.xxh3898.ourledger.recurring.RecurringReferenceGuard;
 import io.github.xxh3898.ourledger.security.CurrentHousehold;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,13 +20,16 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final HouseholdMemberResolver householdMemberResolver;
+    private final RecurringReferenceGuard recurringReferenceGuard;
 
     public AccountService(
             AccountRepository accountRepository,
-            HouseholdMemberResolver householdMemberResolver
+            HouseholdMemberResolver householdMemberResolver,
+            RecurringReferenceGuard recurringReferenceGuard
     ) {
         this.accountRepository = accountRepository;
         this.householdMemberResolver = householdMemberResolver;
+        this.recurringReferenceGuard = recurringReferenceGuard;
     }
 
     @Transactional(readOnly = true)
@@ -96,6 +100,9 @@ public class AccountService {
         new RequestValidator().required(request.archived(), "archived").throwIfInvalid();
         requireOwner(currentHousehold.householdId(), request.ownership(), request.ownerMemberId());
         Account account = requireAccountForPosting(currentHousehold.householdId(), accountId);
+        recurringReferenceGuard.rejectAccountChange(
+                account.getHouseholdId(), account.getId(), request.type(), request.nature(),
+                request.archived());
         rejectPostingClassificationChange(account, request.type(), request.nature());
         account.update(
                 request.name(),

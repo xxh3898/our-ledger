@@ -32,5 +32,10 @@ related:
 19. Refund는 원 NORMAL EXPENSE의 Scope, Owner, Payer, Category, PRIMARY Account를 상속한다.
 20. active Refund가 있는 원 거래의 금융 edit/delete는 lineage를 깨뜨릴 수 없다.
 21. 동시 Refund 생성도 original row lock 경계에서 직렬화돼 누적 상한을 우회할 수 없다.
+22. 반복 규칙 자체는 잔액·Budget·통계에 포함되지 않고 실제 생성된 canonical Transaction과 Entry만 포함된다.
+23. 반복 생성은 규칙 row lock 안에서 due 여부를 다시 확인하며 Transaction 저장과 다음 cursor 이동이 원자적으로 완료된다.
+24. 동일 `(generated_from_recurring_id, recurrence_date)`는 생성 거래가 논리삭제돼도 다시 만들 수 없다.
+25. MONTHLY/YEARLY 반복은 최초 start date anchor를 유지하고 짧은 달·윤년에는 마지막 유효일로 clamp한다.
+26. 규칙 template 수정은 기존 생성 거래를 변경하지 않으며 일시정지 중 발생일은 재개 시 소급 생성하지 않는다.
 
 각 Slice는 관련 불변식의 단위·통합 테스트를 추가한다. 일반 happy path 테스트만으로 완료 처리하지 않는다.

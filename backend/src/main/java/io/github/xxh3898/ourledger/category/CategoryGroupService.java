@@ -4,6 +4,7 @@ import io.github.xxh3898.ourledger.api.ApiErrorCode;
 import io.github.xxh3898.ourledger.api.ApiException;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.security.CurrentHousehold;
+import io.github.xxh3898.ourledger.recurring.RecurringReferenceGuard;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,9 +15,17 @@ import java.util.List;
 public class CategoryGroupService {
 
     private final CategoryGroupRepository categoryGroupRepository;
+    private final CategoryReferenceLock categoryReferenceLock;
+    private final RecurringReferenceGuard recurringReferenceGuard;
 
-    public CategoryGroupService(CategoryGroupRepository categoryGroupRepository) {
+    public CategoryGroupService(
+            CategoryGroupRepository categoryGroupRepository,
+            CategoryReferenceLock categoryReferenceLock,
+            RecurringReferenceGuard recurringReferenceGuard
+    ) {
         this.categoryGroupRepository = categoryGroupRepository;
+        this.categoryReferenceLock = categoryReferenceLock;
+        this.recurringReferenceGuard = recurringReferenceGuard;
     }
 
     @Transactional(readOnly = true)
@@ -55,7 +64,12 @@ public class CategoryGroupService {
             CategoryGroupUpdateRequest request
     ) {
         validateUpdate(request.name(), request.sortOrder(), request.archived());
-        CategoryGroup group = requireGroup(currentHousehold.householdId(), groupId);
+        CategoryGroup group = categoryReferenceLock.lockGroup(
+                currentHousehold.householdId(), groupId);
+        if (request.archived() && !group.isArchived()) {
+            recurringReferenceGuard.rejectCategoryGroupArchive(
+                    group.getHouseholdId(), group.getId());
+        }
         group.update(request.name(), request.sortOrder(), request.archived());
         categoryGroupRepository.flush();
         return toResponse(group);

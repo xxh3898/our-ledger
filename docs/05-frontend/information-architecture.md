@@ -5,6 +5,7 @@ last_updated: 2026-08-28
 related:
   - 01-product/benchmark-weple-money.md
   - 05-frontend/calendar-screen.md
+  - 05-frontend/recurring-transactions.md
   - 05-frontend/quick-entry.md
   - 05-frontend/marriage-goal.md
   - 05-frontend/design-system.md
@@ -76,6 +77,10 @@ Budget은 같은 Couple header와 하단 탐색을 유지하고 월 이동, HOUS
 ## Statistics 화면
 
 Statistics는 같은 Couple header와 하단 탐색을 유지하고 기간, 실제 Member/공동 Scope, summary, comparison, monthly trend, Category/subject/Account breakdown을 하나의 vertical scroll로 제공한다. 주요 숫자는 Bottom Sheet에서 원장을 on-demand 조회하며 저축만 전용 savings activity read model을 사용한다. 세부 계약은 [통계 화면](statistics-screen.md)을 따른다.
+
+## 반복 거래 설정
+
+반복 거래는 새 하단 탭을 만들지 않고 설정 Sheet 안의 독립 section으로 제공한다. active, paused, ended 규칙을 함께 보여 주고 생성·수정·일시정지·재개를 nested Sheet에서 처리한다. 재개 시 일시정지 기간을 소급 생성하지 않는다는 점을 action 근처에 명시한다. Calendar 선택일 거래, Budget 사용 내역, Statistics drill-down과 저축 활동에서 자동 생성된 거래는 `반복` text badge로 provenance를 표시한다. 세부 계약은 [반복 거래 설정](recurring-transactions.md)을 따른다.
 
 ## 전역 필터
 

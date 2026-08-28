@@ -61,7 +61,11 @@ related:
 - `CATEGORY_TYPE_MISMATCH`
 - `BUDGET_DUPLICATE`
 - `BUDGET_VERSION_CONFLICT`
+- `RECURRING_AUTO_POST_REQUIRED`
+- `RECURRING_VERSION_CONFLICT`
+- `RECURRING_REFERENCE_IN_USE`
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`
+- `RECURRING_TEMPLATE_INVALID`
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`
 
 ### Ledger code
@@ -96,6 +100,17 @@ related:
 - `ARCHIVED_CATEGORY_NOT_ALLOWED`: archived Category를 신규 생성·수정 identity에 연결 (`422`)
 - `BUDGET_DUPLICATE`: service pre-check 또는 `uq_budgets_identity` DB race (`409`)
 - `BUDGET_VERSION_CONFLICT`: stale PATCH/DELETE optimistic version (`409`)
+
+### Recurring code
+
+- `INVALID_REQUEST`: 필수값, name/memo 길이, 금액·interval, 날짜 범위, 과거 start date validation 실패 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household에서 규칙, Member, Account, Category를 찾을 수 없음 (`404`)
+- `RECURRING_AUTO_POST_REQUIRED`: V1에서 지원하지 않는 `autoPost=false` 요청 (`422`)
+- `RECURRING_VERSION_CONFLICT`: stale PATCH version (`409`)
+- `RECURRING_REFERENCE_IN_USE`: active 규칙이 참조하는 Account/Category/Category Group의 archive 또는 posting 의미 변경 (`409`)
+- `RECURRING_OCCURRENCE_ALREADY_CREATED`: 같은 규칙과 발생일의 생성 거래 중복 (`409`); scheduler는 기존 거래를 확인해 정상 멱등 결과로 흡수한다.
+- `RECURRING_TEMPLATE_INVALID`: 저장된 규칙 template이 canonical Transaction posting 계약을 더 이상 충족하지 않음 (`409`); 해당 규칙 발생만 실패시키고 다른 규칙은 계속 처리한다.
+- Transaction template의 scope, type, archived reference, Account posting 오류는 Basic Ledger와 같은 `422` code를 사용한다.
 
 ## 보안
 
