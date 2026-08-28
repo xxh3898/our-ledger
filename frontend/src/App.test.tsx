@@ -188,6 +188,7 @@ type RouterOptions = {
   failTransactionCreate?: boolean
   failBudgetCreate?: boolean
   failBudgetUpdate?: boolean
+  budgetCreateGate?: Promise<void>
 }
 
 function transactionDate(occurredAt: string) {
@@ -490,6 +491,7 @@ function installLedgerRouter(options: RouterOptions = {}) {
       return jsonResponse(budgetMonthResponse(url))
     }
     if (url.pathname === '/api/v1/budgets' && method === 'POST') {
+      if (options.budgetCreateGate) await options.budgetCreateGate
       if (options.failBudgetCreate) {
         return jsonResponse({
           code: 'BUDGET_DUPLICATE',
@@ -1071,6 +1073,22 @@ describe('App', () => {
       .toHaveAttribute('aria-current', 'page')
   })
 
+  it('canonicalizes invalid direct and popstate Budget month URLs', async () => {
+    useBudgetUrl('2026-13')
+    installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '2026년 8월' })).toBeInTheDocument()
+    await waitFor(() => expect(window.location.search)
+      .toBe('?screen=budget&month=2026-08'))
+
+    window.history.pushState({}, '', '/?screen=budget&month=invalid')
+    fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(window.location.search)
+      .toBe('?screen=budget&month=2026-08'))
+    expect(screen.getByRole('heading', { name: '2026년 8월' })).toBeInTheDocument()
+  })
+
   it('creates a Budget, refreshes the same month, and offers only EXPENSE Categories', async () => {
     useBudgetUrl()
     const { fetchMock } = installLedgerRouter()
@@ -1092,6 +1110,34 @@ describe('App', () => {
     expect(window.location.search).toBe('?screen=budget&month=2026-08')
     expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/budgets' && init?.method === 'POST')).toBe(true)
+  })
+
+  it('prevents a second Budget submit while the first request is pending', async () => {
+    useBudgetUrl()
+    let releaseBudgetCreate!: () => void
+    const budgetCreateGate = new Promise<void>((resolve) => {
+      releaseBudgetCreate = resolve
+    })
+    const { fetchMock } = installLedgerRouter({ budgetCreateGate })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '+ 예산 추가' }))
+    const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    fireEvent.change(within(dialog).getByLabelText('예산 금액'), {
+      target: { value: '50000' },
+    })
+    const form = within(dialog).getByRole('button', { name: '예산 저장' })
+      .closest('form') as HTMLFormElement
+
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/budgets' && init?.method === 'POST')).toHaveLength(1)
+    expect(within(dialog).getByRole('button', { name: '저장 중…' })).toBeDisabled()
+
+    releaseBudgetCreate()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '예산 추가' }))
+      .not.toBeInTheDocument())
   })
 
   it('updates and deletes only the Budget row while preserving calculated spending', async () => {

@@ -562,14 +562,27 @@ function CalendarWorkspace({
   }, [activeScreen, navigation])
 
   useEffect(() => {
+    if (activeScreen !== 'budget') return
+    const normalizedSearch = serializeBudgetState(budgetMonth)
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
+    }
+  }, [activeScreen, budgetMonth])
+
+  useEffect(() => {
     const onPopState = () => {
       const nextScreen = isBudgetScreen(window.location.search) ? 'budget' : 'calendar'
       setActiveScreen(nextScreen)
       if (nextScreen === 'budget') {
-        setBudgetMonth(normalizeBudgetMonth(
+        const nextBudgetMonth = normalizeBudgetMonth(
           window.location.search,
           references.household.timezone,
-        ))
+        )
+        const normalizedSearch = serializeBudgetState(nextBudgetMonth)
+        if (window.location.search !== normalizedSearch) {
+          window.history.replaceState(window.history.state, '', normalizedSearch)
+        }
+        setBudgetMonth(nextBudgetMonth)
       } else {
         setNavigation(normalizeCalendarState(window.location.search, references.household))
       }
