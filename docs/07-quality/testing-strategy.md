@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.6
+version: 0.7
 last_updated: 2026-08-28
 related:
   - ADR-008
@@ -69,6 +69,21 @@ Calendar Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 - 날짜별 순소비 합과 월 순소비의 같은 정의
 - TRANSFER의 ALL 거래 수 포함과 PERSONAL/SHARED 제외
 
+Budget Slice는 추가로 다음을 PostgreSQL에서 검증한다.
+
+- Flyway V1→V6 clean 적용과 JPA `ddl-auto=validate`
+- `budget_month` 월 1일, amount 0 이상, scope-owner CHECK
+- `UNIQUE NULLS NOT DISTINCT`의 null owner/category 포함 identity 중복 차단
+- Member/Category composite FK와 service의 current Household 404
+- active EXPENSE Category만 신규 연결하고 archived Category 기존 row는 표시
+- HOUSEHOLD, 실제 Member별 PERSONAL, SHARED, Category 순소비 분리
+- INCOME/TRANSFER/논리삭제 제외, REFUND 차감, Household timezone 월 경계
+- 신용카드 구매 EXPENSE 포함과 카드대금 TRANSFER 제외
+- Budget 미설정과 0원, 초과 후 Transaction 저장 허용
+- duplicate pre-check와 DB unique race의 `BUDGET_DUPLICATE`
+- stale PATCH/DELETE의 `BUDGET_VERSION_CONFLICT`
+- Budget CRUD의 인증·CSRF·IDOR와 REST Docs canonical request/response
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -136,6 +151,19 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 설정 Sheet의 Account/Category 기능 보존
 - 미구현 하단 tab disabled
 
+같은 test는 Budget Slice에서 다음 계약을 추가로 검증한다.
+
+- Budget destination active state와 Calendar 복귀, Statistics/Assets disabled
+- HOUSEHOLD/실제 Member/SHARED 기본 카드와 Category Budget
+- 미설정, 0원, 100% 초과의 text·금액 구분
+- `screen=budget&month=YYYY-MM` 월 이동과 popstate
+- 생성 성공 refresh, duplicate 실패 입력 보존, 수정 stale 오류, 2단계 삭제
+- active EXPENSE Category picker와 archived Category 표시
+- month/scope/owner/category `type=EXPENSE` drill-down과 REFUND 표시
+- Budget Paw FAB의 Household timezone 오늘 날짜
+
+`budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
+
 ## Production 보안 검증
 
 배포 Gate에서는 자동 테스트 외에 다음을 확인한다.
@@ -152,7 +180,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete와 `ledger-calendar-month` snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete와 `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다.
 
 ## 회귀 우선순위
 

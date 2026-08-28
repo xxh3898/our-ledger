@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-28
 related:
   - 00-overview/roadmap.md
   - ADR-008
@@ -22,6 +22,14 @@ related:
 | 결혼자금 | 8 | O | O | Account 연결, 중복 입력 금지 |
 | 자산 흐름 | 9 | O | O | ASSET-LIABILITY |
 | CSV/PWA/배포 | 10 | O | O | export 보안, API cache 금지, Access/Tunnel 보호 |
+
+## Slice 5 Budget 구현
+
+- 월 Budget identity: Household timezone의 월, HOUSEHOLD/PERSONAL/SHARED, nullable EXPENSE Category
+- Backend read model: Budget row 유무와 무관한 기본 Scope 사용액, 실제 생성된 Category Budget
+- Frontend: Budget 하단 destination, 월 history, 생성·수정·삭제, 사용액 drill-down
+- 재무 기준: 카드 구매 EXPENSE 포함, 카드대금 TRANSFER·INCOME·논리삭제 제외, REFUND 차감
+- 제외: 자동 이월·자동 복사·거래 차단·추천·Statistics 구현
 
 ## 공통 요구
 

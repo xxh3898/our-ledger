@@ -14,7 +14,7 @@ public enum ApiErrorCode {
     CATEGORY_NAME_CONFLICT("같은 유형의 활성 Category 이름이 이미 존재합니다."),
     CATEGORY_GROUP_TYPE_MISMATCH("Category와 Group의 유형이 일치해야 합니다."),
     ARCHIVED_CATEGORY_GROUP_NOT_ALLOWED("보관된 Category Group을 새 Category에 사용할 수 없습니다."),
-    CATEGORY_TYPE_MISMATCH("Transaction과 Category의 유형이 일치해야 합니다."),
+    CATEGORY_TYPE_MISMATCH("Category 유형이 요청 의미와 일치해야 합니다."),
     ARCHIVED_ACCOUNT_NOT_ALLOWED("보관된 Account는 새 거래에 사용할 수 없습니다."),
     ARCHIVED_CATEGORY_NOT_ALLOWED("보관된 Category는 새 거래에 사용할 수 없습니다."),
     TRANSACTION_INVALID_SCOPE("Transaction scope와 owner 조합이 올바르지 않습니다."),
@@ -25,7 +25,9 @@ public enum ApiErrorCode {
     CREDIT_CARD_NATURE_REQUIRED("CREDIT_CARD Account의 nature는 LIABILITY여야 합니다."),
     ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE("거래가 연결된 Account의 posting 분류는 변경할 수 없습니다."),
     UNSUPPORTED_ADJUSTMENT_TYPE("현재 Slice에서 지원하지 않는 adjustment입니다."),
-    UNSUPPORTED_ACCOUNT_POSTING("이 Transaction 유형에서 지원하지 않는 Account posting입니다.");
+    UNSUPPORTED_ACCOUNT_POSTING("이 Transaction 유형에서 지원하지 않는 Account posting입니다."),
+    BUDGET_DUPLICATE("같은 월과 범위의 Budget이 이미 존재합니다."),
+    BUDGET_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 Budget을 다시 조회해야 합니다.");
 
     private final String message;
 

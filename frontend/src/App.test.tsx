@@ -184,7 +184,10 @@ type RouterOptions = {
   groups?: Array<Record<string, unknown>>
   categories?: Array<Record<string, unknown>>
   transactions?: Array<Record<string, unknown>>
+  budgets?: Array<Record<string, unknown>>
   failTransactionCreate?: boolean
+  failBudgetCreate?: boolean
+  failBudgetUpdate?: boolean
 }
 
 function transactionDate(occurredAt: string) {
@@ -205,9 +208,15 @@ function installLedgerRouter(options: RouterOptions = {}) {
     groups: [...(options.groups ?? [])],
     categories: [...(options.categories ?? [expenseCategory, incomeCategory])],
     transactions: [...(options.transactions ?? [])],
+    budgets: [...(options.budgets ?? [])],
   }
 
   function matchesFilter(transaction: Record<string, unknown>, url: URL) {
+    const type = url.searchParams.get('type')
+    if (type && transaction.type !== type) return false
+    const categoryId = url.searchParams.get('categoryId')
+    if (categoryId && Number((transaction.category as { id?: number } | null)?.id)
+      !== Number(categoryId)) return false
     const scope = url.searchParams.get('scope')
     if (scope === 'SHARED') return transaction.scope === 'SHARED'
     if (scope === 'PERSONAL') {
@@ -256,6 +265,113 @@ function installLedgerRouter(options: RouterOptions = {}) {
       days: [...days.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([date, day]) => ({ date, ...day })),
+    }
+  }
+
+  function budgetOwner(memberId: unknown) {
+    return memberReference(memberId)
+  }
+
+  function budgetCategory(categoryId: unknown) {
+    const category = state.categories.find((item) => Number(item.id) === Number(categoryId))
+    return category
+      ? {
+          id: category.id,
+          name: category.name,
+          type: category.type,
+          archived: category.archived ?? false,
+        }
+      : null
+  }
+
+  function budgetSpent(
+    month: string,
+    scope: string,
+    ownerMemberId: unknown,
+    categoryId: unknown,
+  ) {
+    return state.transactions
+      .filter((transaction) => transaction.type === 'EXPENSE')
+      .filter((transaction) => transactionDate(String(transaction.occurredAt)).startsWith(month))
+      .filter((transaction) => {
+        if (scope === 'HOUSEHOLD') return true
+        if (scope === 'SHARED') return transaction.scope === 'SHARED'
+        const owner = transaction.owner as { memberId?: number } | null
+        return transaction.scope === 'PERSONAL'
+          && owner?.memberId === Number(ownerMemberId)
+      })
+      .filter((transaction) => categoryId == null
+        || Number((transaction.category as { id?: number } | null)?.id) === Number(categoryId))
+      .reduce((sum, transaction) => sum + (
+        transaction.adjustmentType === 'REFUND'
+          ? -Number(transaction.amount)
+          : Number(transaction.amount)
+      ), 0)
+  }
+
+  function budgetMonthResponse(url: URL) {
+    const month = url.searchParams.get('month') ?? '2026-08'
+    const row = (scope: string, ownerMemberId: number | null, categoryId: number | null) =>
+      state.budgets.find((budget) => budget.month === month
+        && budget.scope === scope
+        && (budget.ownerMemberId ?? null) === ownerMemberId
+        && (budget.categoryId ?? null) === categoryId)
+    const scopeItem = (scope: string, ownerMemberId: number | null) => {
+      const budget = row(scope, ownerMemberId, null)
+      const spentAmount = budgetSpent(month, scope, ownerMemberId, null)
+      const amount = budget ? Number(budget.amount) : null
+      return {
+        scope,
+        owner: ownerMemberId === null ? null : budgetOwner(ownerMemberId),
+        budgetId: budget?.id ?? null,
+        version: budget?.version ?? null,
+        budgetAmount: amount,
+        spentAmount,
+        remainingAmount: amount === null ? null : amount - spentAmount,
+        exceeded: amount !== null && spentAmount > amount,
+      }
+    }
+    const scopes = [
+      scopeItem('HOUSEHOLD', null),
+      ...currentHousehold.members.map((member) => scopeItem('PERSONAL', member.memberId)),
+      scopeItem('SHARED', null),
+    ]
+    const categories = state.budgets
+      .filter((budget) => budget.month === month && budget.categoryId != null)
+      .map((budget) => {
+        const spentAmount = budgetSpent(
+          month,
+          String(budget.scope),
+          budget.ownerMemberId,
+          budget.categoryId,
+        )
+        const amount = Number(budget.amount)
+        return {
+          budgetId: budget.id,
+          version: budget.version,
+          scope: budget.scope,
+          owner: budget.ownerMemberId == null ? null : budgetOwner(budget.ownerMemberId),
+          category: budgetCategory(budget.categoryId),
+          budgetAmount: amount,
+          spentAmount,
+          remainingAmount: amount - spentAmount,
+          exceeded: spentAmount > amount,
+        }
+      })
+    return { month, timezone: 'Asia/Seoul', scopes, categories }
+  }
+
+  function budgetResource(budget: Record<string, unknown>) {
+    return {
+      id: budget.id,
+      month: budget.month,
+      scope: budget.scope,
+      owner: budget.ownerMemberId == null ? null : budgetOwner(budget.ownerMemberId),
+      category: budget.categoryId == null ? null : budgetCategory(budget.categoryId),
+      amount: budget.amount,
+      version: budget.version,
+      createdAt: '2026-08-01T00:00:00Z',
+      updatedAt: '2026-08-01T00:00:00Z',
     }
   }
 
@@ -370,6 +486,50 @@ function installLedgerRouter(options: RouterOptions = {}) {
     if (url.pathname === '/api/v1/calendar/month' && method === 'GET') {
       return jsonResponse(calendarResponse(url))
     }
+    if (url.pathname === '/api/v1/budgets' && method === 'GET') {
+      return jsonResponse(budgetMonthResponse(url))
+    }
+    if (url.pathname === '/api/v1/budgets' && method === 'POST') {
+      if (options.failBudgetCreate) {
+        return jsonResponse({
+          code: 'BUDGET_DUPLICATE',
+          message: '같은 Budget이 이미 있습니다.',
+        }, 409)
+      }
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      const created = {
+        id: 600 + state.budgets.length,
+        version: 0,
+        ...inputBody,
+      }
+      state.budgets.push(created)
+      return jsonResponse(budgetResource(created), 201)
+    }
+    if (/^\/api\/v1\/budgets\/\d+$/.test(url.pathname) && method === 'PATCH') {
+      if (options.failBudgetUpdate) {
+        return jsonResponse({
+          code: 'BUDGET_VERSION_CONFLICT',
+          message: 'stale Budget',
+        }, 409)
+      }
+      const budgetId = Number(url.pathname.split('/').at(-1))
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      const index = state.budgets.findIndex((item) => Number(item.id) === budgetId)
+      const current = state.budgets[index]
+      const updated = {
+        ...current,
+        ...inputBody,
+        id: budgetId,
+        version: Number(current?.version ?? 0) + 1,
+      }
+      state.budgets[index] = updated
+      return jsonResponse(budgetResource(updated))
+    }
+    if (/^\/api\/v1\/budgets\/\d+$/.test(url.pathname) && method === 'DELETE') {
+      const budgetId = Number(url.pathname.split('/').at(-1))
+      state.budgets = state.budgets.filter((item) => Number(item.id) !== budgetId)
+      return jsonResponse(null, 204)
+    }
     if (url.pathname === '/api/v1/transactions' && method === 'GET') {
       const from = url.searchParams.get('from')
       const to = url.searchParams.get('to')
@@ -419,6 +579,10 @@ function installLedgerRouter(options: RouterOptions = {}) {
 
 function useCalendarUrl(search = '?month=2026-08&view=all&date=2026-08-27') {
   window.history.replaceState({}, '', `/${search}`)
+}
+
+function useBudgetUrl(month = '2026-08') {
+  window.history.replaceState({}, '', `/?screen=budget&month=${month}`)
 }
 
 describe('App', () => {
@@ -768,7 +932,7 @@ describe('App', () => {
       input === '/api/v1/accounts' && init?.method === 'POST')).toBe(true)
   })
 
-  it('renders unimplemented bottom tabs as disabled instead of fake pages', async () => {
+  it('activates Budget while keeping remaining unimplemented tabs disabled', async () => {
     useCalendarUrl()
     installLedgerRouter()
     render(<App />)
@@ -776,8 +940,293 @@ describe('App', () => {
 
     expect(within(navigation).getByRole('button', { name: /Calendar/ }))
       .toHaveAttribute('aria-current', 'page')
-    expect(within(navigation).getByRole('button', { name: /예산/ })).toBeDisabled()
+    expect(within(navigation).getByRole('button', { name: /예산/ })).not.toBeDisabled()
     expect(within(navigation).getByRole('button', { name: /통계/ })).toBeDisabled()
     expect(within(navigation).getByRole('button', { name: /자산/ })).toBeDisabled()
+  })
+
+  it('renders actual Budget scope cards and distinguishes unset, zero, and overrun states', async () => {
+    useCalendarUrl('?month=2026-07&view=all&date=2026-07-27')
+    installLedgerRouter({
+      transactions: [
+        primaryTransaction({ id: 400, amount: 12_000 }),
+        primaryTransaction({ id: 401, amount: 7000, ownerMemberId: 101 }),
+        primaryTransaction({ id: 402, amount: 5000, scope: 'SHARED' }),
+      ],
+      budgets: [
+        {
+          id: 600,
+          month: '2026-08',
+          scope: 'HOUSEHOLD',
+          ownerMemberId: null,
+          categoryId: null,
+          amount: 20_000,
+          version: 0,
+        },
+        {
+          id: 601,
+          month: '2026-08',
+          scope: 'PERSONAL',
+          ownerMemberId: 100,
+          categoryId: null,
+          amount: 0,
+          version: 0,
+        },
+        {
+          id: 602,
+          month: '2026-08',
+          scope: 'SHARED',
+          ownerMemberId: null,
+          categoryId: 300,
+          amount: 0,
+          version: 0,
+        },
+      ],
+    })
+    render(<App />)
+    const navigation = await screen.findByRole('navigation', { name: '주요 메뉴' })
+
+    fireEvent.click(within(navigation).getByRole('button', { name: /예산/ }))
+
+    expect(await screen.findByRole('heading', { name: '예산' })).toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: /예산/ }))
+      .toHaveAttribute('aria-current', 'page')
+    expect(window.location.search).toBe('?screen=budget&month=2026-08')
+    const householdCard = screen.getByRole('heading', { name: '우리 전체' })
+      .closest('article') as HTMLElement
+    expect(householdCard).toHaveTextContent('예산20,000원')
+    expect(householdCard).toHaveTextContent('사용24,000원')
+    expect(householdCard).toHaveTextContent('예산을 4,000원 초과했어요.')
+    const ownerCard = screen.getByRole('heading', { name: 'Owner' })
+      .closest('article') as HTMLElement
+    expect(ownerCard).toHaveTextContent('예산0원')
+    expect(ownerCard).toHaveTextContent('0원 예산을 초과했어요.')
+    const partnerCard = screen.getByRole('heading', { name: 'Member' })
+      .closest('article') as HTMLElement
+    expect(partnerCard).toHaveTextContent('예산 미설정')
+    expect(partnerCard).toHaveTextContent('이번 달 사용 7,000원')
+    const categorySection = screen.getByRole('heading', { name: 'Category 예산' })
+      .closest('section') as HTMLElement
+    expect(categorySection).toHaveTextContent('식비')
+    expect(categorySection).toHaveTextContent('0원 예산을 초과했어요.')
+  })
+
+  it('keeps an archived Category Budget visible without offering it for a new Budget', async () => {
+    useBudgetUrl()
+    installLedgerRouter({
+      categories: [{ ...expenseCategory, archived: true }, incomeCategory],
+      budgets: [{
+        id: 600,
+        month: '2026-08',
+        scope: 'PERSONAL',
+        ownerMemberId: 100,
+        categoryId: 300,
+        amount: 20_000,
+        version: 0,
+      }],
+    })
+    render(<App />)
+
+    const categorySection = (await screen.findByRole('heading', { name: 'Category 예산' }))
+      .closest('section') as HTMLElement
+    expect(categorySection).toHaveTextContent('식비보관됨')
+
+    const categoryRow = within(categorySection).getByText('식비').closest('li') as HTMLElement
+    fireEvent.click(within(categoryRow).getByRole('button', { name: '수정' }))
+    const editDialog = await screen.findByRole('dialog', { name: '예산 수정' })
+    expect(within(editDialog).getByRole('option', { name: '식비 · 보관됨' })).toBeInTheDocument()
+    expect(within(editDialog).getByRole('button', { name: '예산 저장' })).toBeDisabled()
+    fireEvent.click(within(editDialog).getByRole('button', { name: '예산 입력 닫기' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 예산 추가' }))
+    const createDialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    expect(within(createDialog).queryByRole('option', { name: /식비/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps Budget month and destination in history and uses today for Budget Quick Entry', async () => {
+    useBudgetUrl('2026-07')
+    installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '2026년 7월' })).toBeInTheDocument()
+    const quickEntry = screen.getByRole('button', { name: '2026-08-28 빠른 입력 열기' })
+    fireEvent.click(quickEntry)
+    const quickEntryDialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    expect(within(quickEntryDialog).getByLabelText('날짜')).toHaveValue('2026-08-28')
+    fireEvent.click(within(quickEntryDialog).getByRole('button', { name: '빠른 입력 닫기' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '예산 다음 달' }))
+    expect(await screen.findByRole('heading', { name: '2026년 8월' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?screen=budget&month=2026-08')
+
+    window.history.pushState({}, '', '/?screen=budget&month=2026-06')
+    fireEvent(window, new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: '2026년 6월' })).toBeInTheDocument()
+
+    const navigation = screen.getByRole('navigation', { name: '주요 메뉴' })
+    fireEvent.click(within(navigation).getByRole('button', { name: /Calendar/ }))
+    expect(await screen.findByRole('navigation', { name: 'Calendar 보기 범위' }))
+      .toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: /Calendar/ }))
+      .toHaveAttribute('aria-current', 'page')
+  })
+
+  it('creates a Budget, refreshes the same month, and offers only EXPENSE Categories', async () => {
+    useBudgetUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+      .closest('article') as HTMLElement
+
+    fireEvent.click(within(householdCard).getByRole('button', { name: '설정' }))
+    const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    const categoryPicker = within(dialog).getByLabelText('Category')
+    expect(within(categoryPicker).getByRole('option', { name: '식비' })).toBeInTheDocument()
+    expect(within(categoryPicker).queryByRole('option', { name: '급여' })).not.toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('예산 금액'), {
+      target: { value: '50000' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '예산 저장' }))
+
+    await waitFor(() => expect(householdCard).toHaveTextContent('예산50,000원'))
+    expect(window.location.search).toBe('?screen=budget&month=2026-08')
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/budgets' && init?.method === 'POST')).toBe(true)
+  })
+
+  it('updates and deletes only the Budget row while preserving calculated spending', async () => {
+    useBudgetUrl()
+    const { fetchMock } = installLedgerRouter({
+      transactions: [primaryTransaction({ id: 400, amount: 12_000, scope: 'SHARED' })],
+      budgets: [{
+        id: 600,
+        month: '2026-08',
+        scope: 'HOUSEHOLD',
+        ownerMemberId: null,
+        categoryId: null,
+        amount: 15_000,
+        version: 0,
+      }],
+    })
+    render(<App />)
+    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+      .closest('article') as HTMLElement
+
+    fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
+    const editDialog = await screen.findByRole('dialog', { name: '예산 수정' })
+    fireEvent.change(within(editDialog).getByLabelText('예산 금액'), {
+      target: { value: '20000' },
+    })
+    fireEvent.click(within(editDialog).getByRole('button', { name: '예산 저장' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '예산 수정' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(householdCard).toHaveTextContent('20,000원'))
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/budgets/600' && init?.method === 'PATCH')).toBe(true)
+
+    fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
+    const deleteDialog = await screen.findByRole('dialog', { name: '예산 수정' })
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '예산 삭제' }))
+    expect(within(deleteDialog).getByRole('alert')).toHaveTextContent(
+      '2026년 8월 · 우리 전체 · 전체 Category 예산만 삭제할까요?',
+    )
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '삭제 확인' }))
+
+    await waitFor(() => expect(householdCard).toHaveTextContent('예산 미설정'))
+    expect(householdCard).toHaveTextContent('이번 달 사용 12,000원')
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      String(input).startsWith('/api/v1/budgets/600?version=1')
+        && init?.method === 'DELETE')).toBe(true)
+  })
+
+  it('keeps Budget form values and shows stable duplicate and stale errors', async () => {
+    useBudgetUrl()
+    installLedgerRouter({ failBudgetCreate: true })
+    const { unmount } = render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '+ 예산 추가' }))
+    const createDialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    fireEvent.change(within(createDialog).getByLabelText('범위'), {
+      target: { value: 'PERSONAL:100' },
+    })
+    fireEvent.change(within(createDialog).getByLabelText('Category'), {
+      target: { value: '300' },
+    })
+    const createAmount = within(createDialog).getByLabelText('예산 금액')
+    fireEvent.change(createAmount, { target: { value: '300000' } })
+    fireEvent.click(within(createDialog).getByRole('button', { name: '예산 저장' }))
+
+    expect(await within(createDialog).findByRole('alert'))
+      .toHaveTextContent('같은 월·범위·Category의 예산이 이미 있어요.')
+    expect(createAmount).toHaveValue(300000)
+    expect(within(createDialog).getByLabelText('범위')).toHaveValue('PERSONAL:100')
+    expect(within(createDialog).getByLabelText('Category')).toHaveValue('300')
+    unmount()
+
+    installLedgerRouter({
+      failBudgetUpdate: true,
+      budgets: [{
+        id: 600,
+        month: '2026-08',
+        scope: 'HOUSEHOLD',
+        ownerMemberId: null,
+        categoryId: null,
+        amount: 100_000,
+        version: 0,
+      }],
+    })
+    render(<App />)
+    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+      .closest('article') as HTMLElement
+    fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
+    const updateDialog = await screen.findByRole('dialog', { name: '예산 수정' })
+    const updateAmount = within(updateDialog).getByLabelText('예산 금액')
+    fireEvent.change(updateAmount, { target: { value: '120000' } })
+    fireEvent.click(within(updateDialog).getByRole('button', { name: '예산 저장' }))
+    expect(await within(updateDialog).findByRole('alert'))
+      .toHaveTextContent('다른 변경이 먼저 저장됐어요.')
+    expect(updateAmount).toHaveValue(120000)
+  })
+
+  it('reuses the EXPENSE transaction filter for Budget drill-down including refunds', async () => {
+    useBudgetUrl()
+    const normal = primaryTransaction({ id: 400, amount: 12_000 })
+    const refund = {
+      ...primaryTransaction({ id: 401, amount: 2000, memo: '부분 환불' }),
+      adjustmentType: 'REFUND',
+    }
+    const { fetchMock } = installLedgerRouter({
+      transactions: [normal, refund, transferTransaction(402)],
+      budgets: [{
+        id: 600,
+        month: '2026-08',
+        scope: 'PERSONAL',
+        ownerMemberId: 100,
+        categoryId: 300,
+        amount: 20_000,
+        version: 0,
+      }],
+    })
+    render(<App />)
+    const categorySection = (await screen.findByRole('heading', { name: 'Category 예산' }))
+      .closest('section') as HTMLElement
+    const categoryRow = within(categorySection).getByText('식비').closest('li') as HTMLElement
+
+    fireEvent.click(within(categoryRow).getByRole('button', { name: '사용 내역' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Owner · 식비' })
+    expect(within(dialog).getByText('식비 환불')).toBeInTheDocument()
+    expect(within(dialog).getByText('+2,000원')).toBeInTheDocument()
+    expect(within(dialog).queryByText('계좌 이체')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('from=2026-08-01')
+        && url.includes('to=2026-08-31')
+        && url.includes('type=EXPENSE')
+        && url.includes('scope=PERSONAL')
+        && url.includes('ownerMemberId=100')
+        && url.includes('categoryId=300')
+    })).toBe(true)
   })
 })

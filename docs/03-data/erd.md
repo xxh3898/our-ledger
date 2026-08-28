@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-28
 related:
   - ADR-001
@@ -108,6 +108,23 @@ transaction_account_entries
 `V5__credit_card_liability_constraint.sql`은 `accounts.type='CREDIT_CARD'`이면 nature가 반드시 `LIABILITY`이도록 additive CHECK를 추가한다. 과거에 잘못된 row가 있으면 자동 수정하지 않고 migration을 실패시킨다.
 
 Account owner, Transaction owner/payer/audit, Category Group/Category type, Transaction/Category type, Entry/Transaction/Account는 모두 `household_id`를 포함한 composite FK로 연결한다. V3는 이 target을 위해 `household_members (id, household_id)` unique를 additive로 추가한다.
+
+## Slice 5 물리 schema
+
+`V6__budgets.sql`은 다음 table을 추가한다.
+
+```text
+budgets
+  id, household_id, budget_month, scope, owner_member_id, category_id,
+  amount, version, created_at, updated_at
+```
+
+- `budget_month`는 월 1일 DATE다.
+- `amount`는 0 이상이며 미설정은 row 부재로 표현한다.
+- PERSONAL만 owner가 필수이고 HOUSEHOLD/SHARED owner는 null이다.
+- Member와 Category는 `(id, household_id)` composite FK로 tenant 경계를 강제한다.
+- identity는 `(household_id, budget_month, scope, owner_member_id, category_id) UNIQUE NULLS NOT DISTINCT`다.
+- Category가 나중에 archive돼도 Budget FK와 row를 유지한다.
 
 ## 구현 순서
 

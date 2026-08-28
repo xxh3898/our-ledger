@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-28
 related:
   - 05-frontend/calendar-screen.md
@@ -59,6 +59,19 @@ Frontend의 `전체 / 각 실제 Household Member 이름 / 공동`은 API에서 
 
 TRANSFER는 ALL의 날짜별 거래 수와 선택일 목록에는 포함하지만 소비에는 포함하지 않는다. Member/SHARED 조회에는 포함하지 않는다.
 
+## Budget 사용 내역
+
+Budget 화면의 사용액 drill-down은 새 원장 endpoint를 만들지 않고 거래 목록을 다음처럼 조합한다.
+
+```text
+from=<월 1일>&to=<월 말일>&type=EXPENSE
+scope=PERSONAL&ownerMemberId=<Member ID>  # PERSONAL만
+scope=SHARED                              # SHARED만
+categoryId=<Category ID>                  # Category Budget만
+```
+
+HOUSEHOLD는 scope/owner를 보내지 않는다. `type=EXPENSE` 안에서 NORMAL 지출과 REFUND를 구분해 표시하며 INCOME/TRANSFER는 목록에 포함하지 않는다.
+
 ## URL 상태
 
-Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. frontend는 잘못된 월·날짜·foreign member 조합을 Household timezone의 현재 상태와 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.
+Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. Budget은 `screen=budget&month=YYYY-MM`을 사용한다. frontend는 잘못된 월·날짜·foreign member 조합을 Household timezone의 현재 상태와 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.
