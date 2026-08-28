@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.4
-last_updated: 2026-08-28
+version: 0.5
+last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
   - ADR-008
@@ -47,6 +47,15 @@ related:
 - lifecycle: optimistic rule edit, pause/resume no-backfill, active Account/Category/Group reference 보호
 - Frontend: Settings의 active/paused/ended 목록, 생성·수정·중지·재개 Sheet, Calendar/통계 `반복` text provenance
 - 제한: recurring REFUND, `auto_post=false`, pending 승인, 알림, 전용 Bottom Navigation tab 없음
+
+## Slice 8 Marriage Goal 구현
+
+- Backend: Household MARRIAGE Goal 생성/수정, eligible 실제 Account 연결/해제, optimistic version
+- 원장: current Account balance 합, current link와 `linked_at` 기준 Goal 경계 TRANSFER 순저축
+- 동시성: Household partial unique, Account assignment unique, posting과 같은 Account row lock의 연결 snapshot
+- 지표: raw 달성률, 남은 금액, 현재 월, 6개월 추세, 완료 3개월 평균, 명시적 projection 상태, 최근 근거
+- Frontend: Home actual/empty card, `?screen=goal` 상세, create/edit/link Sheet, unlink 확인, accessible SVG/table
+- 제한: CUSTOM UI, 수동 기여금, aggregate cache, Goal 삭제, 새 Bottom tab, Assets/production asset 없음
 
 ## 공통 요구
 

@@ -236,6 +236,53 @@ export type SavingsActivity = {
   recurrenceDate: string | null
 }
 
+export type GoalProjectionStatus =
+  | 'ACHIEVED'
+  | 'INSUFFICIENT_HISTORY'
+  | 'NON_POSITIVE_AVERAGE'
+  | 'PROJECTED'
+
+export type MarriageGoalView = {
+  goal: {
+    id: number
+    type: 'MARRIAGE'
+    name: string
+    targetAmount: number
+    version: number
+    currentAmount: number
+    achievementRate: number
+    remainingAmount: number
+    thisMonthSavingsAmount: number
+    recentAverageMonthlySavingsAmount: number | null
+    projectionStatus: GoalProjectionStatus
+    expectedAchievementMonth: string | null
+    monthlyTrend: Array<{
+      month: string
+      savingsAmount: number
+    }>
+    linkedAccounts: Array<{
+      id: number
+      name: string
+      ownership: Account['ownership']
+      owner: { memberId: number; displayName: string } | null
+      currentBalance: number
+      startingBalance: number
+      linkedAt: string
+      archived: boolean
+    }>
+    recentSavingsActivities: SavingsActivity[]
+    createdAt: string
+    updatedAt: string
+  } | null
+  eligibleAccounts: Array<{
+    id: number
+    name: string
+    ownership: Account['ownership']
+    owner: { memberId: number; displayName: string } | null
+    currentBalance: number
+  }>
+}
+
 export type RecurrenceFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
 
 export type RecurringTransaction = {
@@ -509,6 +556,39 @@ export function loadSavingsActivities(
     `/api/v1/statistics/savings-activities?${parameters}`,
     { signal },
   )
+}
+
+export function loadMarriageGoal(signal?: AbortSignal) {
+  return request<MarriageGoalView>('/api/v1/goals/marriage', { signal })
+}
+
+export function createMarriageGoal(input: { name: string; targetAmount: number }) {
+  return request<MarriageGoalView>('/api/v1/goals/marriage', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateMarriageGoal(
+  version: number,
+  input: { name: string; targetAmount: number },
+) {
+  return request<MarriageGoalView>('/api/v1/goals/marriage', {
+    method: 'PATCH',
+    body: JSON.stringify({ version, ...input }),
+  })
+}
+
+export function linkMarriageGoalAccount(accountId: number) {
+  return request<MarriageGoalView>(`/api/v1/goals/marriage/accounts/${accountId}`, {
+    method: 'POST',
+  })
+}
+
+export function unlinkMarriageGoalAccount(accountId: number) {
+  return request<void>(`/api/v1/goals/marriage/accounts/${accountId}`, {
+    method: 'DELETE',
+  })
 }
 
 function lastDayOfMonth(month: string) {

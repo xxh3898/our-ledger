@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.4
-last_updated: 2026-08-28
+version: 0.5
+last_updated: 2026-08-29
 related:
   - 01-product/user-flows.md
   - 04-api/pagination-filtering.md
@@ -14,7 +14,7 @@ related:
 
 ## 상태와 원칙
 
-이 문서는 Slice 4에서 구현한 Couple-first Home/Calendar의 활성 디자인 계약이다. 월 read model, URL 상태, Scope, 선택일 목록, Quick Entry 진입, 설정 진입과 비활성 하단 tab까지 구현됐다. production 고양이 illustration과 Goal 실제 값은 각각 별도 asset 작업과 Slice 8 범위다.
+이 문서는 Couple-first Home/Calendar의 활성 디자인 계약이다. Slice 4의 월 read model·URL·Scope·선택일·Quick Entry에 Slice 8의 실제 Marriage Goal card가 연결됐다. production 고양이 illustration은 별도 asset 범위다.
 
 - 한 viewport에 모든 내용을 압축하지 않고 하나의 자연스러운 세로 page scroll을 사용한다.
 - 본문 안에 별도의 vertical scroll container를 만들지 않는다.
@@ -69,7 +69,7 @@ related:
 - Goal 값은 연결된 실제 Account와 Transaction에서 파생하며 Home에서 별도 기여금 입력을 제공하지 않는다.
 - Goal이 없거나 연결 Account가 없을 때는 임의 금액을 만들지 않고 설정 가능한 empty state를 제공한다.
 
-Slice 4에서는 Goal backend와 계산을 선행하지 않는다. 따라서 Home에는 실제 금액·달성률·action을 만들지 않는 shell/empty 안내만 두고, 위 실제 값과 상세 이동은 Slice 8에서 활성화한다.
+Slice 8은 loading에서 이전 수치를 지우고 `GET /api/v1/goals/marriage`의 실제 값을 사용한다. Goal 없음은 `결혼자금 목표 만들기`, Goal은 있으나 link 없음은 0원과 `저축 Account를 연결해 주세요`로 구분한다. card 선택은 새 하단 tab 없이 `?screen=goal` 상세로 이동한다.
 
 ## Scope filter
 

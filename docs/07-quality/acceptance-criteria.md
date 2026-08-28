@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-28
+version: 0.4
+last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
   - ADR-008
@@ -26,6 +26,11 @@ related:
 - 설정에서 반복 규칙을 생성·수정·일시정지·재개할 수 있고 재개 시 일시정지 기간을 소급 생성하지 않는다.
 - 자동 생성 거래가 달력·예산·통계·저축 활동에 일반 원장과 같은 값으로 반영되고 `반복` provenance가 표시된다.
 - 결혼자금 현재 금액이 연결 Account와 일치한다.
+- 결혼자금 Goal 생성·수정과 eligible Account 연결·해제가 current Household 경계에서 동작한다.
+- 결혼자금 이번 달/6개월/완료 3개월 평균과 예상 상태가 Goal 경계 TRANSFER와 linked_at 기준에 일치한다.
+- Goal 내부 이동, 연결 전 거래, INCOME/EXPENSE/REFUND를 신규 Goal 저축으로 중복 집계하지 않는다.
+- concurrent Goal 생성·Account 연결·snapshot posting·target PATCH가 PostgreSQL 제약과 lock/version 계약을 지킨다.
+- Home과 Goal 상세가 실제 read model 또는 정상 empty/error 상태를 표시하고 수동 Goal 기여금 action을 제공하지 않는다.
 - CSV로 지정 기간 데이터를 내보낼 수 있다.
 - PWA를 모바일 홈 화면에 설치할 수 있다.
 

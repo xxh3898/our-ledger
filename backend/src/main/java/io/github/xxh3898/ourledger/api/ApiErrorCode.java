@@ -36,7 +36,11 @@ public enum ApiErrorCode {
     RECURRING_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 반복 거래를 다시 조회해야 합니다."),
     RECURRING_REFERENCE_IN_USE("활성 반복 거래가 참조하는 기준정보는 보관하거나 호환되지 않게 변경할 수 없습니다."),
     RECURRING_OCCURRENCE_ALREADY_CREATED("같은 반복 일정의 거래가 이미 생성되었습니다."),
-    RECURRING_TEMPLATE_INVALID("반복 거래의 Account 구성이 올바르지 않습니다.");
+    RECURRING_TEMPLATE_INVALID("반복 거래의 Account 구성이 올바르지 않습니다."),
+    GOAL_ALREADY_EXISTS("현재 Household에 결혼자금 Goal이 이미 있습니다."),
+    GOAL_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 Goal을 다시 조회해야 합니다."),
+    GOAL_ACCOUNT_ALREADY_ASSIGNED("이 Account는 이미 Goal에 연결되어 있습니다."),
+    GOAL_ACCOUNT_NOT_ELIGIBLE("활성 저축 ASSET Account만 Goal에 연결할 수 있습니다.");
 
     private final String message;
 

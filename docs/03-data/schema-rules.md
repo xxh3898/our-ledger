@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.6
-last_updated: 2026-08-28
+version: 0.7
+last_updated: 2026-08-29
 related:
   - 03-data/erd.md
   - ADR-008
@@ -77,6 +77,7 @@ FOREIGN KEY (category_id, household_id)
 - Budget: PostgreSQL `UNIQUE NULLS NOT DISTINCT`로 월·scope·owner·category 중복 방지
 - 반복 생성: `(generated_from_recurring_id, recurrence_date)` full unique. null pair를 허용하고 논리삭제 generated row도 중복 방지에 포함
 - Goal Account: `(goal_id, account_id)` PK 및 `account_id` unique
+- Marriage Goal: `household_id WHERE type='MARRIAGE'` partial unique
 
 ## Transaction CHECK 요약
 
@@ -118,6 +119,16 @@ Transaction별 exact Entry set은 단일 row CHECK로 표현할 수 없다. Serv
 - generated Transaction: lineage pair CHECK, same-Household Recurring composite FK, NORMAL-only CHECK
 - occurrence unique는 partial index가 아니라 full UNIQUE이므로 logical delete 후에도 동일 occurrence를 다시 만들 수 없다.
 - exact Account role set과 posting compatibility, schedule anchor, active reference lifecycle은 service와 PostgreSQL integration test로 보완한다.
+
+## Slice 8 Goal 제약
+
+- Goal type은 `MARRIAGE`, `CUSTOM`, 이름은 nonblank 100자 이하, `target_amount > 0`, `version >= 0`이다.
+- Household별 `MARRIAGE` 한 개만 partial unique index로 제한하고 `CUSTOM`은 여러 row를 허용한다.
+- Goal create/update actor와 GoalAccount `linked_by`는 같은 Household Member composite FK다.
+- GoalAccount는 Goal과 Account를 각각 `(id, household_id)` composite FK로 연결한다.
+- `(goal_id, account_id)` PK와 `account_id` unique를 함께 사용한다.
+- 신규 연결 eligibility와 `starting_balance` 계산은 Account row write lock 안에서 service가 검사한다.
+- current amount, 달성률, 월별 순저축과 예상 월은 원장에서 파생하며 schema에 저장하지 않는다.
 
 ## Migration
 

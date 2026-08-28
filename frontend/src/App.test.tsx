@@ -172,6 +172,49 @@ const savingsActivities = [{
   recurrenceDate: null,
 }]
 
+function marriageGoal(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 700,
+    type: 'MARRIAGE',
+    name: '우리 집까지',
+    targetAmount: 100_000_000,
+    version: 0,
+    currentAmount: 32_400_000,
+    achievementRate: 32.4,
+    remainingAmount: 67_600_000,
+    thisMonthSavingsAmount: 1_800_000,
+    recentAverageMonthlySavingsAmount: 1_500_000,
+    projectionStatus: 'PROJECTED',
+    expectedAchievementMonth: '2030-06',
+    monthlyTrend: [
+      { month: '2026-03', savingsAmount: 0 },
+      { month: '2026-04', savingsAmount: 900_000 },
+      { month: '2026-05', savingsAmount: 1_100_000 },
+      { month: '2026-06', savingsAmount: 1_400_000 },
+      { month: '2026-07', savingsAmount: 2_000_000 },
+      { month: '2026-08', savingsAmount: 1_800_000 },
+    ],
+    linkedAccounts: [{
+      id: 201,
+      name: '비상금 통장',
+      ownership: 'PERSONAL',
+      owner: { memberId: 100, displayName: 'Owner' },
+      currentBalance: 32_400_000,
+      startingBalance: 30_000_000,
+      linkedAt: '2026-03-01T00:00:00Z',
+      archived: false,
+    }],
+    recentSavingsActivities: [{
+      ...savingsActivities[0],
+      generatedFromRecurringId: 800,
+      recurrenceDate: '2026-08-10',
+    }],
+    createdAt: '2026-03-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function primaryTransaction({
   id,
   amount,
@@ -350,6 +393,13 @@ type RouterOptions = {
   statisticsGate?: Promise<void>
   failRecurringCreate?: boolean
   recurringCreateGate?: Promise<void>
+  goal?: Record<string, unknown> | null
+  goalReadGate?: Promise<void>
+  goalMutationGate?: Promise<void>
+  failGoalCreate?: boolean
+  failGoalUpdate?: boolean
+  failGoalLink?: boolean
+  failGoalUnlink?: boolean
 }
 
 function transactionDate(occurredAt: string) {
@@ -372,6 +422,27 @@ function installLedgerRouter(options: RouterOptions = {}) {
     transactions: [...(options.transactions ?? [])],
     budgets: [...(options.budgets ?? [])],
     recurringTransactions: [...(options.recurringTransactions ?? [])],
+    goal: options.goal ?? null,
+  }
+
+  function goalViewResponse() {
+    const linkedIds = new Set(
+      ((state.goal?.linkedAccounts ?? []) as Array<Record<string, unknown>>)
+        .map((account) => Number(account.id)),
+    )
+    const eligibleAccounts = state.accounts
+      .filter((account) => account.nature === 'ASSET')
+      .filter((account) => account.savingsEnabled === true)
+      .filter((account) => account.archived !== true)
+      .filter((account) => !linkedIds.has(Number(account.id)))
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        ownership: account.ownership,
+        owner: account.owner,
+        currentBalance: account.currentBalance,
+      }))
+    return { goal: state.goal, eligibleAccounts }
   }
 
   function matchesFilter(transaction: Record<string, unknown>, url: URL) {
@@ -650,6 +721,86 @@ function installLedgerRouter(options: RouterOptions = {}) {
     if (url.pathname === '/api/v1/me') return jsonResponse(currentUser)
     if (url.pathname === '/api/v1/households/current') return jsonResponse(currentHousehold)
 
+    if (url.pathname === '/api/v1/goals/marriage' && method === 'GET') {
+      if (options.goalReadGate) await options.goalReadGate
+      return jsonResponse(goalViewResponse())
+    }
+    if (url.pathname === '/api/v1/goals/marriage' && method === 'POST') {
+      if (options.goalMutationGate) await options.goalMutationGate
+      if (options.failGoalCreate) {
+        return jsonResponse({ code: 'GOAL_ALREADY_EXISTS', message: '중복 Goal' }, 409)
+      }
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      state.goal = marriageGoal({
+        name: inputBody.name,
+        targetAmount: inputBody.targetAmount,
+        currentAmount: 0,
+        achievementRate: 0,
+        remainingAmount: inputBody.targetAmount,
+        thisMonthSavingsAmount: 0,
+        recentAverageMonthlySavingsAmount: null,
+        projectionStatus: 'INSUFFICIENT_HISTORY',
+        expectedAchievementMonth: null,
+        linkedAccounts: [],
+        recentSavingsActivities: [],
+      })
+      return jsonResponse(goalViewResponse(), 201)
+    }
+    if (url.pathname === '/api/v1/goals/marriage' && method === 'PATCH') {
+      if (options.goalMutationGate) await options.goalMutationGate
+      if (options.failGoalUpdate) {
+        return jsonResponse({ code: 'GOAL_VERSION_CONFLICT', message: 'stale Goal' }, 409)
+      }
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      state.goal = {
+        ...(state.goal ?? {}),
+        name: inputBody.name,
+        targetAmount: inputBody.targetAmount,
+        version: Number(state.goal?.version ?? 0) + 1,
+      }
+      return jsonResponse(goalViewResponse())
+    }
+    const goalAccountMatch = url.pathname.match(/^\/api\/v1\/goals\/marriage\/accounts\/(\d+)$/)
+    if (goalAccountMatch && method === 'POST') {
+      if (options.goalMutationGate) await options.goalMutationGate
+      if (options.failGoalLink) {
+        return jsonResponse({
+          code: 'GOAL_ACCOUNT_ALREADY_ASSIGNED',
+          message: '이미 연결됨',
+        }, 409)
+      }
+      const accountId = Number(goalAccountMatch[1])
+      const account = state.accounts.find((item) => Number(item.id) === accountId)
+      const linkedAccounts = [
+        ...((state.goal?.linkedAccounts ?? []) as Array<Record<string, unknown>>),
+        {
+          id: account?.id,
+          name: account?.name,
+          ownership: account?.ownership,
+          owner: account?.owner,
+          currentBalance: account?.currentBalance,
+          startingBalance: account?.currentBalance,
+          linkedAt: '2026-08-28T03:00:00Z',
+          archived: false,
+        },
+      ]
+      state.goal = { ...(state.goal ?? {}), linkedAccounts }
+      return jsonResponse(goalViewResponse(), 201)
+    }
+    if (goalAccountMatch && method === 'DELETE') {
+      if (options.goalMutationGate) await options.goalMutationGate
+      if (options.failGoalUnlink) {
+        return jsonResponse({ code: 'RESOURCE_STATE_CONFLICT', message: '해제 실패' }, 409)
+      }
+      const accountId = Number(goalAccountMatch[1])
+      state.goal = {
+        ...(state.goal ?? {}),
+        linkedAccounts: ((state.goal?.linkedAccounts ?? []) as Array<Record<string, unknown>>)
+          .filter((account) => Number(account.id) !== accountId),
+      }
+      return jsonResponse(null, 204)
+    }
+
     if (url.pathname === '/api/v1/accounts' && method === 'GET') return jsonResponse(state.accounts)
     if (url.pathname === '/api/v1/accounts' && method === 'POST') {
       const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
@@ -889,6 +1040,10 @@ function useStatisticsUrl(search = 'preset=this-month&view=all') {
   window.history.replaceState({}, '', `/?screen=statistics&${search}`)
 }
 
+function useGoalUrl() {
+  window.history.replaceState({}, '', '/?screen=goal')
+}
+
 describe('App', () => {
   it('renders authentication loading and stable error states', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
@@ -935,12 +1090,183 @@ describe('App', () => {
     const hero = screen.getByRole('heading', { name: '이번 달 우리가 쓴 돈' }).closest('section')
     await waitFor(() => expect(hero).toHaveTextContent('12,000원'))
     expect(hero).toHaveTextContent('지난달보다 7,000원 더 썼어요.')
-    expect(screen.getByRole('heading', { name: '둘의 다음 목표를 담을 자리' }))
+    expect(await screen.findByRole('heading', { name: '둘의 결혼자금 목표를 만들어 보세요' }))
       .toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Calendar 보기 범위' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '2026년 8월' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '8월 27일의 기록' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '주요 메뉴' })).toBeInTheDocument()
+  })
+
+  it('renders actual Goal values and opens the accessible detail without a new bottom tab', async () => {
+    useCalendarUrl()
+    installLedgerRouter({ goal: marriageGoal() })
+    render(<App />)
+
+    const goalButton = await screen.findByRole('button', { name: /우리 집까지/ })
+    expect(goalButton).toHaveTextContent('32,400,000원')
+    expect(goalButton).toHaveTextContent('/ 100,000,000원')
+    expect(goalButton).toHaveTextContent('32.4%')
+    expect(goalButton).toHaveTextContent('이번 달 +1,800,000원')
+    fireEvent.click(goalButton)
+
+    expect(await screen.findByRole('heading', { name: '결혼자금' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?screen=goal')
+    expect(screen.getByText('67,600,000원', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('2030년 6월 예상')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: '최근 6개월 월별 순저축' }))
+      .toHaveTextContent('2026년 3월')
+    expect(screen.getByText('비상금 통장')).toBeInTheDocument()
+    expect(screen.getByText('주거래 통장 → 비상금 통장')).toBeInTheDocument()
+    expect(screen.getByText('반복')).toBeInTheDocument()
+    expect(screen.queryByText(/목표에 돈 추가|기여금 추가|Goal 입금/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /자산준비 중/ })).toBeDisabled()
+  })
+
+  it('creates a Goal with a blank amount, prevents duplicate pending submit, and restores focus', async () => {
+    useCalendarUrl()
+    let releaseMutation!: () => void
+    const mutationGate = new Promise<void>((resolve) => { releaseMutation = resolve })
+    const { fetchMock } = installLedgerRouter({ goal: null, goalMutationGate: mutationGate })
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: '결혼자금 목표 만들기' })
+    fireEvent.click(opener)
+    const name = screen.getByRole('textbox', { name: '목표 이름' })
+    const amount = screen.getByRole('spinbutton', { name: '목표 금액' })
+    expect(name).toHaveFocus()
+    expect(amount).toHaveValue(null)
+    fireEvent.change(name, { target: { value: '우리 보금자리' } })
+    fireEvent.change(amount, { target: { value: '90000000' } })
+    const form = screen.getByRole('button', { name: 'Goal 저장' }).closest('form')!
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+
+    const createCalls = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input).includes('/api/v1/goals/marriage')
+      && !String(input).includes('/accounts/')
+      && init?.method === 'POST')
+    expect(createCalls).toHaveLength(1)
+    expect(JSON.parse(String(createCalls[0][1]?.body))).toEqual({
+      name: '우리 보금자리',
+      targetAmount: 90_000_000,
+    })
+
+    releaseMutation()
+    expect(await screen.findByRole('button', { name: /우리 보금자리/ })).toBeInTheDocument()
+
+    const editOpener = screen.getByRole('button', { name: /우리 보금자리/ })
+    fireEvent.click(editOpener)
+    await screen.findByRole('heading', { name: '결혼자금' })
+    const editButton = screen.getByRole('button', { name: '수정' })
+    fireEvent.click(editButton)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(editButton).toHaveFocus())
+  })
+
+  it('keeps Goal create and stale edit inputs after stable server errors', async () => {
+    useCalendarUrl()
+    installLedgerRouter({ goal: null, failGoalCreate: true })
+    const { unmount } = render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '결혼자금 목표 만들기' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '목표 이름' }), {
+      target: { value: '실패해도 유지' },
+    })
+    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+      target: { value: '50000000' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('결혼자금 목표가 이미 있어요')
+    expect(screen.getByRole('textbox', { name: '목표 이름' })).toHaveValue('실패해도 유지')
+    expect(screen.getByRole('spinbutton', { name: '목표 금액' })).toHaveValue(50_000_000)
+    unmount()
+
+    useGoalUrl()
+    const { fetchMock } = installLedgerRouter({ goal: marriageGoal(), failGoalUpdate: true })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '수정' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '목표 이름' }), {
+      target: { value: '충돌 입력 유지' },
+    })
+    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+      target: { value: '110000000' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('다른 변경이 먼저 저장됐어요')
+    expect(screen.getByRole('textbox', { name: '목표 이름' })).toHaveValue('충돌 입력 유지')
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      String(input).endsWith('/api/v1/goals/marriage') && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      version: 0,
+      name: '충돌 입력 유지',
+      targetAmount: 110_000_000,
+    })
+  })
+
+  it('links and unlinks an eligible Account while preserving link selection on conflict', async () => {
+    useGoalUrl()
+    const emptyLinkedGoal = marriageGoal({
+      currentAmount: 0,
+      achievementRate: 0,
+      remainingAmount: 100_000_000,
+      linkedAccounts: [],
+      recentSavingsActivities: [],
+    })
+    const { fetchMock } = installLedgerRouter({ goal: emptyLinkedGoal })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '계좌 연결' }))
+    const choice = screen.getByRole('radio', { name: /비상금 통장/ })
+    expect(choice).toHaveFocus()
+    fireEvent.click(choice)
+    fireEvent.click(screen.getByRole('button', { name: '선택한 Account 연결' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText('비상금 통장')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      String(input).endsWith('/api/v1/goals/marriage/accounts/201')
+      && init?.method === 'POST')).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '연결 해제' }))
+    fireEvent.click(screen.getByRole('button', { name: '해제 확인' }))
+    await waitFor(() => expect(screen.getByText('저축 Account를 연결해 주세요.'))
+      .toBeInTheDocument())
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      String(input).endsWith('/api/v1/goals/marriage/accounts/201')
+      && init?.method === 'DELETE')).toBe(true)
+
+    cleanup()
+    useGoalUrl()
+    installLedgerRouter({ goal: emptyLinkedGoal, failGoalLink: true })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '계좌 연결' }))
+    const failedChoice = screen.getByRole('radio', { name: /비상금 통장/ })
+    fireEvent.click(failedChoice)
+    fireEvent.click(screen.getByRole('button', { name: '선택한 Account 연결' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('다른 Goal에 먼저 연결됐어요')
+    expect(failedChoice).toBeChecked()
+  })
+
+  it('clears stale Goal numbers while loading and restores Goal direct history state', async () => {
+    useGoalUrl()
+    let releaseRead!: () => void
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    installLedgerRouter({ goal: marriageGoal(), goalReadGate: readGate })
+    render(<App />)
+
+    expect(await screen.findByText('Goal 지표를 다시 계산하고 있어요.'))
+      .toHaveAttribute('role', 'status')
+    expect(screen.queryByText(/32,400,000원/)).not.toBeInTheDocument()
+    releaseRead()
+    expect(await screen.findByText('2030년 6월 예상')).toBeInTheDocument()
+
+    window.history.pushState({}, '', '/?month=2026-08&view=all&date=2026-08-27')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: '이번 달 우리가 쓴 돈' }))
+      .toBeInTheDocument()
+    window.history.pushState({}, '', '/?screen=goal')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: '결혼자금' })).toBeInTheDocument()
   })
 
   it('shows the amount difference when previous-month spending is zero', async () => {

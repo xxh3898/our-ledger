@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { BudgetScreen } from './BudgetScreen.tsx'
+import { GoalAccountLinkSheet } from './GoalAccountLinkSheet.tsx'
+import { MarriageGoalCard, type GoalViewState } from './MarriageGoalCard.tsx'
+import { MarriageGoalScreen } from './MarriageGoalScreen.tsx'
+import { MarriageGoalSheet } from './MarriageGoalSheet.tsx'
 import { QuickEntrySheet } from './QuickEntrySheet.tsx'
 import { RefundSheet } from './RefundSheet.tsx'
 import { SettingsSheet } from './SettingsSheet.tsx'
@@ -26,6 +30,7 @@ import {
   type CurrentHousehold,
   type CurrentUser,
   type LedgerTransaction,
+  type MarriageGoalView,
   type RefundSummary,
   LedgerApiError,
   deleteTransaction,
@@ -34,6 +39,8 @@ import {
   loadDayTransactions,
   loadReferenceData,
   loadRefundSummary,
+  loadMarriageGoal,
+  unlinkMarriageGoalAccount,
 } from './ledgerApi.ts'
 import { entryByRole } from './transactionUtils.ts'
 import {
@@ -43,9 +50,10 @@ import {
   type StatisticsNavigationState,
 } from './statisticsState.ts'
 
-type WorkspaceScreen = 'calendar' | 'budget' | 'statistics'
+type WorkspaceScreen = 'calendar' | 'budget' | 'statistics' | 'goal'
 
 function screenFromSearch(search: string): WorkspaceScreen {
+  if (new URLSearchParams(search).get('screen') === 'goal') return 'goal'
   if (isStatisticsScreen(search)) return 'statistics'
   if (isBudgetScreen(search)) return 'budget'
   return 'calendar'
@@ -218,19 +226,6 @@ function SpendingHero({
           <p className="difference-copy">{differenceCopy(state.data.summary)}</p>
         </>
       )}
-    </section>
-  )
-}
-
-function MarriageGoalShell() {
-  return (
-    <section className="goal-shell" aria-labelledby="goal-title">
-      <div className="goal-paw" aria-hidden="true">♡</div>
-      <div>
-        <p className="section-kicker">Marriage Goal</p>
-        <h2 id="goal-title">둘의 다음 목표를 담을 자리</h2>
-        <p>목표 금액과 진행률은 Goal Slice에서 연결됩니다.</p>
-      </div>
     </section>
   )
 }
@@ -674,6 +669,8 @@ function CalendarWorkspace({
     normalizeStatisticsState(window.location.search, initialReferences.household))
   const [monthState, setMonthState] = useState<AsyncState<CalendarMonth>>({ status: 'loading' })
   const [dayState, setDayState] = useState<AsyncState<LedgerTransaction[]>>({ status: 'loading' })
+  const [goalState, setGoalState] = useState<GoalViewState>({ status: 'loading' })
+  const [goalRevision, setGoalRevision] = useState(0)
   const [revision, setRevision] = useState(0)
   const [entryMode, setEntryMode] = useState<{
     selectedDate: string
@@ -684,10 +681,12 @@ function CalendarWorkspace({
     summary: RefundSummary
   } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [goalSheet, setGoalSheet] = useState<'create' | 'edit' | 'link' | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const refundOpenerRef = useRef<HTMLElement | null>(null)
   const refundOriginalIdRef = useRef<number | null>(null)
   const settingsButtonRef = useRef<HTMLElement | null>(null)
+  const goalOpenerRef = useRef<HTMLElement | null>(null)
 
   const filter = useMemo(() => calendarFilter(navigation), [navigation])
   const filterKey = `${filter.scope}:${filter.ownerMemberId ?? ''}`
@@ -727,6 +726,17 @@ function CalendarWorkspace({
     if (ownsHistoryEntry) window.history.back()
   }, [finishClosingRefund])
 
+  const finishClosingGoalSheet = useCallback(() => {
+    setGoalSheet(null)
+    window.setTimeout(() => goalOpenerRef.current?.focus(), 0)
+  }, [])
+
+  const requestCloseGoalSheet = useCallback(() => {
+    const ownsHistoryEntry = window.history.state?.ourLedgerSheet === 'goal'
+    finishClosingGoalSheet()
+    if (ownsHistoryEntry) window.history.back()
+  }, [finishClosingGoalSheet])
+
   useEffect(() => {
     if (activeScreen !== 'calendar') return
     const normalizedSearch = serializeCalendarState(navigation)
@@ -752,6 +762,14 @@ function CalendarWorkspace({
   }, [activeScreen, statisticsNavigation])
 
   useEffect(() => {
+    if (activeScreen !== 'goal') return
+    const normalizedSearch = '?screen=goal'
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
+    }
+  }, [activeScreen])
+
+  useEffect(() => {
     const onPopState = () => {
       const nextScreen = screenFromSearch(window.location.search)
       setActiveScreen(nextScreen)
@@ -775,6 +793,8 @@ function CalendarWorkspace({
           window.history.replaceState(window.history.state, '', normalizedSearch)
         }
         setStatisticsNavigation(nextStatistics)
+      } else if (nextScreen === 'goal') {
+        // Goal has no additional URL state in Slice 8.
       } else {
         setNavigation(normalizeCalendarState(window.location.search, references.household))
       }
@@ -784,6 +804,9 @@ function CalendarWorkspace({
       if (refundMode && window.history.state?.ourLedgerSheet !== 'refund') {
         finishClosingRefund()
       }
+      if (goalSheet && window.history.state?.ourLedgerSheet !== 'goal') {
+        finishClosingGoalSheet()
+      }
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -791,9 +814,25 @@ function CalendarWorkspace({
     entryMode,
     finishClosingEntry,
     finishClosingRefund,
+    finishClosingGoalSheet,
+    goalSheet,
     references.household,
     refundMode,
   ])
+
+  useEffect(() => {
+    if (activeScreen !== 'calendar' && activeScreen !== 'goal') return
+    const controller = new AbortController()
+    setGoalState({ status: 'loading' })
+    void loadMarriageGoal(controller.signal)
+      .then((data) => setGoalState({ status: 'ready', data }))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setGoalState({ status: 'error', message: errorMessage(error) })
+        }
+      })
+    return () => controller.abort()
+  }, [activeScreen, goalRevision, revision])
 
   useEffect(() => {
     if (activeScreen !== 'calendar') return
@@ -862,6 +901,16 @@ function CalendarWorkspace({
     setRefundMode({ original, summary })
   }
 
+  function openGoalSheet(mode: 'create' | 'edit' | 'link', opener: HTMLElement) {
+    goalOpenerRef.current = opener
+    window.history.pushState(
+      { ...window.history.state, ourLedgerSheet: 'goal' },
+      '',
+      window.location.href,
+    )
+    setGoalSheet(mode)
+  }
+
   function navigate(destination: WorkspaceScreen) {
     if (destination === activeScreen) return
     if (destination === 'budget') {
@@ -872,6 +921,11 @@ function CalendarWorkspace({
     if (destination === 'statistics') {
       window.history.pushState({}, '', serializeStatisticsState(statisticsNavigation))
       setActiveScreen('statistics')
+      return
+    }
+    if (destination === 'goal') {
+      window.history.pushState({}, '', '?screen=goal')
+      setActiveScreen('goal')
       return
     }
     window.history.pushState({}, '', serializeCalendarState(navigation))
@@ -901,6 +955,15 @@ function CalendarWorkspace({
     setRevision((current) => current + 1)
   }
 
+  function acceptGoalView(view: MarriageGoalView) {
+    setGoalState({ status: 'ready', data: view })
+  }
+
+  async function unlinkGoalAccount(accountId: number) {
+    await unlinkMarriageGoalAccount(accountId)
+    setGoalRevision((current) => current + 1)
+  }
+
   return (
     <>
       <main className="app-shell">
@@ -922,7 +985,12 @@ function CalendarWorkspace({
               state={monthState}
               onRetry={() => setRevision((current) => current + 1)}
             />
-            <MarriageGoalShell />
+            <MarriageGoalCard
+              state={goalState}
+              onRetry={() => setGoalRevision((current) => current + 1)}
+              onOpen={() => navigate('goal')}
+              onCreate={(opener) => openGoalSheet('create', opener)}
+            />
             <ScopeSelector
               user={user}
               household={references.household}
@@ -948,6 +1016,17 @@ function CalendarWorkspace({
               onDeleted={() => setRevision((current) => current + 1)}
             />
           </>
+        ) : activeScreen === 'goal' ? (
+          <MarriageGoalScreen
+            state={goalState}
+            timezone={references.household.timezone}
+            onBack={() => navigate('calendar')}
+            onRetry={() => setGoalRevision((current) => current + 1)}
+            onCreate={(opener) => openGoalSheet('create', opener)}
+            onEdit={(opener) => openGoalSheet('edit', opener)}
+            onLink={(opener) => openGoalSheet('link', opener)}
+            onUnlink={unlinkGoalAccount}
+          />
         ) : activeScreen === 'budget' ? (
           <BudgetScreen
             month={budgetMonth}
@@ -1008,6 +1087,22 @@ function CalendarWorkspace({
           categories={references.categories}
           onChanged={refreshReferences}
           onRequestClose={closeSettings}
+        />
+      )}
+      {(goalSheet === 'create' || goalSheet === 'edit') && (
+        <MarriageGoalSheet
+          goal={goalSheet === 'edit' && goalState.status === 'ready'
+            ? goalState.data.goal
+            : null}
+          onSaved={acceptGoalView}
+          onRequestClose={requestCloseGoalSheet}
+        />
+      )}
+      {goalSheet === 'link' && goalState.status === 'ready' && (
+        <GoalAccountLinkSheet
+          accounts={goalState.data.eligibleAccounts}
+          onSaved={acceptGoalView}
+          onRequestClose={requestCloseGoalSheet}
         />
       )}
     </>

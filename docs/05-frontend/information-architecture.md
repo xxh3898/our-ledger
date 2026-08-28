@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.8
-last_updated: 2026-08-28
+version: 0.9
+last_updated: 2026-08-29
 related:
   - 01-product/benchmark-weple-money.md
   - 05-frontend/calendar-screen.md
@@ -50,7 +50,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 | [Couple-first 디자인 시스템](design-system.md) | 색상, 고양이 정체성, Concept Mockup 사용 경계 | 해당 화면 Slice |
 | [Motion과 상호작용](interaction-motion.md) | 전환, feedback, reduced motion | 해당 화면 Slice |
 
-이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4, Budget destination은 Slice 5에서 활성화됐다. Marriage Goal 실제 지표·상세는 Slice 8, production illustration은 별도 asset 범위다.
+이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4, Budget destination은 Slice 5, Marriage Goal 실제 지표·상세는 Slice 8에서 활성화됐다. production illustration은 별도 asset 범위다.
 
 ## 하단 탐색
 
@@ -61,7 +61,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 - `+`는 탭이 아니라 빠른 입력을 여는 주요 action이다.
 - Bottom Navigation과 중앙 Paw FAB는 viewport 하단에 고정하고 본문에는 safe-area와 겹치지 않는 여백을 둔다.
 - 설정은 상단 프로필 또는 더보기 메뉴에 둔다.
-- 결혼자금은 달력 요약 카드와 자산 화면에서 접근한다.
+- 결혼자금은 Calendar Home 요약 카드에서 상세로 접근한다. Slice 8은 새 하단 tab이나 Assets 화면을 만들지 않는다.
 - Calendar, Budget, Statistics는 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
 - Assets는 구현 Slice 전까지 disabled 상태와 `준비 중` text를 유지한다.
 - Budget과 Statistics의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
@@ -81,6 +81,12 @@ Statistics는 같은 Couple header와 하단 탐색을 유지하고 기간, 실�
 ## 반복 거래 설정
 
 반복 거래는 새 하단 탭을 만들지 않고 설정 Sheet 안의 독립 section으로 제공한다. active, paused, ended 규칙을 함께 보여 주고 생성·수정·일시정지·재개를 nested Sheet에서 처리한다. 재개 시 일시정지 기간을 소급 생성하지 않는다는 점을 action 근처에 명시한다. Calendar 선택일 거래, Budget 사용 내역, Statistics drill-down과 저축 활동에서 자동 생성된 거래는 `반복` text badge로 provenance를 표시한다. 세부 계약은 [반복 거래 설정](recurring-transactions.md)을 따른다.
+
+## Marriage Goal 상세
+
+Calendar Home은 Goal 없음이면 생성 CTA, Goal 존재면 실제 current/target/rate/이번 달 순저축 card를 표시한다. card는 `?screen=goal` 상세로 이동하고 새로고침/back/forward를 지원한다.
+
+상세는 hero, current/target/rate/remaining, 이번 달/최근 평균/projection, accessible 6개월 추세, 연결 Account, 최근 Transfer 근거를 순서대로 제공한다. 생성·수정·연결은 Bottom Sheet, 연결 해제는 Account row의 확인 단계로 처리한다. Goal용 수동 기여금 action은 제공하지 않는다.
 
 ## 전역 필터
 

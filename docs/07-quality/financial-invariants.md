@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-28
+version: 0.3
+last_updated: 2026-08-29
 related:
   - 02-domain/financial-metrics.md
   - 03-data/transaction-ledger-rules.md
@@ -37,5 +37,12 @@ related:
 24. 동일 `(generated_from_recurring_id, recurrence_date)`는 생성 거래가 논리삭제돼도 다시 만들 수 없다.
 25. MONTHLY/YEARLY 반복은 최초 start date anchor를 유지하고 짧은 달·윤년에는 마지막 유효일로 clamp한다.
 26. 규칙 template 수정은 기존 생성 거래를 변경하지 않으며 일시정지 중 발생일은 재개 시 소급 생성하지 않는다.
+27. Goal `starting_balance`는 연결 audit snapshot일 뿐 현재 보유금에 다시 더하지 않는다.
+28. Goal 순저축은 연결 시점 이후 비Goal→Goal TRANSFER는 양수, Goal→비Goal은 음수, Goal Account 사이 이동은 0이다.
+29. Goal Account의 INCOME/EXPENSE/REFUND는 current balance에는 반영하지만 Goal 순저축 Transfer로 오분류하지 않는다.
+30. 같은 Household의 MARRIAGE Goal은 하나이며 같은 Account는 둘 이상의 Goal에 동시에 연결될 수 없다.
+31. Goal Account link snapshot과 같은 Account Transaction posting은 Account row lock에서 직렬화돼 partial balance를 저장할 수 없다.
+32. 이미 연결된 archived Account는 unlink 전까지 실제 잔액과 함께 Goal에 남는다.
+33. Goal target의 동시 PATCH는 optimistic version으로 한 요청만 반영한다.
 
 각 Slice는 관련 불변식의 단위·통합 테스트를 추가한다. 일반 happy path 테스트만으로 완료 처리하지 않는다.

@@ -19,15 +19,18 @@ public class AccountService {
     private static final String KRW = "KRW";
 
     private final AccountRepository accountRepository;
+    private final AccountBalanceService accountBalanceService;
     private final HouseholdMemberResolver householdMemberResolver;
     private final RecurringReferenceGuard recurringReferenceGuard;
 
     public AccountService(
             AccountRepository accountRepository,
+            AccountBalanceService accountBalanceService,
             HouseholdMemberResolver householdMemberResolver,
             RecurringReferenceGuard recurringReferenceGuard
     ) {
         this.accountRepository = accountRepository;
+        this.accountBalanceService = accountBalanceService;
         this.householdMemberResolver = householdMemberResolver;
         this.recurringReferenceGuard = recurringReferenceGuard;
     }
@@ -236,9 +239,7 @@ public class AccountService {
                     member.getUser().getDisplayName()
             );
         }
-        long delta = accountRepository.sumActiveBalanceDelta(
-                account.getHouseholdId(), account.getId());
-        long currentBalance = Math.addExact(account.getOpeningBalance(), delta);
+        long currentBalance = accountBalanceService.currentBalance(account);
         return new AccountResponse(
                 account.getId(),
                 account.getName(),
