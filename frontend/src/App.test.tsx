@@ -168,6 +168,8 @@ const savingsActivities = [{
   sourceAccount: { id: 200, name: '주거래 통장' },
   destinationAccount: { id: 201, name: '비상금 통장' },
   memo: '결혼자금',
+  generatedFromRecurringId: null,
+  recurrenceDate: null,
 }]
 
 function primaryTransaction({
@@ -202,6 +204,8 @@ function primaryTransaction({
     occurredAt,
     memo,
     adjustmentType: 'NORMAL',
+    generatedFromRecurringId: null,
+    recurrenceDate: null,
     version: 0,
     entries: [{
       id: id + 1000,
@@ -230,6 +234,8 @@ function transferTransaction(id: number, occurredAt = '2026-08-27T04:00:00Z') {
     occurredAt,
     memo: '저축 이동',
     adjustmentType: 'NORMAL',
+    generatedFromRecurringId: null,
+    recurrenceDate: null,
     version: 0,
     entries: [
       {
@@ -257,6 +263,41 @@ function transferTransaction(id: number, occurredAt = '2026-08-27T04:00:00Z') {
         },
       },
     ],
+  }
+}
+
+function recurringRule(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 800,
+    name: '월급',
+    type: 'INCOME',
+    amount: 3_000_000,
+    scope: 'PERSONAL',
+    owner: { memberId: 100, displayName: 'Owner' },
+    payer: null,
+    category: { id: 301, name: '급여', archived: false },
+    accounts: [{
+      role: 'PRIMARY',
+      account: {
+        id: 200,
+        name: '주거래 통장',
+        type: 'CHECKING',
+        nature: 'ASSET',
+        archived: false,
+      },
+    }],
+    frequency: 'MONTHLY',
+    intervalValue: 1,
+    startDate: '2026-08-28',
+    endDate: null,
+    scheduledLocalTime: '09:00:00',
+    memo: null,
+    autoPost: true,
+    active: true,
+    nextRecurrenceDate: '2026-09-28',
+    status: 'ACTIVE',
+    version: 0,
+    ...overrides,
   }
 }
 
@@ -297,6 +338,7 @@ type RouterOptions = {
   categories?: Array<Record<string, unknown>>
   transactions?: Array<Record<string, unknown>>
   budgets?: Array<Record<string, unknown>>
+  recurringTransactions?: Array<Record<string, unknown>>
   failTransactionCreate?: boolean
   failRefundCreate?: boolean
   failBudgetCreate?: boolean
@@ -306,6 +348,8 @@ type RouterOptions = {
   statistics?: Record<string, unknown>
   savingsActivities?: Array<Record<string, unknown>>
   statisticsGate?: Promise<void>
+  failRecurringCreate?: boolean
+  recurringCreateGate?: Promise<void>
 }
 
 function transactionDate(occurredAt: string) {
@@ -327,6 +371,7 @@ function installLedgerRouter(options: RouterOptions = {}) {
     categories: [...(options.categories ?? [expenseCategory, incomeCategory])],
     transactions: [...(options.transactions ?? [])],
     budgets: [...(options.budgets ?? [])],
+    recurringTransactions: [...(options.recurringTransactions ?? [])],
   }
 
   function matchesFilter(transaction: Record<string, unknown>, url: URL) {
@@ -529,6 +574,8 @@ function installLedgerRouter(options: RouterOptions = {}) {
       occurredAt: inputBody.occurredAt,
       memo: inputBody.memo,
       adjustmentType: 'NORMAL',
+      generatedFromRecurringId: null,
+      recurrenceDate: null,
       version,
       entries: type === 'TRANSFER'
         ? [
@@ -546,6 +593,52 @@ function installLedgerRouter(options: RouterOptions = {}) {
             balanceDelta: type === 'INCOME' ? amount : -amount,
             account: accountReference(account),
           }],
+    }
+  }
+
+  function recurringResponse(inputBody: Record<string, unknown>, id: number, version: number) {
+    const type = String(inputBody.type)
+    const accountReference = (accountId: unknown) => {
+      const account = state.accounts.find((item) => Number(item.id) === Number(accountId))
+      return {
+        id: account?.id,
+        name: account?.name,
+        type: account?.type,
+        nature: account?.nature,
+        archived: false,
+      }
+    }
+    const accounts = type === 'TRANSFER'
+      ? [
+          { role: 'SOURCE', account: accountReference(inputBody.sourceAccountId) },
+          { role: 'DESTINATION', account: accountReference(inputBody.destinationAccountId) },
+        ]
+      : [{ role: 'PRIMARY', account: accountReference(inputBody.accountId) }]
+    const category = state.categories.find(
+      (item) => Number(item.id) === Number(inputBody.categoryId),
+    )
+    const active = Boolean(inputBody.active)
+    return {
+      id,
+      name: inputBody.name,
+      type,
+      amount: inputBody.amount,
+      scope: inputBody.scope,
+      owner: memberReference(inputBody.ownerMemberId),
+      payer: memberReference(inputBody.payerMemberId),
+      category: category ? { id: category.id, name: category.name, archived: false } : null,
+      accounts,
+      frequency: inputBody.frequency,
+      intervalValue: inputBody.intervalValue,
+      startDate: inputBody.startDate,
+      endDate: inputBody.endDate,
+      scheduledLocalTime: inputBody.scheduledLocalTime,
+      memo: inputBody.memo,
+      autoPost: true,
+      active,
+      nextRecurrenceDate: inputBody.startDate,
+      status: active ? 'ACTIVE' : 'PAUSED',
+      version,
     }
   }
 
@@ -599,6 +692,35 @@ function installLedgerRouter(options: RouterOptions = {}) {
     }
     if (url.pathname.startsWith('/api/v1/categories/') && method === 'PATCH') {
       return jsonResponse({ ...state.categories[0], archived: true })
+    }
+
+    if (url.pathname === '/api/v1/recurring-transactions' && method === 'GET') {
+      return jsonResponse(state.recurringTransactions)
+    }
+    if (url.pathname === '/api/v1/recurring-transactions' && method === 'POST') {
+      if (options.recurringCreateGate) await options.recurringCreateGate
+      if (options.failRecurringCreate) {
+        return jsonResponse({
+          code: 'INVALID_REQUEST',
+          message: '반복 일정을 확인해 주세요.',
+        }, 400)
+      }
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      const created = recurringResponse(inputBody, 800 + state.recurringTransactions.length, 0)
+      state.recurringTransactions.push(created)
+      return jsonResponse(created, 201)
+    }
+    if (/^\/api\/v1\/recurring-transactions\/\d+$/.test(url.pathname) && method === 'PATCH') {
+      const recurringId = Number(url.pathname.split('/').at(-1))
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      const index = state.recurringTransactions.findIndex((item) => Number(item.id) === recurringId)
+      const updated = recurringResponse(
+        inputBody,
+        recurringId,
+        Number(state.recurringTransactions[index]?.version ?? 0) + 1,
+      )
+      state.recurringTransactions[index] = updated
+      return jsonResponse(updated)
     }
 
     if (url.pathname === '/api/v1/calendar/month' && method === 'GET') {
@@ -1314,6 +1436,142 @@ describe('App', () => {
       input === '/api/v1/accounts' && init?.method === 'POST')).toBe(true)
   })
 
+  it('manages active paused and ended recurring rules inside Settings', async () => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter({
+      recurringTransactions: [
+        recurringRule(),
+        recurringRule({ id: 801, name: 'OTT 구독', active: false, status: 'PAUSED' }),
+        recurringRule({
+          id: 802,
+          name: '종료 보험',
+          nextRecurrenceDate: null,
+          status: 'ENDED',
+        }),
+      ],
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+
+    expect(await within(settings).findByRole('heading', { name: '반복 거래' }))
+      .toBeInTheDocument()
+    expect(within(settings).getByText('월급')).toBeInTheDocument()
+    expect(within(settings).getByText('OTT 구독')).toBeInTheDocument()
+    expect(within(settings).getByText('종료 보험')).toBeInTheDocument()
+    expect(within(settings).getByText('활성')).toBeInTheDocument()
+    expect(within(settings).getByText('중지됨')).toBeInTheDocument()
+    expect(within(settings).getByText('종료됨')).toBeInTheDocument()
+    expect(within(settings).getByText(/중지 기간은 소급 생성하지 않습니다/))
+      .toBeInTheDocument()
+
+    fireEvent.click(within(settings).getAllByRole('button', { name: '중지' })[0])
+    await within(settings).findAllByText('중지됨')
+    fireEvent.click(within(settings).getAllByRole('button', { name: '재개' })[0])
+    await within(settings).findByText('활성')
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      String(input) === '/api/v1/recurring-transactions/800'
+        && init?.method === 'PATCH')).toHaveLength(2)
+  })
+
+  it('creates and edits a recurring rule with schedule fields and focus lifecycle', async () => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const addButton = await within(settings).findByRole('button', { name: '+ 반복 거래 추가' })
+    fireEvent.click(addButton)
+
+    const createDialog = await screen.findByRole('dialog', { name: '반복 거래 추가' })
+    const nameInput = within(createDialog).getByLabelText('이름')
+    await waitFor(() => expect(nameInput).toHaveFocus())
+    fireEvent.change(nameInput, { target: { value: '격주 생활비' } })
+    fireEvent.change(within(createDialog).getByLabelText('금액'), {
+      target: { value: '45000' },
+    })
+    fireEvent.change(within(createDialog).getByLabelText('주기'), {
+      target: { value: 'WEEKLY' },
+    })
+    fireEvent.change(within(createDialog).getByLabelText('간격'), {
+      target: { value: '2' },
+    })
+    fireEvent.change(within(createDialog).getByLabelText('실행 시간'), {
+      target: { value: '08:30' },
+    })
+    fireEvent.click(within(createDialog).getByRole('button', { name: '반복 거래 저장' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '반복 거래 추가' }))
+      .not.toBeInTheDocument())
+    expect(addButton).toHaveFocus()
+    expect(within(settings).getByText('격주 생활비')).toBeInTheDocument()
+    const createCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/recurring-transactions' && init?.method === 'POST')
+    const payload = JSON.parse(String(createCall?.[1]?.body)) as Record<string, unknown>
+    expect(payload).toMatchObject({
+      type: 'EXPENSE',
+      frequency: 'WEEKLY',
+      intervalValue: 2,
+      startDate: '2026-08-28',
+      scheduledLocalTime: '08:30',
+      autoPost: true,
+    })
+    expect(payload).not.toHaveProperty('householdId')
+    expect(payload).not.toHaveProperty('adjustmentType')
+
+    const row = within(settings).getByText('격주 생활비').closest('li') as HTMLElement
+    const editButton = within(row).getByRole('button', { name: '수정' })
+    fireEvent.click(editButton)
+    const editDialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+    expect(within(editDialog).getByText(/이미 생성된 거래는 바뀌지 않습니다/))
+      .toBeInTheDocument()
+    expect(within(editDialog).queryByText('월말')).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(editButton).toHaveFocus())
+  })
+
+  it('keeps recurring form input on failure and prevents duplicate pending submits', async () => {
+    useCalendarUrl()
+    let releaseGate: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+    const { fetchMock } = installLedgerRouter({ recurringCreateGate: gate })
+    const { unmount } = render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    fireEvent.click(await screen.findByRole('button', { name: '+ 반복 거래 추가' }))
+    const pendingDialog = await screen.findByRole('dialog', { name: '반복 거래 추가' })
+    fireEvent.change(within(pendingDialog).getByLabelText('이름'), {
+      target: { value: '월 구독' },
+    })
+    fireEvent.change(within(pendingDialog).getByLabelText('금액'), {
+      target: { value: '17000' },
+    })
+    const submit = within(pendingDialog).getByRole('button', { name: '반복 거래 저장' })
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/recurring-transactions' && init?.method === 'POST')).toHaveLength(1))
+    expect(within(pendingDialog).getByRole('button', { name: '저장 중…' })).toBeDisabled()
+    releaseGate?.()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '반복 거래 추가' }))
+      .not.toBeInTheDocument())
+    unmount()
+
+    installLedgerRouter({ failRecurringCreate: true })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    fireEvent.click(await screen.findByRole('button', { name: '+ 반복 거래 추가' }))
+    const failedDialog = await screen.findByRole('dialog', { name: '반복 거래 추가' })
+    const failedName = within(failedDialog).getByLabelText('이름')
+    const failedAmount = within(failedDialog).getByLabelText('금액')
+    fireEvent.change(failedName, { target: { value: '실패 구독' } })
+    fireEvent.change(failedAmount, { target: { value: '19000' } })
+    fireEvent.click(within(failedDialog).getByRole('button', { name: '반복 거래 저장' }))
+    expect(await within(failedDialog).findByRole('alert'))
+      .toHaveTextContent('반복 일정을 확인해 주세요.')
+    expect(failedName).toHaveValue('실패 구독')
+    expect(failedAmount).toHaveValue(19000)
+  })
+
   it('keeps Budget and Statistics active while Assets remains disabled', async () => {
     useCalendarUrl()
     installLedgerRouter()
@@ -1882,6 +2140,44 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([input]) =>
       String(input).includes('/api/v1/statistics/savings-activities?from=2026-08-01&to=2026-08-31')))
       .toBe(true)
+  })
+
+  it('shows generated provenance as text in Calendar and Statistics drill-downs', async () => {
+    const generated = {
+      ...primaryTransaction({ id: 410, amount: 12_000 }),
+      generatedFromRecurringId: 800,
+      recurrenceDate: '2026-08-27',
+    }
+    useCalendarUrl()
+    installLedgerRouter({ transactions: [generated] })
+    const { unmount } = render(<App />)
+    const selectedDay = (await screen.findByRole('heading', { name: '8월 27일의 기록' }))
+      .closest('section') as HTMLElement
+    expect(await within(selectedDay).findByText('반복')).toBeInTheDocument()
+    unmount()
+
+    useStatisticsUrl()
+    installLedgerRouter({
+      transactions: [generated],
+      savingsActivities: [{
+        ...savingsActivities[0],
+        generatedFromRecurringId: 801,
+        recurrenceDate: '2026-08-10',
+      }],
+    })
+    render(<App />)
+    const categorySection = (await screen.findByRole('heading', { name: '어디에 썼나요' }))
+      .closest('section') as HTMLElement
+    fireEvent.click(within(categorySection).getByRole('button', { name: /식비/ }))
+    const categoryDialog = await screen.findByRole('dialog', { name: '식비 소비·환불' })
+    expect(await within(categoryDialog).findByText('반복')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    const summarySection = screen.getByRole('heading', { name: '이번 기간 요약' })
+      .closest('section') as HTMLElement
+    fireEvent.click(within(summarySection).getByRole('button', { name: /저축.*원장 보기/ }))
+    const savingsDialog = await screen.findByRole('dialog', { name: '저축 활동' })
+    expect(await within(savingsDialog).findByText('반복')).toBeInTheDocument()
   })
 
   it('renders unavailable percentages and keeps amount and percent directions independent', async () => {

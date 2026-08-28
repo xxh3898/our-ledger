@@ -543,7 +543,9 @@ public class StatisticsService {
                         source.getId(), source.getName()),
                 new SavingsActivityResponse.AccountReference(
                         destination.getId(), destination.getName()),
-                transaction.getMemo()
+                transaction.getMemo(),
+                transaction.getGeneratedFromRecurringId(),
+                transaction.getRecurrenceDate()
         );
     }
 

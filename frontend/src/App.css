@@ -22,9 +22,81 @@
   background: var(--background);
 }
 
+.provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.45rem;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #7857d6) 35%, transparent);
+  border-radius: 999px;
+  color: var(--accent, #6544c5);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.sheet-backdrop.recurring-sheet-backdrop {
+  z-index: 110;
+}
+
+.recurring-sheet {
+  max-height: min(90vh, 860px);
+  overflow-y: auto;
+}
+
+.recurring-form textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 5rem;
+  padding: 0.68rem 0.75rem;
+  border: 1px solid var(--neutral-300);
+  border-radius: 0.8rem;
+  background: var(--neutral-0);
+  color: var(--body);
+  resize: vertical;
+}
+
+.recurring-list li {
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.recurring-list li > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.recurring-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.status-badge {
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.status-badge--active {
+  background: #e4f7e9;
+  color: #28633a;
+}
+
+.status-badge--paused {
+  background: #fff3d6;
+  color: #76540f;
+}
+
+.status-badge--ended {
+  background: #ececf1;
+  color: #555866;
+}
+
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -44,7 +116,8 @@ button:disabled {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgb(243 111 159 / 35%);
   outline-offset: 2px;
 }

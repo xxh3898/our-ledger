@@ -13,6 +13,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "transactions")
@@ -58,6 +59,12 @@ public class LedgerTransaction {
     @Column(name = "reverses_transaction_id")
     private Long reversesTransactionId;
 
+    @Column(name = "generated_from_recurring_id")
+    private Long generatedFromRecurringId;
+
+    @Column(name = "recurrence_date")
+    private LocalDate recurrenceDate;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -95,10 +102,14 @@ public class LedgerTransaction {
             String memo,
             AdjustmentType adjustmentType,
             Long reversesTransactionId,
+            Long generatedFromRecurringId,
+            LocalDate recurrenceDate,
             Long actorMemberId
     ) {
         this.householdId = householdId;
         this.createdBy = actorMemberId;
+        this.generatedFromRecurringId = generatedFromRecurringId;
+        this.recurrenceDate = recurrenceDate;
         apply(
                 type,
                 amount,
@@ -140,6 +151,40 @@ public class LedgerTransaction {
                 memo,
                 adjustmentType,
                 reversesTransactionId,
+                null,
+                null,
+                actorMemberId
+        );
+    }
+
+    public static LedgerTransaction createGenerated(
+            Long householdId,
+            TransactionType type,
+            long amount,
+            TransactionScope scope,
+            Long ownerMemberId,
+            Long payerMemberId,
+            Long categoryId,
+            Instant occurredAt,
+            String memo,
+            Long generatedFromRecurringId,
+            LocalDate recurrenceDate,
+            Long actorMemberId
+    ) {
+        return new LedgerTransaction(
+                householdId,
+                type,
+                amount,
+                scope,
+                ownerMemberId,
+                payerMemberId,
+                categoryId,
+                occurredAt,
+                memo,
+                AdjustmentType.NORMAL,
+                null,
+                generatedFromRecurringId,
+                recurrenceDate,
                 actorMemberId
         );
     }
@@ -269,6 +314,14 @@ public class LedgerTransaction {
 
     public Long getReversesTransactionId() {
         return reversesTransactionId;
+    }
+
+    public Long getGeneratedFromRecurringId() {
+        return generatedFromRecurringId;
+    }
+
+    public LocalDate getRecurrenceDate() {
+        return recurrenceDate;
     }
 
     public long getVersion() {

@@ -55,6 +55,14 @@ Statistics는 current Household의 유효 Transaction, Account Entry, Account �
 
 Slice 6은 Statistics read model/API, 기간·주체 URL state, 월별 표와 drill-down을 포함한다. 통계 persistence/cache/materialized view/Redis, 근거 없는 index, Recurring·Goal·Assets·CSV·PWA·production 작업은 포함하지 않으며 schema migration을 추가하지 않는다.
 
+## Slice 7 Recurring 구현 경계
+
+Recurring은 Household timezone의 `start_date` anchor와 `scheduled_local_time`을 가진 rule을 저장하고 due occurrence마다 기존 canonical posting 로직으로 일반 Transaction과 Account Entry를 생성한다. rule 자체는 잔액·Calendar·Budget·Statistics에 포함하지 않는다.
+
+V7은 rule/template Account table, generated lineage와 full occurrence unique, operational cursor를 additive로 추가한다. backend minute poll은 occurrence별 새 transaction에서 rule row lock과 due 재확인, generated 원장 저장, cursor advance를 원자 처리하고 bounded catch-up과 one-rule failure isolation을 제공한다.
+
+Settings Sheet는 active/paused/ended 목록, 생성·수정·중지·재개를 제공한다. pause 기간은 resume 시 소급 생성하지 않고 generated history는 rule edit와 독립적인 snapshot으로 유지한다. recurring REFUND, `auto_post=false`, LIABILITY source, 예정 거래 승인, 알림, 별도 하단 tab, production 작업은 포함하지 않는다.
+
 ## Release Gate
 
 - `dev`는 검증된 Slice를 누적한다.

@@ -5,6 +5,7 @@ import io.github.xxh3898.ourledger.account.AccountType;
 import io.github.xxh3898.ourledger.category.CategoryType;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 public record TransactionResponse(
@@ -18,6 +19,8 @@ public record TransactionResponse(
         Instant occurredAt,
         String memo,
         AdjustmentType adjustmentType,
+        Long generatedFromRecurringId,
+        LocalDate recurrenceDate,
         long version,
         List<Entry> entries,
         Instant createdAt,

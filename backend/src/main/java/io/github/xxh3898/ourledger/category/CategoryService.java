@@ -4,6 +4,7 @@ import io.github.xxh3898.ourledger.api.ApiErrorCode;
 import io.github.xxh3898.ourledger.api.ApiException;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.security.CurrentHousehold;
+import io.github.xxh3898.ourledger.recurring.RecurringReferenceGuard;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,13 +16,16 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final CategoryGroupService categoryGroupService;
+    private final RecurringReferenceGuard recurringReferenceGuard;
 
     public CategoryService(
             CategoryRepository categoryRepository,
-            CategoryGroupService categoryGroupService
+            CategoryGroupService categoryGroupService,
+            RecurringReferenceGuard recurringReferenceGuard
     ) {
         this.categoryRepository = categoryRepository;
         this.categoryGroupService = categoryGroupService;
+        this.recurringReferenceGuard = recurringReferenceGuard;
     }
 
     @Transactional(readOnly = true)
@@ -72,6 +76,10 @@ public class CategoryService {
     ) {
         validateUpdate(request);
         Category category = requireCategory(currentHousehold.householdId(), categoryId);
+        if (request.archived() && !category.isArchived()) {
+            recurringReferenceGuard.rejectCategoryArchive(
+                    category.getHouseholdId(), category.getId());
+        }
         CategoryGroup group = requireMatchingGroup(
                 currentHousehold.householdId(),
                 request.groupId(),

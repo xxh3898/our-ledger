@@ -125,7 +125,7 @@ POST   /api/v1/transactions/{originalTransactionId}/refunds
 
 POST의 공통 필드는 `type`, positive `amount`, ISO 8601 `occurredAt`, nullable `memo`, `adjustmentType=NORMAL`, nullable `reversesTransactionId=null`이다. INCOME/EXPENSE는 `scope`, nullable `ownerMemberId/payerMemberId`, `categoryId`, `accountId`를 사용하고 source/destination은 null이다. TRANSFER는 scope/owner/payer/category/account가 null이고 `sourceAccountId`, `destinationAccountId`가 필수다. PATCH는 같은 필드와 현재 `version`을 요구한다.
 
-response는 nullable owner/payer/Category, `version`, canonical `entries[]`를 포함한다. 각 Entry는 `id`, `role`, `balanceDelta`, Account reference를 제공하며 최상위 단일 `account`/`entry`는 제공하지 않는다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
+response는 nullable owner/payer/Category, `version`, canonical `entries[]`, nullable `generatedFromRecurringId`/`recurrenceDate`를 포함한다. 수동 거래와 Refund의 provenance 두 field는 null이고 generated NORMAL 거래만 둘 다 값을 가진다. 각 Entry는 `id`, `role`, `balanceDelta`, Account reference를 제공하며 최상위 단일 `account`/`entry`는 제공하지 않는다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
 
 Refund POST는 원 NORMAL EXPENSE 하위 resource에서 `amount`, `occurredAt`, nullable `memo`만 받는다. Scope, Owner, Payer, Category, PRIMARY Account는 원 거래에서 파생하고 canonical `TransactionResponse`를 반환한다. generic Transaction POST의 `adjustmentType=REFUND`와 Refund generic PATCH는 허용하지 않는다.
 
@@ -276,6 +276,37 @@ GET은 Budget row와 Transaction 파생 사용액의 단일 화면 계약이다.
 
 사용액은 같은 month/scope/category의 `NORMAL EXPENSE - REFUND EXPENSE`다. INCOME, TRANSFER, 논리삭제는 제외한다. 실제 request/response는 `BudgetApiDocsTest`의 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, Budget conflict snippet으로 검증한다.
 
+## Recurring API
+
+모든 endpoint는 `CurrentHousehold.householdId`를 적용하며 request에 `householdId`를 받지 않는다. V1에서는 규칙 삭제 대신 일시정지와 재개를 사용한다.
+
+```text
+GET   /api/v1/recurring-transactions
+POST  /api/v1/recurring-transactions
+PATCH /api/v1/recurring-transactions/{recurringTransactionId}
+```
+
+create/update는 다음 template과 schedule을 전체 필드로 받는다.
+
+- template: `name`, `type`, positive `amount`, nullable `scope`, nullable `ownerMemberId`/`payerMemberId`/`categoryId`, 거래 유형에 따른 `accountId` 또는 `sourceAccountId`/`destinationAccountId`, nullable `memo`
+- schedule: `frequency=DAILY|WEEKLY|MONTHLY|YEARLY`, positive `intervalValue`, `startDate`, nullable `endDate`, `scheduledLocalTime`
+- execution: `autoPost=true`, `active`; PATCH는 현재 `version`을 추가로 요구한다.
+
+template의 Scope, Member, Category, Account와 posting 조합은 수동 Transaction과 같은 canonical validation을 사용한다. 규칙은 잔액이나 통계의 원장이 아니며, 실행 시 canonical `NORMAL` Transaction과 Entry를 생성한다. 생성 거래 response의 `generatedFromRecurringId`와 `recurrenceDate`가 원 규칙과 발생일을 식별한다.
+
+response는 template/schedule 외에 role별 `accounts[]`, `nextRecurrenceDate`, `status=ACTIVE|PAUSED|ENDED`, `version`, timestamp를 반환한다. 목록은 규칙 ID 오름차순이며 active, paused, ended를 모두 포함한다. 종료일을 지난 active 규칙은 `ENDED`, 사용자가 끈 규칙은 `PAUSED`다.
+
+- Household timezone의 local date/time을 실제 실행 시각으로 해석한다.
+- MONTHLY/YEARLY는 최초 start date의 day/month anchor를 보존하고 짧은 달과 윤년에는 해당 월의 마지막 날로 clamp한다.
+- 일시정지 중 발생일은 재개 시 소급 생성하지 않고 재개 시각 이후의 첫 발생일로 cursor를 이동한다.
+- 활성 규칙의 template 수정은 이미 생성된 Transaction을 바꾸지 않으며 다음 발생부터 snapshot으로 적용한다.
+- 한 번의 scheduler poll은 설정된 최대 발생 수까지만 처리하고, 발생일 하나마다 별도 Transaction을 만든다.
+- 규칙 row lock 아래 due 여부를 다시 확인하고 Transaction 생성과 cursor 이동을 하나의 transaction으로 처리한다.
+- `(generated_from_recurring_id, recurrence_date)` unique는 논리삭제된 생성 거래까지 포함해 재생성을 차단한다.
+- active 규칙이 참조하는 Account, Category, Category Group은 archive 또는 posting 의미 변경을 `409 RECURRING_REFERENCE_IN_USE`로 거부한다.
+
+실제 request/response와 CSRF, Household 격리, version conflict는 `RecurringApiDocsTest`의 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet으로 검증한다.
+
 ## Statistics read model
 
 ```text
@@ -315,7 +346,7 @@ production 요청은 Cloudflare Access를 통과한 뒤 Spring Security가 `Cf-A
 
 ## 동시 수정
 
-Transaction 등 충돌 가능 리소스는 version을 요청에 포함한다. 오래된 version이면 `409 Conflict`와 명시적 오류 코드를 반환한다.
+Transaction과 Recurring Transaction 등 충돌 가능 리소스는 version을 요청에 포함한다. 오래된 version이면 `409 Conflict`와 명시적 오류 코드를 반환한다.
 
 ## 멱등성
 

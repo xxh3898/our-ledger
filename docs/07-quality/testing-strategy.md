@@ -110,6 +110,22 @@ Statistics Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
 - savings activity impact 합과 ALL summary savings amount 일치
 - 인증, validation, canonical Statistics/savings activity REST Docs
 
+Recurring Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
+
+- Flyway V1→V7 clean 적용과 JPA `ddl-auto=validate`
+- rule schedule CHECK, role별 Account template 제약, Household composite FK
+- 생성 Transaction provenance의 둘 다 null 또는 둘 다 non-null CHECK와 논리삭제를 포함하는 full unique
+- DAILY/WEEKLY/MONTHLY/YEARLY interval, 최초 anchor, 짧은 달과 윤년 clamp
+- Household timezone local time의 due 경계와 지연 실행 catch-up batch 상한
+- INCOME, ASSET EXPENSE, 카드 EXPENSE, TRANSFER의 canonical Entry·잔액·Calendar·Budget·Statistics 반영
+- rule row lock을 경합하는 PostgreSQL worker의 발생일 중복 방지와 cursor 원자성
+- 생성 Transaction 논리삭제 뒤 같은 발생일 재생성 차단
+- template 수정의 향후 snapshot 적용과 기존 생성 거래 불변
+- 일시정지·재개의 소급 미생성, 종료일, active/paused/ended 상태
+- 한 규칙의 invalid template 실패가 다른 due 규칙을 막지 않는 격리
+- active reference lifecycle 차단, stale version, validation, Household IDOR, 인증·CSRF
+- canonical Recurring create/list/update/conflict REST Docs
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -209,6 +225,15 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - savings activity endpoint, Sheet focus/Escape/backdrop/opener 복귀
 - Statistics Paw FAB의 Household timezone 오늘 날짜
 
+같은 `App.test.tsx`는 Recurring Slice에서 다음 계약을 추가로 검증한다.
+
+- 설정 Sheet의 active/paused/ended 목록과 schedule·Account·subject 표시
+- 생성·수정 nested Sheet의 유형별 template, frequency/interval/date/time 입력
+- pause/resume action과 소급 미생성 안내
+- pending 중복 submit 방지, 실패 시 입력 보존, 성공 시 목록 refresh
+- autofocus, Escape/backdrop close와 opener focus 복귀
+- Calendar, Budget, Statistics, savings activity의 `반복` text badge
+
 `budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
 
 ## Production 보안 검증
@@ -227,7 +252,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
 
 ## 회귀 우선순위
 

@@ -31,7 +31,12 @@ public enum ApiErrorCode {
     UNSUPPORTED_ADJUSTMENT_TYPE("현재 Slice에서 지원하지 않는 adjustment입니다."),
     UNSUPPORTED_ACCOUNT_POSTING("이 Transaction 유형에서 지원하지 않는 Account posting입니다."),
     BUDGET_DUPLICATE("같은 월과 범위의 Budget이 이미 존재합니다."),
-    BUDGET_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 Budget을 다시 조회해야 합니다.");
+    BUDGET_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 Budget을 다시 조회해야 합니다."),
+    RECURRING_AUTO_POST_REQUIRED("V1 반복 거래는 자동 반영만 지원합니다."),
+    RECURRING_VERSION_CONFLICT("다른 변경이 먼저 반영되어 최신 반복 거래를 다시 조회해야 합니다."),
+    RECURRING_REFERENCE_IN_USE("활성 반복 거래가 참조하는 기준정보는 보관하거나 호환되지 않게 변경할 수 없습니다."),
+    RECURRING_OCCURRENCE_ALREADY_CREATED("같은 반복 일정의 거래가 이미 생성되었습니다."),
+    RECURRING_TEMPLATE_INVALID("반복 거래의 Account 구성이 올바르지 않습니다.");
 
     private final String message;
 

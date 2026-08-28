@@ -70,6 +70,8 @@ export type LedgerTransaction = {
   occurredAt: string
   memo: string | null
   adjustmentType: 'NORMAL' | 'REFUND'
+  generatedFromRecurringId: number | null
+  recurrenceDate: string | null
   version: number
   entries: Array<{
     id: number
@@ -230,6 +232,63 @@ export type SavingsActivity = {
   sourceAccount: { id: number; name: string }
   destinationAccount: { id: number; name: string }
   memo: string | null
+  generatedFromRecurringId: number | null
+  recurrenceDate: string | null
+}
+
+export type RecurrenceFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
+
+export type RecurringTransaction = {
+  id: number
+  name: string
+  type: LedgerTransaction['type']
+  amount: number
+  scope: LedgerTransaction['scope']
+  owner: { memberId: number; displayName: string } | null
+  payer: { memberId: number; displayName: string } | null
+  category: { id: number; name: string; archived: boolean } | null
+  accounts: Array<{
+    role: 'PRIMARY' | 'SOURCE' | 'DESTINATION'
+    account: {
+      id: number
+      name: string
+      type: Account['type']
+      nature: Account['nature']
+      archived: boolean
+    }
+  }>
+  frequency: RecurrenceFrequency
+  intervalValue: number
+  startDate: string
+  endDate: string | null
+  scheduledLocalTime: string
+  memo: string | null
+  autoPost: true
+  active: boolean
+  nextRecurrenceDate: string | null
+  status: 'ACTIVE' | 'PAUSED' | 'ENDED'
+  version: number
+}
+
+export type RecurringTransactionInput = {
+  name: string
+  type: LedgerTransaction['type']
+  amount: number
+  scope: LedgerTransaction['scope']
+  ownerMemberId: number | null
+  payerMemberId: number | null
+  categoryId: number | null
+  accountId: number | null
+  sourceAccountId: number | null
+  destinationAccountId: number | null
+  frequency: RecurrenceFrequency
+  intervalValue: number
+  startDate: string
+  endDate: string | null
+  scheduledLocalTime: string
+  memo: string | null
+  autoPost: true
+  active: boolean
 }
 
 export type AccountInput = {
@@ -568,6 +627,31 @@ export function createTransaction(input: TransactionInput) {
     method: 'POST',
     body: JSON.stringify(input),
   })
+}
+
+export function loadRecurringTransactions(signal?: AbortSignal) {
+  return request<RecurringTransaction[]>('/api/v1/recurring-transactions', { signal })
+}
+
+export function createRecurringTransaction(input: RecurringTransactionInput) {
+  return request<RecurringTransaction>('/api/v1/recurring-transactions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateRecurringTransaction(
+  recurringTransactionId: number,
+  version: number,
+  input: RecurringTransactionInput,
+) {
+  return request<RecurringTransaction>(
+    `/api/v1/recurring-transactions/${recurringTransactionId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ version, ...input }),
+    },
+  )
 }
 
 export function updateTransaction(

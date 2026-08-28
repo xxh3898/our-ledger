@@ -18,6 +18,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -167,7 +168,7 @@ public class TransactionService {
             TransactionCreateRequest request
     ) {
         ValidatedPosting posting = validatePosting(
-                currentHousehold,
+                currentHousehold.householdId(),
                 request.type(),
                 request.amount(),
                 request.scope(),
@@ -199,6 +200,47 @@ public class TransactionService {
         ));
         saveEntries(transaction, posting.entries());
         return toResponse(transaction);
+    }
+
+    @Transactional
+    public void validateRecurringTemplate(
+            Long householdId,
+            TransactionType type,
+            Long amount,
+            TransactionScope scope,
+            Long ownerMemberId,
+            Long payerMemberId,
+            Long categoryId,
+            Long accountId,
+            Long sourceAccountId,
+            Long destinationAccountId,
+            String memo
+    ) {
+        validatePosting(
+                householdId, type, amount, scope, ownerMemberId, payerMemberId,
+                categoryId, accountId, sourceAccountId, destinationAccountId,
+                Instant.EPOCH, memo, AdjustmentType.NORMAL, null);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Long createGenerated(GeneratedTransactionCommand command) {
+        ValidatedPosting posting = validatePosting(
+                command.householdId(), command.type(), command.amount(), command.scope(),
+                command.ownerMemberId(), command.payerMemberId(), command.categoryId(),
+                command.accountId(), command.sourceAccountId(), command.destinationAccountId(),
+                command.occurredAt(), command.memo(), AdjustmentType.NORMAL, null
+        );
+        householdMemberResolver.require(command.householdId(), command.actorMemberId());
+        LedgerTransaction transaction = transactionRepository.saveAndFlush(
+                LedgerTransaction.createGenerated(
+                        command.householdId(), command.type(), command.amount(), command.scope(),
+                        command.ownerMemberId(), command.payerMemberId(), command.categoryId(),
+                        command.occurredAt(), command.memo(), command.recurringTransactionId(),
+                        command.recurrenceDate(), command.actorMemberId()
+                )
+        );
+        saveEntries(transaction, posting.entries());
+        return transaction.getId();
     }
 
     @Transactional
@@ -241,7 +283,7 @@ public class TransactionService {
             return toResponse(transaction);
         }
         ValidatedPosting posting = validatePosting(
-                currentHousehold,
+                currentHousehold.householdId(),
                 request.type(),
                 request.amount(),
                 request.scope(),
@@ -439,7 +481,7 @@ public class TransactionService {
     }
 
     private ValidatedPosting validatePosting(
-            CurrentHousehold currentHousehold,
+            Long householdId,
             TransactionType type,
             Long amount,
             TransactionScope scope,
@@ -473,7 +515,7 @@ public class TransactionService {
         }
         if (type == TransactionType.TRANSFER) {
             return validateTransfer(
-                    currentHousehold,
+                    householdId,
                     amount,
                     scope,
                     ownerMemberId,
@@ -485,7 +527,7 @@ public class TransactionService {
             );
         }
         return validatePrimaryPosting(
-                currentHousehold,
+                householdId,
                 type,
                 amount,
                 scope,
@@ -499,7 +541,7 @@ public class TransactionService {
     }
 
     private ValidatedPosting validateTransfer(
-            CurrentHousehold currentHousehold,
+            Long householdId,
             long amount,
             TransactionScope scope,
             Long ownerMemberId,
@@ -521,7 +563,7 @@ public class TransactionService {
 
         if (sourceAccountId.equals(destinationAccountId)) {
             accountService.requireAccountForPosting(
-                    currentHousehold.householdId(), sourceAccountId);
+                    householdId, sourceAccountId);
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     ApiErrorCode.TRANSFER_SAME_ACCOUNT_NOT_ALLOWED
@@ -531,14 +573,14 @@ public class TransactionService {
         Account destination;
         if (sourceAccountId.compareTo(destinationAccountId) < 0) {
             source = accountService.requireAccountForPosting(
-                    currentHousehold.householdId(), sourceAccountId);
+                    householdId, sourceAccountId);
             destination = accountService.requireAccountForPosting(
-                    currentHousehold.householdId(), destinationAccountId);
+                    householdId, destinationAccountId);
         } else {
             destination = accountService.requireAccountForPosting(
-                    currentHousehold.householdId(), destinationAccountId);
+                    householdId, destinationAccountId);
             source = accountService.requireAccountForPosting(
-                    currentHousehold.householdId(), sourceAccountId);
+                    householdId, sourceAccountId);
         }
         requireActive(source);
         requireActive(destination);
@@ -562,7 +604,7 @@ public class TransactionService {
     }
 
     private ValidatedPosting validatePrimaryPosting(
-            CurrentHousehold currentHousehold,
+            Long householdId,
             TransactionType type,
             long amount,
             TransactionScope scope,
@@ -589,14 +631,14 @@ public class TransactionService {
             );
         }
         if (ownerMemberId != null) {
-            householdMemberResolver.require(currentHousehold.householdId(), ownerMemberId);
+            householdMemberResolver.require(householdId, ownerMemberId);
         }
         if (payerMemberId != null) {
-            householdMemberResolver.require(currentHousehold.householdId(), payerMemberId);
+            householdMemberResolver.require(householdId, payerMemberId);
         }
 
         Category category = categoryService.requireCategory(
-                currentHousehold.householdId(), categoryId);
+                householdId, categoryId);
         CategoryType expectedCategoryType = CategoryType.valueOf(type.name());
         if (category.getType() != expectedCategoryType) {
             throw new ApiException(
@@ -612,7 +654,7 @@ public class TransactionService {
         }
 
         Account account = accountService.requireAccountForPosting(
-                currentHousehold.householdId(), accountId);
+                householdId, accountId);
         requireActive(account);
         requireValidCreditCardNature(account);
         long balanceDelta = primaryBalanceDelta(type, amount, account);
@@ -853,6 +895,8 @@ public class TransactionService {
                 transaction.getOccurredAt(),
                 transaction.getMemo(),
                 transaction.getAdjustmentType(),
+                transaction.getGeneratedFromRecurringId(),
+                transaction.getRecurrenceDate(),
                 transaction.getVersion(),
                 entries,
                 transaction.getCreatedAt(),

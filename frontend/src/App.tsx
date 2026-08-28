@@ -536,7 +536,12 @@ function SelectedDayTransactions({
                     : '−'}
               </span>
               <div className="transaction-copy">
-                <strong>{transactionTitle(transaction)}</strong>
+                <strong>
+                  {transactionTitle(transaction)}
+                  {typeof transaction.generatedFromRecurringId === 'number' && (
+                    <span className="provenance-badge">반복</span>
+                  )}
+                </strong>
                 <span>
                   {transaction.adjustmentType === 'REFUND'
                     ? `${transaction.memo ? `${transaction.memo} · ` : ''}${accountPath(transaction)}`

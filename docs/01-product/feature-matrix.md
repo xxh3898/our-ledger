@@ -39,6 +39,15 @@ related:
 - Drill-down: 기존 Transaction 목록과 impact가 0이 아닌 savings activity endpoint
 - 제한: 저축은 ALL에만 제공하며 개인·공동 Account ownership 귀속, aggregate persistence/cache/index migration 없음
 
+## Slice 7 Recurring 구현
+
+- Backend: DAILY/WEEKLY/MONTHLY/YEARLY + interval, Household local time, cursor 기반 bounded catch-up
+- 원장: due occurrence의 일반 Transaction/Entry만 재무 상태에 반영, generated lineage와 deleted row 포함 idempotency
+- 동시성: rule row lock + due 재확인 + database unique, occurrence별 transaction과 one-rule failure isolation
+- lifecycle: optimistic rule edit, pause/resume no-backfill, active Account/Category/Group reference 보호
+- Frontend: Settings의 active/paused/ended 목록, 생성·수정·중지·재개 Sheet, Calendar/통계 `반복` text provenance
+- 제한: recurring REFUND, `auto_post=false`, pending 승인, 알림, 전용 Bottom Navigation tab 없음
+
 ## 공통 요구
 
 모든 Slice는 다음을 포함한다.

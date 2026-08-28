@@ -21,7 +21,10 @@ related:
 - 환불은 원 거래의 금융 bucket과 Account Entry 효과를 반대로 상속하고, 삭제 시 잔액·순소비·예산이 복원된다.
 - active Refund가 있는 원 거래의 금융 edit/delete는 차단되고 환불 자체는 삭제 후 재생성한다.
 - 월 예산 사용액이 거래와 일치한다.
-- 반복 거래가 중복 없이 생성된다.
+- 반복 거래가 Household timezone과 DAILY/WEEKLY/MONTHLY/YEARLY schedule에 따라 canonical Transaction으로 중복 없이 생성된다.
+- 월말·윤년 clamp, 지연 실행 catch-up, 동시 worker에서도 최초 anchor와 발생일별 멱등성이 보존된다.
+- 설정에서 반복 규칙을 생성·수정·일시정지·재개할 수 있고 재개 시 일시정지 기간을 소급 생성하지 않는다.
+- 자동 생성 거래가 달력·예산·통계·저축 활동에 일반 원장과 같은 값으로 반영되고 `반복` provenance가 표시된다.
 - 결혼자금 현재 금액이 연결 Account와 일치한다.
 - CSV로 지정 기간 데이터를 내보낼 수 있다.
 - PWA를 모바일 홈 화면에 설치할 수 있다.

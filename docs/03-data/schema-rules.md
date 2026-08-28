@@ -75,7 +75,7 @@ FOREIGN KEY (category_id, household_id)
 - Household OWNER: `household_id WHERE role = 'OWNER'` partial unique
 - 활성 Category: Household/type/lower(name) partial unique
 - Budget: PostgreSQL `UNIQUE NULLS NOT DISTINCT`로 월·scope·owner·category 중복 방지
-- 반복 생성: `(generated_from_recurring_id, recurrence_date)` partial unique
+- 반복 생성: `(generated_from_recurring_id, recurrence_date)` full unique. null pair를 허용하고 논리삭제 generated row도 중복 방지에 포함
 - Goal Account: `(goal_id, account_id)` PK 및 `account_id` unique
 
 ## Transaction CHECK 요약
@@ -108,6 +108,16 @@ Transaction별 exact Entry set은 단일 row CHECK로 표현할 수 없다. Serv
 - Member와 Category는 같은 Household의 `(id, household_id)`만 참조한다.
 - `UNIQUE NULLS NOT DISTINCT (household_id, budget_month, scope, owner_member_id, category_id)`로 null 포함 identity 중복을 DB에서 차단한다.
 - EXPENSE/active Category 신규 연결은 Service에서 검사한다. archive된 기존 Category FK와 Budget row는 유지한다.
+
+## Slice 7 Recurring 제약
+
+- rule: positive amount, supported type/frequency, positive interval, valid start/end, nonblank name/memo, `auto_post=true`, nonnegative version
+- template field: INCOME/EXPENSE의 Scope/Owner/Category와 TRANSFER null field 의미를 Transaction과 동일하게 CHECK
+- template Account: same-Household Recurring/Account composite FK, `PRIMARY/SOURCE/DESTINATION`, `(recurring_transaction_id, entry_role)` unique
+- cursor: null 또는 start 이상이며 end가 있으면 end 이하
+- generated Transaction: lineage pair CHECK, same-Household Recurring composite FK, NORMAL-only CHECK
+- occurrence unique는 partial index가 아니라 full UNIQUE이므로 logical delete 후에도 동일 occurrence를 다시 만들 수 없다.
+- exact Account role set과 posting compatibility, schedule anchor, active reference lifecycle은 service와 PostgreSQL integration test로 보완한다.
 
 ## Migration
 
