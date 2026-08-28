@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-28
 related:
   - 00-overview/roadmap.md
@@ -30,6 +30,14 @@ related:
 - Frontend: Budget 하단 destination, 월 history, 생성·수정·삭제, 사용액 drill-down
 - 재무 기준: 카드 구매 EXPENSE 포함, 카드대금 TRANSFER·INCOME·논리삭제 제외, REFUND 차감
 - 제외: 자동 이월·자동 복사·거래 차단·추천·Statistics 구현
+
+## Slice 6 Statistics 구현
+
+- Backend read model: current/comparison summary와 주체·Category·PRIMARY Account·calendar month breakdown
+- 재무 기준: NORMAL INCOME, NORMAL EXPENSE - REFUND EXPENSE, 저축 Account 순이체, income 0 저축률 null
+- Frontend: 이번 달 기본값, preset/custom 기간, 실제 Member/공동 Scope, canonical URL/history, semantic table/list
+- Drill-down: 기존 Transaction 목록과 impact가 0이 아닌 savings activity endpoint
+- 제한: 저축은 ALL에만 제공하며 개인·공동 Account ownership 귀속, aggregate persistence/cache/index migration 없음
 
 ## 공통 요구
 

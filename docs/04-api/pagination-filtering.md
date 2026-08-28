@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-28
 related:
   - 05-frontend/calendar-screen.md
@@ -72,6 +72,23 @@ categoryId=<Category ID>                  # Category Budget만
 
 HOUSEHOLD는 scope/owner를 보내지 않는다. `type=EXPENSE` 안에서 NORMAL 지출과 REFUND를 구분해 표시하며 INCOME/TRANSFER는 목록에 포함하지 않는다.
 
+## Statistics와 drill-down
+
+Statistics read model은 `from/to`와 optional `compareFrom/compareTo`를 받고 Calendar와 같은 Scope mapping을 적용한다. frontend는 raw Transaction 전체를 받아 합계를 다시 만들지 않는다.
+
+주요 지표 drill-down은 같은 current `from/to`와 현재 Statistics Scope에 다음 filter를 더한다.
+
+```text
+수입       type=INCOME
+순소비     type=EXPENSE
+Category   type=EXPENSE&categoryId=<Category ID>
+Account    type=EXPENSE&accountId=<PRIMARY Account ID>
+Member     type=EXPENSE&scope=PERSONAL&ownerMemberId=<Member ID>
+공동       type=EXPENSE&scope=SHARED
+```
+
+Category·Account row는 현재 Statistics Scope를 유지한다. 주체 row는 해당 row의 Scope로 좁힌다. 저축은 raw `type=TRANSFER`를 사용하지 않고 `/api/v1/statistics/savings-activities`를 조회한다.
+
 ## URL 상태
 
-Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. Budget은 `screen=budget&month=YYYY-MM`을 사용한다. frontend는 잘못된 월·날짜·foreign member 조합을 Household timezone의 현재 상태와 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.
+Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. Budget은 `screen=budget&month=YYYY-MM`을 사용한다. Statistics는 `screen=statistics`, `preset`, `view`, optional `memberId`, custom의 `from/to`를 사용하며 comparison range는 canonical preset/custom state에서 파생한다. frontend는 잘못된 월·날짜·기간을 Household timezone의 현재 상태로, foreign member를 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.9
+version: 1.0
 last_updated: 2026-08-28
 related:
   - 04-api/error-contract.md
@@ -275,6 +275,33 @@ GET은 Budget row와 Transaction 파생 사용액의 단일 화면 계약이다.
 `scopes`는 HOUSEHOLD, current Household의 각 실제 Member PERSONAL, SHARED를 Budget 설정 여부와 무관하게 포함한다. 미설정은 `budgetId/version/budgetAmount/remainingAmount=null`이다. `categories`는 실제 생성된 Category Budget만 반환하고 archived Category도 `archived=true`로 식별한다.
 
 사용액은 같은 month/scope/category의 `NORMAL EXPENSE - REFUND EXPENSE`다. INCOME, TRANSFER, 논리삭제는 제외한다. 실제 request/response는 `BudgetApiDocsTest`의 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, Budget conflict snippet으로 검증한다.
+
+## Statistics read model
+
+```text
+GET /api/v1/statistics?from=2026-08-01&to=2026-08-31&compareFrom=2026-07-01&compareTo=2026-07-31
+GET /api/v1/statistics?...&scope=PERSONAL&ownerMemberId=100
+GET /api/v1/statistics?...&scope=SHARED
+GET /api/v1/statistics/savings-activities?from=2026-08-01&to=2026-08-31
+```
+
+모든 날짜는 current Household timezone의 포함 날짜다. `from/to`는 필수이며 역전할 수 없다. `compareFrom/compareTo`는 둘 다 있거나 둘 다 없어야 한다. Scope와 owner 조합은 Calendar와 같고 다른 Household Member는 `404 RESOURCE_NOT_FOUND`다. request에 `householdId`를 받지 않는다.
+
+`GET /api/v1/statistics`는 다음 의미를 가진다.
+
+- `period`: current `from/to/timezone`
+- `summary`: NORMAL INCOME, NORMAL EXPENSE - REFUND EXPENSE, nullable savings amount/rate
+- `comparison`: 이전 기간 값, current-previous 금액 차이, percent change, savings rate percentage point 차이. 비교 범위가 없으면 `null`이다.
+- `subjects`: 실제 Member PERSONAL과 SHARED 순소비. filtered view에는 현재 filter 밖 bucket을 섞지 않는다.
+- `categories`: current canonical name, archived, 순소비, nullable share rate
+- `accounts`: EXPENSE/REFUND PRIMARY Account reference와 순소비
+- `months`: current range가 걸친 모든 calendar month. 빈 달도 0 row이며 partial month는 실제 범위만 계산한다.
+
+비율은 소수점 한 자리 `HALF_UP`이다. 이전 금액이 0이면 percent change는 `null`, income이 0이면 savings rate는 `null`이다. Transfer에는 Scope가 없으므로 PERSONAL/SHARED의 savings amount/rate와 관련 comparison/month 값은 `null`이다.
+
+`savings-activities`는 비저축 ASSET→저축 ASSET의 양수 impact와 저축 ASSET→비저축 목적지의 음수 impact만 반환한다. impact가 0인 Transfer, 논리삭제 Transaction, 다른 Household data는 제외하며 item은 Transaction ID, occurredAt, 원 amount, savings impact, source/destination Account의 ID·name, memo만 포함한다. item impact 합은 같은 기간 ALL summary savings amount와 일치한다.
+
+실제 request/response는 `StatisticsApiDocsTest`의 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet으로 검증한다. Statistics는 별도 table/cache가 없는 원장 파생 read model이다.
 
 ## 인증 상태와 CSRF
 
