@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-28
 related:
   - 06-security/authorization.md
@@ -55,6 +55,8 @@ related:
 - `TRANSACTION_ENTRY_SET_INVALID`
 - `TRANSACTION_REFUND_ORIGINAL_REQUIRED`
 - `TRANSACTION_REFUND_EXCEEDS_ORIGINAL`
+- `TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS`
+- `TRANSACTION_REFUND_UPDATE_NOT_ALLOWED`
 - `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`
 - `CATEGORY_TYPE_MISMATCH`
 - `BUDGET_DUPLICATE`
@@ -79,7 +81,11 @@ related:
 - `UNSUPPORTED_TRANSFER_SOURCE`: LIABILITY source 이체 (`422`)
 - `CREDIT_CARD_NATURE_REQUIRED`: CREDIT_CARD/ASSET 조합 (`422`)
 - `ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`: Entry가 연결된 Account의 posting 분류 변경 (`409`)
-- `UNSUPPORTED_ADJUSTMENT_TYPE`: REFUND/reversal 요청 (`422`)
+- `TRANSACTION_REFUND_ORIGINAL_REQUIRED`: original이 active NORMAL EXPENSE가 아님 (`422`)
+- `TRANSACTION_REFUND_EXCEEDS_ORIGINAL`: active 누적 환불 상한 초과 (`422`, amount field error 포함)
+- `TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS`: active Refund가 있는 original 금융 edit/delete (`409`)
+- `TRANSACTION_REFUND_UPDATE_NOT_ALLOWED`: Refund generic PATCH 요청 (`422`)
+- `UNSUPPORTED_ADJUSTMENT_TYPE`: generic Transaction POST의 REFUND/reversal 요청 (`422`)
 - `UNSUPPORTED_ACCOUNT_POSTING`: Transaction 유형과 Account nature/type 조합 불일치 (`422`)
 
 ### Budget code

@@ -433,6 +433,194 @@ class LedgerApiDocsTest {
     }
 
     @Test
+    void should_documentRefundLifecycle_when_originalExpenseIsPartiallyRefunded()
+            throws Exception {
+        AccountResponse account = createAccount(100_000);
+        Category expenseCategory = createCategory(CategoryType.EXPENSE, "환불 식비");
+        TransactionResponse original = transactionService.create(
+                currentHousehold,
+                new TransactionCreateRequest(
+                        TransactionType.EXPENSE,
+                        50_000L,
+                        TransactionScope.PERSONAL,
+                        ownerMemberId,
+                        partnerMemberId,
+                        expenseCategory.getId(),
+                        account.id(),
+                        null,
+                        null,
+                        Instant.parse("2026-08-27T03:00:00Z"),
+                        "원 지출",
+                        AdjustmentType.NORMAL,
+                        null
+                )
+        );
+        Cookie csrf = csrfCookie();
+
+        mockMvc.perform(post(
+                        "/api/v1/transactions/{originalTransactionId}/refunds",
+                        original.id()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "amount": 20000,
+                                  "occurredAt": "2026-08-28T03:00:00Z",
+                                  "memo": "부분 환불"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("EXPENSE"))
+                .andExpect(jsonPath("$.adjustmentType").value("REFUND"))
+                .andExpect(jsonPath("$.amount").value(20_000))
+                .andExpect(jsonPath("$.scope").value("PERSONAL"))
+                .andExpect(jsonPath("$.owner.memberId").value(ownerMemberId))
+                .andExpect(jsonPath("$.payer.memberId").value(partnerMemberId))
+                .andExpect(jsonPath("$.category.id").value(expenseCategory.getId()))
+                .andExpect(jsonPath("$.entries[0].account.id").value(account.id()))
+                .andExpect(jsonPath("$.entries[0].balanceDelta").value(20_000))
+                .andDo(document("ledger-refund-create"));
+
+        LedgerTransaction refund = transactionRepository.findAll().stream()
+                .filter(transaction ->
+                        transaction.getAdjustmentType() == AdjustmentType.REFUND)
+                .findFirst()
+                .orElseThrow();
+
+        mockMvc.perform(get(
+                        "/api/v1/transactions/{originalTransactionId}/refunds",
+                        original.id()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.originalTransactionId").value(original.id()))
+                .andExpect(jsonPath("$.originalAmount").value(50_000))
+                .andExpect(jsonPath("$.refundedAmount").value(20_000))
+                .andExpect(jsonPath("$.remainingRefundableAmount").value(30_000))
+                .andExpect(jsonPath("$.refunds[0].id").value(refund.getId()))
+                .andExpect(jsonPath("$.refunds[0].memo").value("부분 환불"))
+                .andDo(document("ledger-refund-summary"));
+
+        mockMvc.perform(post(
+                        "/api/v1/transactions/{originalTransactionId}/refunds",
+                        original.id()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "amount": 30001,
+                                  "occurredAt": "2026-08-28T04:00:00Z",
+                                  "memo": null
+                                }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code")
+                        .value("TRANSACTION_REFUND_EXCEEDS_ORIGINAL"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("amount"))
+                .andDo(document("ledger-refund-exceeds-original"));
+
+        mockMvc.perform(patch(
+                        "/api/v1/transactions/{transactionId}",
+                        original.id()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "version": 0,
+                                  "type": "EXPENSE",
+                                  "amount": 40000,
+                                  "scope": "PERSONAL",
+                                  "ownerMemberId": %d,
+                                  "payerMemberId": %d,
+                                  "categoryId": %d,
+                                  "accountId": %d,
+                                  "sourceAccountId": null,
+                                  "destinationAccountId": null,
+                                  "occurredAt": "2026-08-27T03:00:00Z",
+                                  "memo": "원 지출",
+                                  "adjustmentType": "NORMAL",
+                                  "reversesTransactionId": null
+                                }
+                                """.formatted(
+                                ownerMemberId,
+                                partnerMemberId,
+                                expenseCategory.getId(),
+                                account.id()
+                        )))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code")
+                        .value("TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS"))
+                .andDo(document("ledger-refund-original-conflict"));
+
+        mockMvc.perform(patch(
+                        "/api/v1/transactions/{transactionId}",
+                        refund.getId()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "version": 0,
+                                  "type": "EXPENSE",
+                                  "amount": 20000,
+                                  "scope": "PERSONAL",
+                                  "ownerMemberId": %d,
+                                  "payerMemberId": %d,
+                                  "categoryId": %d,
+                                  "accountId": %d,
+                                  "sourceAccountId": null,
+                                  "destinationAccountId": null,
+                                  "occurredAt": "2026-08-28T03:00:00Z",
+                                  "memo": "환불 수정 시도",
+                                  "adjustmentType": "REFUND",
+                                  "reversesTransactionId": %d
+                                }
+                                """.formatted(
+                                ownerMemberId,
+                                partnerMemberId,
+                                expenseCategory.getId(),
+                                account.id(),
+                                original.id()
+                        )))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code")
+                        .value("TRANSACTION_REFUND_UPDATE_NOT_ALLOWED"))
+                .andDo(document("ledger-refund-update-not-allowed"));
+
+        mockMvc.perform(delete(
+                        "/api/v1/transactions/{transactionId}",
+                        refund.getId()
+                )
+                        .queryParam("version", Long.toString(refund.getVersion()))
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .header("X-XSRF-TOKEN", csrf.getValue())
+                        .cookie(csrf))
+                .andExpect(status().isNoContent())
+                .andDo(document("ledger-refund-delete"));
+
+        mockMvc.perform(get(
+                        "/api/v1/transactions/{originalTransactionId}/refunds",
+                        original.id()
+                )
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.refundedAmount").value(0))
+                .andExpect(jsonPath("$.remainingRefundableAmount").value(50_000))
+                .andExpect(jsonPath("$.refunds").isEmpty());
+    }
+
+    @Test
     void should_documentCalendarMonth_when_personalScopeIsRequested() throws Exception {
         AccountResponse account = createAccount(0);
         Category expenseCategory = createCategory(CategoryType.EXPENSE, "Calendar 식비");
@@ -720,6 +908,19 @@ class LedgerApiDocsTest {
                         .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CSRF_TOKEN_INVALID"));
+
+        mockMvc.perform(post("/api/v1/transactions/1/refunds")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("CSRF_TOKEN_INVALID"));
+
+        mockMvc.perform(delete("/api/v1/transactions/1")
+                        .queryParam("version", "0")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("CSRF_TOKEN_INVALID"));
     }

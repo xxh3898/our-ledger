@@ -212,6 +212,26 @@ export type TransactionInput = {
   reversesTransactionId: null
 }
 
+export type RefundSummary = {
+  originalTransactionId: number
+  originalAmount: number
+  refundedAmount: number
+  remainingRefundableAmount: number
+  refunds: Array<{
+    id: number
+    amount: number
+    occurredAt: string
+    memo: string | null
+    version: number
+  }>
+}
+
+export type RefundInput = {
+  amount: number
+  occurredAt: string
+  memo: string | null
+}
+
 export class LedgerApiError extends Error {
   readonly code?: string
   readonly status: number
@@ -448,4 +468,21 @@ export function deleteTransaction(transactionId: number, version: number) {
   return request<void>(`/api/v1/transactions/${transactionId}?version=${version}`, {
     method: 'DELETE',
   })
+}
+
+export function loadRefundSummary(originalTransactionId: number, signal?: AbortSignal) {
+  return request<RefundSummary>(
+    `/api/v1/transactions/${originalTransactionId}/refunds`,
+    { signal },
+  )
+}
+
+export function createRefund(originalTransactionId: number, input: RefundInput) {
+  return request<LedgerTransaction>(
+    `/api/v1/transactions/${originalTransactionId}/refunds`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  )
 }

@@ -69,6 +69,25 @@ public class TransactionController {
         return transactionService.create(currentHousehold, request);
     }
 
+    @GetMapping("/{originalTransactionId}/refunds")
+    RefundSummaryResponse findRefunds(
+            @AuthenticationPrincipal CurrentHousehold currentHousehold,
+            @PathVariable Long originalTransactionId
+    ) {
+        return transactionService.findRefunds(currentHousehold, originalTransactionId);
+    }
+
+    @PostMapping("/{originalTransactionId}/refunds")
+    @ResponseStatus(HttpStatus.CREATED)
+    TransactionResponse createRefund(
+            @AuthenticationPrincipal CurrentHousehold currentHousehold,
+            @PathVariable Long originalTransactionId,
+            @RequestBody RefundCreateRequest request
+    ) {
+        return transactionService.createRefund(
+                currentHousehold, originalTransactionId, request);
+    }
+
     @PatchMapping("/{transactionId}")
     TransactionResponse update(
             @AuthenticationPrincipal CurrentHousehold currentHousehold,

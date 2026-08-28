@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.2
+last_updated: 2026-08-28
 related:
   - 07-quality/financial-invariants.md
 ---
@@ -25,6 +25,8 @@ NORMAL EXPENSE 합계 - REFUND EXPENSE 합계
 ```
 
 개인·공동·Category·Account 필터를 동일하게 적용한다.
+
+REFUND는 원 NORMAL EXPENSE의 Scope, Owner, Payer, Category와 PRIMARY Account를 상속하므로 원 지출과 같은 bucket에서 차감된다. active Refund만 포함하고 logical delete된 Refund는 제외한다.
 
 ## 개인 소비
 
@@ -67,6 +69,8 @@ opening_balance + 유효 entry.balance_delta 합
 ```
 
 LIABILITY 잔액은 양수 부채로 표현한다.
+
+ASSET EXPENSE Refund는 positive delta, CREDIT_CARD/LIABILITY EXPENSE Refund는 negative delta다. Refund 삭제 시 해당 Entry는 원장에 남더라도 연결 Transaction이 삭제 상태이므로 잔액 합에서 제외된다.
 
 ## 순자산
 
