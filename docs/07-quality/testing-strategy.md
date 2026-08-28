@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-28
 related:
   - ADR-008
@@ -58,6 +58,17 @@ Transfer/Card Ledger Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 - same/archived/unsupported/foreign transfer, invalid stored Entry set 거부와 atomic rollback
 - Entry가 연결된 Account의 posting 분류 변경 거부와 기존 거래 조회·잔액 보존
 
+Calendar Slice는 추가로 다음을 PostgreSQL에서 검증한다.
+
+- 현재월과 이전월 `NORMAL EXPENSE - REFUND EXPENSE` 합계와 차이
+- INCOME/TRANSFER 순소비 제외, 논리삭제 거래 전체 제외
+- ALL, 두 실제 Member의 PERSONAL, SHARED 분리
+- PERSONAL owner 누락과 잘못된 scope/owner 조합 `400`
+- 다른 Household Member를 PERSONAL owner로 요청할 때 `404`
+- `Asia/Seoul` 자정 UTC 경계의 월·날짜 귀속
+- 날짜별 순소비 합과 월 순소비의 같은 정의
+- TRANSFER의 ALL 거래 수 포함과 PERSONAL/SHARED 제외
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -109,7 +120,21 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
 
-`App.test.tsx`는 identity loading/401/403을 보존하며 Account/Category 설정, current user 기본값, 수입·지출·이체와 카드 posting, 서버 validation 실패 입력 보존, 최근 목록 edit/delete를 mock HTTP 경계에서 검증한다.
+`calendarState.test.ts`는 Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
+
+`App.test.tsx`는 identity loading/401/403을 보존하며 다음 Calendar/Quick Entry 계약을 mock HTTP 경계에서 검증한다.
+
+- Couple-first section 순서와 실제 Member 이름
+- ALL/각 Member/SHARED의 월 요약·선택일 동일 적용
+- transfer-only 무지출과 future Paw 제외
+- 날짜 선택 URL/API, popstate 동기화
+- 선택 날짜 전달과 current user PERSONAL 기본값
+- numeric autofocus, ESC close, opener focus 복귀
+- 중복 submit 방지, 500ms 성공 feedback, 같은 context 갱신
+- 실패 시 Sheet·입력 보존
+- 선택일 edit/delete 후 월·일 갱신
+- 설정 Sheet의 Account/Category 기능 보존
+- 미구현 하단 tab disabled
 
 ## Production 보안 검증
 
@@ -127,7 +152,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete와 `ledger-calendar-month` snippet을 생성한다.
 
 ## 회귀 우선순위
 

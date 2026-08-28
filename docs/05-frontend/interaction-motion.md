@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-28
 related:
   - 05-frontend/design-system.md
@@ -53,3 +53,10 @@ related:
 - keyboard와 screen reader 사용자는 pointer motion 없이 같은 action과 상태를 확인할 수 있어야 한다.
 - animation 중 submit이나 navigation을 중복 실행하지 않도록 pending 상태를 명시한다.
 - duration과 easing token은 실제 구현에서 기기 성능과 접근성을 검증한 뒤 확정한다. 저장 성공 feedback의 400~600ms 외에는 mockup만 보고 고정하지 않는다.
+
+## Slice 4 구현 상태
+
+- 새 motion dependency 없이 CSS만 사용한다.
+- Paw FAB press와 loading Paw에만 작은 scale/opacity feedback을 적용하고 `prefers-reduced-motion`에서 제거한다.
+- 저장 성공 text/Paw는 즉시 표시하고 500ms 뒤 Sheet를 닫는다. 실패 상태는 움직이거나 닫지 않는다.
+- Quick Entry를 닫으면 호출한 FAB 또는 수정 button으로 focus를 복귀한다.

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-28
 related:
   - 05-frontend/calendar-screen.md
@@ -100,6 +100,22 @@ Semantic color는 pink palette와 분리한다.
 - illustration에는 decorative 여부에 맞는 대체 text 정책을 적용하고 같은 정보가 본문에 있으면 중복 낭독을 피한다.
 - mockup의 금융 숫자와 계좌 표시는 sample이다. 실제 전체 계좌번호, credential, private 금융 식별정보를 asset이나 문서에 넣지 않는다.
 - animation과 interaction은 [Motion과 상호작용](interaction-motion.md)의 reduced-motion 계약을 따른다.
+
+## Slice 4 CSS 적용
+
+Calendar Home은 이 palette를 CSS custom property로 구현한다. 작은 본문과 action의 실제 대비를 확보하기 위해 다음 text/semantic token은 문서의 초기 후보보다 어두운 값을 사용한다.
+
+| 실제 token | 값 | 대표 대비 |
+|---|---|---|
+| `action-text` | `#241B1E` | `primary #F36F9F` 위 `6.07:1` |
+| `accent-text` | `#B83267` | 흰색 위 `5.69:1` |
+| `neutral-500` | `#76666C` | 흰색 위 `5.40:1` |
+| `income` | `#2D805F` | text/icon 의미 보강 |
+| `expense` | `#C84354` | text/icon 의미 보강 |
+| `transfer` | `#5265C7` | text/icon 의미 보강 |
+| `danger` | `#BD3344` | 오류 text 의미 보강 |
+
+`body #30272A`와 `pink-200 #FFE1EC` 조합은 `11.89:1`이다. 수치 자체만으로 전체 화면 접근성을 단정하지 않고 날짜 button의 text label, 부호, 현재/선택 상태와 함께 검증한다. Slice 4는 CSS avatar placeholder만 사용하며 production 고양이 asset을 추가하지 않는다.
 
 ## 구현 library 후보
 

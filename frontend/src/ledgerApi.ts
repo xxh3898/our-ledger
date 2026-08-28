@@ -69,7 +69,7 @@ export type LedgerTransaction = {
   category: { id: number; name: string; type: 'INCOME' | 'EXPENSE'; archived: boolean } | null
   occurredAt: string
   memo: string | null
-  adjustmentType: 'NORMAL'
+  adjustmentType: 'NORMAL' | 'REFUND'
   version: number
   entries: Array<{
     id: number
@@ -84,6 +84,26 @@ export type LedgerTransaction = {
     }
   }>
 }
+
+export type CalendarMonth = {
+  month: string
+  timezone: string
+  summary: {
+    netSpendingAmount: number
+    previousMonthNetSpendingAmount: number
+    differenceAmount: number
+  }
+  days: Array<{
+    date: string
+    transactionCount: number
+    netSpendingAmount: number
+  }>
+}
+
+export type CalendarFilter =
+  | { scope: 'ALL'; ownerMemberId: null }
+  | { scope: 'PERSONAL'; ownerMemberId: number }
+  | { scope: 'SHARED'; ownerMemberId: null }
 
 export type AccountInput = {
   name: string
@@ -190,15 +210,43 @@ export async function loadCurrentUser(signal: AbortSignal): Promise<CurrentUser>
   return request<CurrentUser>('/api/v1/me', { signal })
 }
 
-export async function loadLedgerData(signal?: AbortSignal) {
-  const [household, accounts, groups, categories, transactions] = await Promise.all([
+export async function loadReferenceData(signal?: AbortSignal) {
+  const [household, accounts, groups, categories] = await Promise.all([
     request<CurrentHousehold>('/api/v1/households/current', { signal }),
     request<Account[]>('/api/v1/accounts', { signal }),
     request<CategoryGroup[]>('/api/v1/category-groups', { signal }),
     request<Category[]>('/api/v1/categories', { signal }),
-    request<LedgerTransaction[]>('/api/v1/transactions', { signal }),
   ])
-  return { household, accounts, groups, categories, transactions }
+  return { household, accounts, groups, categories }
+}
+
+function applyCalendarFilter(parameters: URLSearchParams, filter: CalendarFilter) {
+  if (filter.scope === 'PERSONAL') {
+    parameters.set('scope', 'PERSONAL')
+    parameters.set('ownerMemberId', filter.ownerMemberId.toString())
+  } else if (filter.scope === 'SHARED') {
+    parameters.set('scope', 'SHARED')
+  }
+}
+
+export function loadCalendarMonth(
+  month: string,
+  filter: CalendarFilter,
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams({ month })
+  applyCalendarFilter(parameters, filter)
+  return request<CalendarMonth>(`/api/v1/calendar/month?${parameters}`, { signal })
+}
+
+export function loadDayTransactions(
+  date: string,
+  filter: CalendarFilter,
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams({ from: date, to: date })
+  applyCalendarFilter(parameters, filter)
+  return request<LedgerTransaction[]>(`/api/v1/transactions?${parameters}`, { signal })
 }
 
 export function createAccount(input: AccountInput) {

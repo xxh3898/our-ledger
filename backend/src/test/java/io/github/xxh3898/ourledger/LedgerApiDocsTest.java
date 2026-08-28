@@ -433,6 +433,66 @@ class LedgerApiDocsTest {
     }
 
     @Test
+    void should_documentCalendarMonth_when_personalScopeIsRequested() throws Exception {
+        AccountResponse account = createAccount(0);
+        Category expenseCategory = createCategory(CategoryType.EXPENSE, "Calendar 식비");
+        transactionService.create(currentHousehold, new TransactionCreateRequest(
+                TransactionType.EXPENSE,
+                12_000L,
+                TransactionScope.PERSONAL,
+                ownerMemberId,
+                ownerMemberId,
+                expenseCategory.getId(),
+                account.id(),
+                null,
+                null,
+                Instant.parse("2026-08-01T03:00:00Z"),
+                "8월 식비",
+                AdjustmentType.NORMAL,
+                null
+        ));
+        transactionService.create(currentHousehold, new TransactionCreateRequest(
+                TransactionType.EXPENSE,
+                5_000L,
+                TransactionScope.PERSONAL,
+                ownerMemberId,
+                ownerMemberId,
+                expenseCategory.getId(),
+                account.id(),
+                null,
+                null,
+                Instant.parse("2026-07-31T14:59:00Z"),
+                "7월 식비",
+                AdjustmentType.NORMAL,
+                null
+        ));
+
+        mockMvc.perform(get("/api/v1/calendar/month")
+                        .queryParam("month", "2026-08")
+                        .queryParam("scope", "PERSONAL")
+                        .queryParam("ownerMemberId", ownerMemberId.toString())
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.month").value("2026-08"))
+                .andExpect(jsonPath("$.timezone").value("Asia/Seoul"))
+                .andExpect(jsonPath("$.summary.netSpendingAmount").value(12_000))
+                .andExpect(jsonPath("$.summary.previousMonthNetSpendingAmount").value(5_000))
+                .andExpect(jsonPath("$.summary.differenceAmount").value(7_000))
+                .andExpect(jsonPath("$.days[0].date").value("2026-08-01"))
+                .andExpect(jsonPath("$.days[0].transactionCount").value(1))
+                .andExpect(jsonPath("$.days[0].netSpendingAmount").value(12_000))
+                .andDo(document("ledger-calendar-month"));
+
+        mockMvc.perform(get("/api/v1/calendar/month")
+                        .queryParam("month", "2026-08")
+                        .queryParam("scope", "PERSONAL")
+                        .header(LOCAL_IDENTITY_HEADER, OWNER_EMAIL))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("ownerMemberId"));
+    }
+
+    @Test
     void should_documentTransferAndCardPosting_when_cardExpenseAndPaymentAreCreated()
             throws Exception {
         AccountResponse checking = createAccount(50_000);

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-28
 related:
   - 01-product/user-flows.md
@@ -53,7 +53,7 @@ related:
 
 ## 기본값
 
-- 날짜: 오늘
+- 날짜: Calendar에서 열면 선택 날짜, 그 밖의 진입에서는 오늘
 - 통화: KRW
 - Account: 최근 사용값 또는 사용자 기본값
 - Owner/Payer: `/api/v1/me.userId`와 Household Member의 `userId`가 일치하는 현재 사용자
@@ -122,15 +122,17 @@ client validation은 server의 Household, ownership, 거래 유형, Account/Cate
 
 실패하면 Sheet와 모든 입력값을 유지하고 오류 원인을 표시해 재시도할 수 있게 한다. V1에서는 `저장 후 계속 입력`을 기본 제공하지 않는다.
 
-## Slice 3 화면
+## Slice 4 구현 상태
 
 - 현재 Household의 Account를 이름, type, PERSONAL/SHARED owner, 기초 잔액·기준일로 생성하고 active 목록에서 archive할 수 있다.
 - Category Group과 Category를 지출/수입 type으로 생성하고 active 목록에서 archive할 수 있다. Group 없는 Category를 허용한다.
+- 빠른 입력은 Home Paw FAB에서 86dvh Bottom Sheet로 열리고 금액 input을 autofocus한다. 닫기·ESC·browser back 뒤 opener focus를 복원한다.
 - 빠른 입력은 지출/수입/이체와 양수 금액을 받는다. 수입은 active ASSET, 지출은 active ASSET 또는 CREDIT_CARD/LIABILITY, 이체 source는 active ASSET, destination은 다른 active ASSET/LIABILITY만 선택한다.
 - 이체에서는 Scope/Owner/Payer/Category/PRIMARY Account를 숨기고 source/destination을 표시한다.
 - Account 생성에서 CREDIT_CARD를 선택하면 LIABILITY를 강제하고 savings를 비활성화한다.
-- 최근 목록은 `occurredAt DESC, id DESC`의 API 순서를 그대로 표시한다. 이체는 source→destination, 카드 지출은 카드 Account를 표시하며 edit/delete는 조회한 `version`을 사용한다.
+- 선택일 목록은 `occurredAt DESC, id DESC`의 API 순서를 그대로 표시한다. 이체는 source→destination, 카드 지출은 카드 Account를 표시하며 edit/delete는 조회한 `version`을 사용한다.
 - mutation helper는 same-origin `XSRF-TOKEN` cookie를 `X-XSRF-TOKEN` header로 보낸다. pending 동안 해당 submit/delete button을 비활성화한다.
 - 서버 validation/domain 실패 시 Account/Category/Transaction form state를 초기화하지 않고 error message를 `role=alert`로 표시한다.
+- 성공 시 `저장했어요/수정했어요 🐾`를 500ms 표시한 뒤 Sheet를 닫고 같은 월·Scope·선택일을 갱신한다. Calendar Scope와 무관하게 현재 사용자의 PERSONAL을 신규 입력 기본값으로 사용한다.
 
-Calendar/Home 정보 구조와 최종 캐릭터·색상 production asset은 이 Slice 화면에서 제외한다. Couple-first 문서는 후속 구현 방향이며 현재 Slice 3 UI 구현 완료를 의미하지 않는다.
+최근 Category chip·검색·Group icon grid와 Account section picker는 이 Slice에서 새 dependency나 가짜 최근 사용 data 없이 기존 native select를 유지한다. 해당 picker 정교화는 실제 최근 사용 계약과 production asset을 함께 정의하는 후속 범위다.

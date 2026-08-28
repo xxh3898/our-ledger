@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-28
 related:
   - 01-product/benchmark-weple-money.md
@@ -24,19 +24,18 @@ Ledger 본 화면 전에는 same-origin `/api/v1/me`로 current identity를 확�
 - 403: 내부 User 미등록·비활성 또는 Household membership 문제를 안내한다.
 - network/server error: 재시도 가능한 일반 오류로 표시한다.
 
-이 상태 화면은 Slice 1에서 확정한 경계를 유지한다. success일 때만 Ledger dashboard를 로드하고 401/403/error에서는 Ledger request를 시작하지 않는다.
+이 상태 화면은 Slice 1에서 확정한 경계를 유지한다. success일 때만 Calendar Home을 로드하고 401/403/error에서는 Ledger request를 시작하지 않는다.
 
-## Slice 3 Transfer/Card Ledger
+## Slice 3 Transfer/Card Ledger 보존 기능
 
-최종 Home/Calendar 정보구조 전에 다음 기능 panel만 제공한다.
+Slice 4 Calendar Home에서도 다음 기능을 Quick Entry, 선택일 목록, 설정 Sheet로 보존한다.
 
-1. current ASSET Account 잔액 요약
-2. Account 생성·active 목록·archive
-3. Category Group/Category 생성·active 목록·archive
-4. INCOME/EXPENSE/TRANSFER NORMAL 빠른 입력과 CREDIT_CARD/LIABILITY posting
-5. 최근 거래 목록·수정·논리삭제
+1. Account 생성·active 목록·archive
+2. Category Group/Category 생성·active 목록·archive
+3. INCOME/EXPENSE/TRANSFER NORMAL 빠른 입력과 CREDIT_CARD/LIABILITY posting
+4. 선택일 거래 목록·수정·논리삭제
 
-이 panel 구조는 기능 검증용이며 하단 탐색, Calendar/Home, 캐릭터·색상 asset 계약을 확정하지 않는다.
+기존 current ASSET 잔액 panel은 Calendar Home의 월 소비 hero로 대체한다. Account 잔액과 posting 계산 계약 자체는 바꾸지 않는다.
 
 ## Couple-first 디자인 계약
 
@@ -50,7 +49,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 | [Couple-first 디자인 시스템](design-system.md) | 색상, 고양이 정체성, Concept Mockup 사용 경계 | 해당 화면 Slice |
 | [Motion과 상호작용](interaction-motion.md) | 전환, feedback, reduced motion | 해당 화면 Slice |
 
-이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Slice 3 화면에 해당 UI가 이미 구현됐다는 뜻은 아니며, 구현 완료 여부는 각 Slice Issue와 code가 결정한다.
+이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4에서 활성화됐고 Marriage Goal 실제 지표·상세는 Slice 8, production illustration은 별도 asset 범위다.
 
 ## 하단 탐색
 
@@ -72,7 +71,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 가능한 화면에서 동일한 의미로 사용한다.
 
 ```text
-전체 | 치호 | 실제 상대 Member 이름 | 공동
+전체 | 실제 Member A | 실제 Member B | 공동
 ```
 
 개인 항목은 API가 반환한 실제 Member 이름을 사용한다. `ME`나 `PARTNER`를 data model에 추가하지 않는다. 선택값은 달력·예산·통계의 조회 조건에 반영하되 화면별로 부적절한 경우 명확히 비활성화한다.
