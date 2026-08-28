@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BudgetDrilldownSheet, type BudgetDrilldownTarget } from './BudgetDrilldownSheet.tsx'
 import { BudgetSheet, type BudgetEditTarget } from './BudgetSheet.tsx'
 import {
@@ -14,6 +14,17 @@ import {
 
 type BudgetScopeItem = BudgetMonth['scopes'][number]
 type CategoryBudgetItem = BudgetMonth['categories'][number]
+type FocusReturnTarget = {
+  element: HTMLElement
+  key: string | null
+}
+
+function focusReturnTarget(element: HTMLElement): FocusReturnTarget {
+  return {
+    element,
+    key: element.dataset.budgetFocusKey ?? null,
+  }
+}
 
 function formatWon(amount: number) {
   return `${amount.toLocaleString('ko-KR')}원`
@@ -106,8 +117,8 @@ function BudgetCard({
 }: {
   month: string
   item: BudgetScopeItem
-  onEdit: (target: BudgetEditTarget) => void
-  onDrilldown: (target: BudgetDrilldownTarget) => void
+  onEdit: (target: BudgetEditTarget, opener: HTMLElement) => void
+  onDrilldown: (target: BudgetDrilldownTarget, opener: HTMLElement) => void
 }) {
   const label = scopeLabel(item.scope, item.owner)
   return (
@@ -117,7 +128,11 @@ function BudgetCard({
           <p className="section-kicker">{item.scope}</p>
           <h3>{label}</h3>
         </div>
-        <button type="button" onClick={() => onEdit(editTarget(month, item, null))}>
+        <button
+          type="button"
+          data-budget-focus-key={`scope:${item.scope}:${item.owner?.memberId ?? 'none'}:edit`}
+          onClick={(event) => onEdit(editTarget(month, item, null), event.currentTarget)}
+        >
           {item.budgetId === null ? '설정' : '수정'}
         </button>
       </header>
@@ -130,7 +145,11 @@ function BudgetCard({
       <button
         className="budget-spending-link"
         type="button"
-        onClick={() => onDrilldown({ scope: item.scope, owner: item.owner, category: null })}
+        data-budget-focus-key={`scope:${item.scope}:${item.owner?.memberId ?? 'none'}:drilldown`}
+        onClick={(event) => onDrilldown(
+          { scope: item.scope, owner: item.owner, category: null },
+          event.currentTarget,
+        )}
       >
         {label} 사용 내역 보기
       </button>
@@ -161,6 +180,9 @@ export function BudgetScreen({
   const [retryRevision, setRetryRevision] = useState(0)
   const [editing, setEditing] = useState<BudgetEditTarget | null>(null)
   const [drilldown, setDrilldown] = useState<BudgetDrilldownTarget | null>(null)
+  const editingOpenerRef = useRef<FocusReturnTarget | null>(null)
+  const drilldownOpenerRef = useRef<FocusReturnTarget | null>(null)
+  const pendingFocusRef = useRef<FocusReturnTarget | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -174,6 +196,49 @@ export function BudgetScreen({
       })
     return () => controller.abort()
   }, [month, retryRevision, revision])
+
+  useEffect(() => {
+    if (editing || drilldown || !pendingFocusRef.current) return
+    const timeout = window.setTimeout(() => {
+      const pending = pendingFocusRef.current
+      if (!pending) return
+      const replacement = pending.key
+        ? document.querySelector<HTMLElement>(`[data-budget-focus-key="${pending.key}"]`)
+        : null
+      const target = pending.element.isConnected
+        ? pending.element
+        : replacement ?? document.querySelector<HTMLElement>(
+          '[data-budget-focus-key="budget:add"]',
+        )
+      if (target) {
+        target.focus()
+        pendingFocusRef.current = null
+      }
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [drilldown, editing, state.status])
+
+  function openEditing(target: BudgetEditTarget, opener: HTMLElement) {
+    editingOpenerRef.current = focusReturnTarget(opener)
+    setEditing(target)
+  }
+
+  function openDrilldown(target: BudgetDrilldownTarget, opener: HTMLElement) {
+    drilldownOpenerRef.current = focusReturnTarget(opener)
+    setDrilldown(target)
+  }
+
+  const closeEditing = useCallback(() => {
+    pendingFocusRef.current = editingOpenerRef.current
+    editingOpenerRef.current = null
+    setEditing(null)
+  }, [])
+
+  const closeDrilldown = useCallback(() => {
+    pendingFocusRef.current = drilldownOpenerRef.current
+    drilldownOpenerRef.current = null
+    setDrilldown(null)
+  }, [])
 
   const [year, monthNumber] = month.split('-').map(Number)
   return (
@@ -215,8 +280,8 @@ export function BudgetScreen({
                   key={`${item.scope}:${item.owner?.memberId ?? ''}`}
                   month={month}
                   item={item}
-                  onEdit={setEditing}
-                  onDrilldown={setDrilldown}
+                  onEdit={openEditing}
+                  onDrilldown={openDrilldown}
                 />
               ))}
             </div>
@@ -251,16 +316,25 @@ export function BudgetScreen({
                       exceeded={item.exceeded}
                     />
                     <div className="category-budget-actions">
-                      <button type="button" onClick={() => setDrilldown({
-                        scope: item.scope,
-                        owner: item.owner,
-                        category: item.category,
-                      })}>
+                      <button
+                        type="button"
+                        data-budget-focus-key={`category:${item.budgetId}:drilldown`}
+                        onClick={(event) => openDrilldown({
+                          scope: item.scope,
+                          owner: item.owner,
+                          category: item.category,
+                        }, event.currentTarget)}
+                      >
                         사용 내역
                       </button>
-                      <button type="button" onClick={() => setEditing(
-                        editTarget(month, item, item.category),
-                      )}>
+                      <button
+                        type="button"
+                        data-budget-focus-key={`category:${item.budgetId}:edit`}
+                        onClick={(event) => openEditing(
+                          editTarget(month, item, item.category),
+                          event.currentTarget,
+                        )}
+                      >
                         수정
                       </button>
                     </div>
@@ -273,7 +347,8 @@ export function BudgetScreen({
           <button
             className="primary-button add-budget-button"
             type="button"
-            onClick={() => setEditing({
+            data-budget-focus-key="budget:add"
+            onClick={(event) => openEditing({
               budgetId: null,
               version: null,
               month,
@@ -281,7 +356,7 @@ export function BudgetScreen({
               owner: null,
               category: null,
               amount: null,
-            })}
+            }, event.currentTarget)}
           >
             + 예산 추가
           </button>
@@ -295,7 +370,7 @@ export function BudgetScreen({
           household={household}
           categories={categories}
           onChanged={onChanged}
-          onRequestClose={() => setEditing(null)}
+          onRequestClose={closeEditing}
         />
       )}
       {drilldown && (
@@ -303,7 +378,7 @@ export function BudgetScreen({
           month={month}
           timezone={household.timezone}
           target={drilldown}
-          onRequestClose={() => setDrilldown(null)}
+          onRequestClose={closeDrilldown}
         />
       )}
     </>

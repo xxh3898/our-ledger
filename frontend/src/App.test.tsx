@@ -1045,6 +1045,23 @@ describe('App', () => {
     expect(within(createDialog).queryByRole('option', { name: /식비/ })).not.toBeInTheDocument()
   })
 
+  it('moves focus into the Budget Sheet and restores it to the opener after close', async () => {
+    useBudgetUrl()
+    installLedgerRouter()
+    render(<App />)
+    const opener = await screen.findByRole('button', { name: '+ 예산 추가' })
+
+    fireEvent.click(opener)
+
+    const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    expect(within(dialog).getByLabelText('예산 금액')).toHaveFocus()
+    fireEvent.click(within(dialog).getByRole('button', { name: '예산 입력 닫기' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '예산 추가' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
   it('keeps Budget month and destination in history and uses today for Budget Quick Entry', async () => {
     useBudgetUrl('2026-07')
     installLedgerRouter()
@@ -1274,5 +1291,23 @@ describe('App', () => {
         && url.includes('ownerMemberId=100')
         && url.includes('categoryId=300')
     })).toBe(true)
+  })
+
+  it('focuses the Budget drill-down and restores its opener after Escape', async () => {
+    useBudgetUrl()
+    installLedgerRouter()
+    render(<App />)
+    const opener = await screen.findByRole('button', { name: '우리 전체 사용 내역 보기' })
+
+    fireEvent.click(opener)
+
+    const dialog = await screen.findByRole('dialog', { name: '우리 전체' })
+    const closeButton = within(dialog).getByRole('button', { name: '예산 사용 내역 닫기' })
+    await waitFor(() => expect(closeButton).toHaveFocus())
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '우리 전체' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

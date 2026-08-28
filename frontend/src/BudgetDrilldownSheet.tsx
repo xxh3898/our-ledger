@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   type BudgetCategory,
   type BudgetOwner,
@@ -54,6 +54,16 @@ export function BudgetDrilldownSheet({
     | { status: 'error'; message: string }
   >({ status: 'loading' })
   const [revision, setRevision] = useState(0)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeButtonRef.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onRequestClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onRequestClose])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -91,6 +101,7 @@ export function BudgetDrilldownSheet({
             <h2 id="budget-drilldown-title">{title(target)}</h2>
           </div>
           <button
+            ref={closeButtonRef}
             className="icon-button"
             type="button"
             aria-label="예산 사용 내역 닫기"
