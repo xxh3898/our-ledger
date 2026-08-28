@@ -77,6 +77,7 @@ related:
 - `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`: source와 destination 동일 (`422`)
 - `UNSUPPORTED_TRANSFER_SOURCE`: LIABILITY source 이체 (`422`)
 - `CREDIT_CARD_NATURE_REQUIRED`: CREDIT_CARD/ASSET 조합 (`422`)
+- `ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`: Entry가 연결된 Account의 posting 분류 변경 (`409`)
 - `UNSUPPORTED_ADJUSTMENT_TYPE`: REFUND/reversal 요청 (`422`)
 - `UNSUPPORTED_ACCOUNT_POSTING`: Transaction 유형과 Account nature/type 조합 불일치 (`422`)
 

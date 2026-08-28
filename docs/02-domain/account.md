@@ -62,4 +62,5 @@ current_balance = opening_balance + 유효 Account Entry의 balance_delta 합
 - `savings_enabled=true`는 ASSET Account에만 허용한다.
 - INCOME은 active ASSET, 일반 EXPENSE는 active ASSET 또는 CREDIT_CARD/LIABILITY에만 posting한다.
 - TRANSFER source는 active ASSET, destination은 active ASSET 또는 LIABILITY다. OTHER/LIABILITY는 destination으로 허용하지만 카드 EXPENSE Account로는 허용하지 않는다.
+- Entry가 연결된 뒤에는 기존 delta 의미를 바꾸는 ASSET/CREDIT_CARD-LIABILITY/기타 LIABILITY posting 분류 변경을 거부한다. 이름·보관과 같은 분류 비영향 수정은 허용한다.
 - 목록은 active-only가 기본이고 `includeArchived=true`일 때 보관 Account를 함께 반환한다.

@@ -93,6 +93,8 @@ PATCH /api/v1/accounts/{accountId}
 
 create/update는 `name`, nullable `institution`, `type`, `nature`, `ownership`, nullable `ownerMemberId`, `openingBalance`, `openingBalanceAsOf`, `currency`, nullable `lastFour`, `savingsEnabled`, `sortOrder`를 사용한다. update는 `archived` boolean을 추가로 요구한다. response는 해당 필드와 owner reference, `currentBalance`, `archived`, timestamp를 반환한다.
 
+Entry가 연결된 Account의 update는 Account row를 잠그고 posting 분류 변경 여부를 검사한다. ASSET, CREDIT_CARD/LIABILITY, 기타 LIABILITY 사이를 바꿔 기존 Entry delta 의미를 변경하는 요청은 `409 ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`로 거부한다. 동일 ASSET 분류 안의 type 변경과 이름·소유·보관 등 posting 분류에 영향을 주지 않는 수정은 유지한다.
+
 ### Category Group / Category
 
 ```text

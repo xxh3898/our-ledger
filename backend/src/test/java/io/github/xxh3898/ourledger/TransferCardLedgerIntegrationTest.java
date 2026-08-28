@@ -379,6 +379,67 @@ class TransferCardLedgerIntegrationTest {
     }
 
     @Test
+    void should_preservePostingClassification_when_accountHasLedgerEntries() {
+        AccountResponse card = createAccount(
+                "생활 카드", AccountType.CREDIT_CARD, AccountNature.LIABILITY, 0);
+        Category expenseCategory = createCategory(CategoryType.EXPENSE, "생활비");
+        TransactionResponse cardExpense = transactionService.create(
+                currentHousehold,
+                primaryRequest(
+                        TransactionType.EXPENSE,
+                        12_000,
+                        expenseCategory.getId(),
+                        card.id()
+                )
+        );
+
+        assertApiError(
+                ApiErrorCode.ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE,
+                () -> accountService.update(
+                        currentHousehold,
+                        card.id(),
+                        accountUpdate(
+                                card,
+                                card.name(),
+                                AccountType.OTHER,
+                                AccountNature.LIABILITY,
+                                false
+                        ))
+        );
+        assertApiError(
+                ApiErrorCode.ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE,
+                () -> accountService.update(
+                        currentHousehold,
+                        card.id(),
+                        accountUpdate(
+                                card,
+                                card.name(),
+                                AccountType.CHECKING,
+                                AccountNature.ASSET,
+                                false
+                        ))
+        );
+
+        AccountResponse renamed = accountService.update(
+                currentHousehold,
+                card.id(),
+                accountUpdate(
+                        card,
+                        "생활 카드 변경",
+                        AccountType.CREDIT_CARD,
+                        AccountNature.LIABILITY,
+                        false
+                )
+        );
+        assertThat(renamed.name()).isEqualTo("생활 카드 변경");
+        assertThat(renamed.currentBalance()).isEqualTo(12_000);
+        assertThat(transactionService.findOne(currentHousehold, cardExpense.id()).entries())
+                .singleElement()
+                .extracting(TransactionResponse.Entry::balanceDelta)
+                .isEqualTo(12_000L);
+    }
+
+    @Test
     void should_returnStableConflict_when_storedEntrySetIsIncomplete() {
         AccountResponse source = createAccount(
                 "출금 통장", AccountType.CHECKING, AccountNature.ASSET, 0);
@@ -519,11 +580,31 @@ class TransferCardLedgerIntegrationTest {
     }
 
     private void archive(AccountResponse account) {
-        accountService.update(currentHousehold, account.id(), new AccountUpdateRequest(
-                account.name(),
+        accountService.update(
+                currentHousehold,
+                account.id(),
+                accountUpdate(
+                        account,
+                        account.name(),
+                        account.type(),
+                        account.nature(),
+                        true
+                )
+        );
+    }
+
+    private AccountUpdateRequest accountUpdate(
+            AccountResponse account,
+            String name,
+            AccountType type,
+            AccountNature nature,
+            boolean archived
+    ) {
+        return new AccountUpdateRequest(
+                name,
                 account.institution(),
-                account.type(),
-                account.nature(),
+                type,
+                nature,
                 account.ownership(),
                 account.owner().memberId(),
                 account.openingBalance(),
@@ -532,8 +613,8 @@ class TransferCardLedgerIntegrationTest {
                 account.lastFour(),
                 account.savingsEnabled(),
                 account.sortOrder(),
-                true
-        ));
+                archived
+        );
     }
 
     private AccountResponse createForeignAccount() {

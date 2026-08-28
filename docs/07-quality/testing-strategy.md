@@ -56,6 +56,7 @@ Transfer/Card Ledger Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 - update 후 PRIMARY 또는 SOURCE/DESTINATION exact set으로 교체되고 stale role/delta가 남지 않음
 - logical delete 후 목록/detail/잔액 제외, stale version `409`
 - same/archived/unsupported/foreign transfer, invalid stored Entry set 거부와 atomic rollback
+- Entry가 연결된 Account의 posting 분류 변경 거부와 기존 거래 조회·잔액 보존
 
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 

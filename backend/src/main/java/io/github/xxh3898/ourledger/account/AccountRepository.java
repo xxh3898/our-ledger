@@ -1,6 +1,8 @@
 package io.github.xxh3898.ourledger.account;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -14,6 +16,31 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     List<Account> findAllByHouseholdIdAndArchivedAtIsNullOrderBySortOrderAscIdAsc(Long householdId);
 
     Optional<Account> findByIdAndHouseholdId(Long id, Long householdId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT account
+            FROM Account account
+            WHERE account.id = :accountId
+              AND account.householdId = :householdId
+            """)
+    Optional<Account> findByIdAndHouseholdIdForUpdate(
+            @Param("accountId") Long accountId,
+            @Param("householdId") Long householdId
+    );
+
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM transaction_account_entries entry
+                WHERE entry.household_id = :householdId
+                  AND entry.account_id = :accountId
+            )
+            """, nativeQuery = true)
+    boolean hasLedgerEntries(
+            @Param("householdId") Long householdId,
+            @Param("accountId") Long accountId
+    );
 
     @Query(value = """
             SELECT COALESCE(SUM(entry.balance_delta), 0)

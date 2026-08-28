@@ -295,15 +295,26 @@ public class TransactionService {
                 .check(accountId == null, "accountId", "mustBeNull", "TRANSFER에는 PRIMARY Account를 지정하지 않습니다.")
                 .throwIfInvalid();
 
-        Account source = accountService.requireAccount(
-                currentHousehold.householdId(), sourceAccountId);
-        Account destination = accountService.requireAccount(
-                currentHousehold.householdId(), destinationAccountId);
-        if (source.getId().equals(destination.getId())) {
+        if (sourceAccountId.equals(destinationAccountId)) {
+            accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     ApiErrorCode.TRANSFER_SAME_ACCOUNT_NOT_ALLOWED
             );
+        }
+        Account source;
+        Account destination;
+        if (sourceAccountId.compareTo(destinationAccountId) < 0) {
+            source = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
+            destination = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), destinationAccountId);
+        } else {
+            destination = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), destinationAccountId);
+            source = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
         }
         requireActive(source);
         requireActive(destination);
@@ -376,7 +387,7 @@ public class TransactionService {
             );
         }
 
-        Account account = accountService.requireAccount(
+        Account account = accountService.requireAccountForPosting(
                 currentHousehold.householdId(), accountId);
         requireActive(account);
         requireValidCreditCardNature(account);

@@ -23,6 +23,7 @@ public enum ApiErrorCode {
     TRANSFER_SAME_ACCOUNT_NOT_ALLOWED("이체 source와 destination은 달라야 합니다."),
     UNSUPPORTED_TRANSFER_SOURCE("LIABILITY Account에서는 이체를 시작할 수 없습니다."),
     CREDIT_CARD_NATURE_REQUIRED("CREDIT_CARD Account의 nature는 LIABILITY여야 합니다."),
+    ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE("거래가 연결된 Account의 posting 분류는 변경할 수 없습니다."),
     UNSUPPORTED_ADJUSTMENT_TYPE("현재 Slice에서 지원하지 않는 adjustment입니다."),
     UNSUPPORTED_ACCOUNT_POSTING("이 Transaction 유형에서 지원하지 않는 Account posting입니다.");
 

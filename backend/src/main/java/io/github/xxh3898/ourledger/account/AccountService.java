@@ -95,7 +95,8 @@ public class AccountService {
         );
         new RequestValidator().required(request.archived(), "archived").throwIfInvalid();
         requireOwner(currentHousehold.householdId(), request.ownership(), request.ownerMemberId());
-        Account account = requireAccount(currentHousehold.householdId(), accountId);
+        Account account = requireAccountForPosting(currentHousehold.householdId(), accountId);
+        rejectPostingClassificationChange(account, request.type(), request.nature());
         account.update(
                 request.name(),
                 request.institution(),
@@ -122,6 +123,32 @@ public class AccountService {
                         HttpStatus.NOT_FOUND,
                         ApiErrorCode.RESOURCE_NOT_FOUND
                 ));
+    }
+
+    @Transactional
+    public Account requireAccountForPosting(Long householdId, Long accountId) {
+        return accountRepository.findByIdAndHouseholdIdForUpdate(accountId, householdId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ApiErrorCode.RESOURCE_NOT_FOUND
+                ));
+    }
+
+    private void rejectPostingClassificationChange(
+            Account account,
+            AccountType requestedType,
+            AccountNature requestedNature
+    ) {
+        boolean classificationChanged = account.getNature() != requestedNature
+                || (account.getType() == AccountType.CREDIT_CARD)
+                != (requestedType == AccountType.CREDIT_CARD);
+        if (classificationChanged && accountRepository.hasLedgerEntries(
+                account.getHouseholdId(), account.getId())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCode.ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE
+            );
+        }
     }
 
     private void validate(
