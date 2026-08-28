@@ -82,7 +82,7 @@ Account별 순소비
 ?screen=statistics&preset=custom&from=2026-06-15&to=2026-08-20&view=shared
 ```
 
-Router dependency 없이 `history.pushState/replaceState`와 `popstate`를 사용한다. invalid preset/date/range/foreign Member는 이번 달·ALL canonical state로 정규화한다. comparison query는 canonical current state에서 파생한다.
+Router dependency 없이 `history.pushState/replaceState`와 `popstate`를 사용한다. invalid preset/date/range는 이번 달로, invalid/foreign Member는 ALL로 각 상태를 안전하게 정규화한다. comparison query는 canonical current state에서 파생한다.
 
 ## Drill-down Sheet
 

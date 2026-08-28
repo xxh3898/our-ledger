@@ -46,9 +46,11 @@ function formatRate(rate: number | null) {
 }
 
 function differenceText(amount: number, percent: number | null) {
-  const direction = amount > 0 ? '증가' : amount < 0 ? '감소' : '변화 없음'
-  const amountText = amount === 0 ? '0원' : `${formatWon(Math.abs(amount))} ${direction}`
-  return percent === null ? `${amountText} · 비율 계산 불가` : `${amountText} · ${Math.abs(percent)}% ${direction}`
+  const amountDirection = amount > 0 ? '증가' : amount < 0 ? '감소' : '변화 없음'
+  const amountText = amount === 0 ? '0원' : `${formatWon(Math.abs(amount))} ${amountDirection}`
+  if (percent === null) return `${amountText} · 비율 계산 불가`
+  const percentDirection = percent > 0 ? '증가' : percent < 0 ? '감소' : '변화 없음'
+  return `${amountText} · ${Math.abs(percent)}% ${percentDirection}`
 }
 
 function scopeFilter(
@@ -304,7 +306,9 @@ function StatisticsContent({
             <>
               <SummaryCard
                 label="저축"
-                value={formatWon(data.summary.savingsAmount ?? 0)}
+                value={data.summary.savingsAmount === null
+                  ? '계산 불가'
+                  : formatWon(data.summary.savingsAmount)}
                 detail="저축 Account 순이체"
                 onClick={(opener) => onDrilldown({
                   kind: 'savings', title: '저축 활동',
@@ -358,8 +362,12 @@ function StatisticsContent({
                   <th>{month.month}</th>
                   <td>{formatWon(month.incomeAmount)}</td>
                   <td>{formatWon(month.netSpendingAmount)}</td>
-                  <td>{month.savingsAmount === null ? '전체 보기 전용' : formatWon(month.savingsAmount)}</td>
-                  <td>{month.savingsRate === null ? '계산 불가' : formatRate(month.savingsRate)}</td>
+                  <td>{!savingsAvailable
+                    ? '전체 보기 전용'
+                    : month.savingsAmount === null
+                      ? '계산 불가'
+                      : formatWon(month.savingsAmount)}</td>
+                  <td>{!savingsAvailable ? '전체 보기 전용' : formatRate(month.savingsRate)}</td>
                 </tr>
               ))}
             </tbody>

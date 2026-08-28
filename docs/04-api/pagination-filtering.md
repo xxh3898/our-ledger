@@ -91,4 +91,4 @@ Category·Account row는 현재 Statistics Scope를 유지한다. 주체 row는 
 
 ## URL 상태
 
-Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. Budget은 `screen=budget&month=YYYY-MM`을 사용한다. Statistics는 `screen=statistics`, `preset`, `view`, optional `memberId`, custom의 `from/to`를 사용하며 comparison range는 canonical preset/custom state에서 파생한다. frontend는 잘못된 월·날짜·기간·foreign member 조합을 Household timezone의 현재 상태와 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.
+Calendar는 `month`, `view`, `date`, `memberId`를 URL query에 반영해 새로고침과 앞·뒤 이동에서 유지한다. Budget은 `screen=budget&month=YYYY-MM`을 사용한다. Statistics는 `screen=statistics`, `preset`, `view`, optional `memberId`, custom의 `from/to`를 사용하며 comparison range는 canonical preset/custom state에서 파생한다. frontend는 잘못된 월·날짜·기간을 Household timezone의 현재 상태로, foreign member를 ALL 보기로 명시적으로 정규화하고, 선택 날짜가 항상 표시 월에 속하도록 보장한다.

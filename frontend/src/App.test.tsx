@@ -1740,6 +1740,8 @@ describe('App', () => {
 
     expect(await screen.findByText('저축·저축률은 전체 보기에서 제공해요.'))
       .toBeInTheDocument()
+    expect(screen.getAllByText('전체 보기 전용')).toHaveLength(2)
+    expect(screen.queryAllByText('1,000,000원')).toHaveLength(0)
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = String(input)
       return url.includes('/api/v1/statistics?')
@@ -1775,7 +1777,7 @@ describe('App', () => {
       .getByRole('button', { name: '공동' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('loads filtered transaction and savings drill-downs with refund semantics and focus return', async () => {
+  it('loads every filtered transaction and savings drill-down with refund semantics', async () => {
     useStatisticsUrl()
     const normal = primaryTransaction({ id: 400, amount: 12_000 })
     const refund = {
@@ -1806,6 +1808,72 @@ describe('App', () => {
 
     const summarySection = screen.getByRole('heading', { name: '이번 기간 요약' })
       .closest('section') as HTMLElement
+    const incomeOpener = within(summarySection).getByRole('button', { name: /^수입/ })
+    fireEvent.click(incomeOpener)
+    await screen.findByRole('dialog', { name: '수입 원장' })
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('type=INCOME')
+        && !url.includes('categoryId=')
+        && !url.includes('accountId=')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(incomeOpener).toHaveFocus())
+
+    const spendingOpener = within(summarySection).getByRole('button', { name: /^순소비/ })
+    fireEvent.click(spendingOpener)
+    await screen.findByRole('dialog', { name: '소비·환불 원장' })
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('type=EXPENSE')
+        && !url.includes('categoryId=')
+        && !url.includes('accountId=')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(spendingOpener).toHaveFocus())
+
+    const accountSection = screen.getByRole('heading', { name: '어떤 Account로 썼나요' })
+      .closest('section') as HTMLElement
+    const accountOpener = within(accountSection).getByRole('button', { name: /주거래 통장/ })
+    fireEvent.click(accountOpener)
+    await screen.findByRole('dialog', { name: '주거래 통장 소비·환불' })
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('type=EXPENSE')
+        && url.includes('accountId=200')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(accountOpener).toHaveFocus())
+
+    const subjectSection = screen.getByRole('heading', { name: '누가 썼나요' })
+      .closest('section') as HTMLElement
+    const memberOpener = within(subjectSection).getByRole('button', { name: /Member/ })
+    fireEvent.click(memberOpener)
+    await screen.findByRole('dialog', { name: 'Member 소비·환불' })
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('scope=PERSONAL')
+        && url.includes('ownerMemberId=101')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(memberOpener).toHaveFocus())
+
+    const sharedOpener = within(subjectSection).getByRole('button', { name: /공동/ })
+    fireEvent.click(sharedOpener)
+    await screen.findByRole('dialog', { name: '공동 소비·환불' })
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('scope=SHARED')
+        && !url.includes('ownerMemberId=')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(sharedOpener).toHaveFocus())
+
     const savingsOpener = within(summarySection).getByRole('button', { name: /저축.*원장 보기/ })
     fireEvent.click(savingsOpener)
     const savingsDialog = await screen.findByRole('dialog', { name: '저축 활동' })
@@ -1814,6 +1882,42 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([input]) =>
       String(input).includes('/api/v1/statistics/savings-activities?from=2026-08-01&to=2026-08-31')))
       .toBe(true)
+  })
+
+  it('renders unavailable percentages and keeps amount and percent directions independent', async () => {
+    useStatisticsUrl()
+    installLedgerRouter({
+      statistics: {
+        ...statisticsData,
+        summary: {
+          ...statisticsData.summary,
+          incomeAmount: 0,
+          savingsAmount: -10_000,
+          savingsRate: null,
+        },
+        comparison: {
+          ...statisticsData.comparison,
+          incomeDifferenceAmount: 100_000,
+          incomePercentChange: null,
+          netSpendingDifferenceAmount: 50_000,
+          netSpendingPercentChange: -50,
+          savingsRateDifferencePoints: null,
+        },
+        months: [{
+          ...statisticsData.months[0],
+          incomeAmount: 0,
+          savingsAmount: -10_000,
+          savingsRate: null,
+        }],
+      },
+    })
+    render(<App />)
+
+    expect(await screen.findByText('100,000원 증가 · 비율 계산 불가')).toBeInTheDocument()
+    expect(screen.getByText('50,000원 증가 · 50% 감소')).toBeInTheDocument()
+    expect(screen.getByText('비교 계산 불가')).toBeInTheDocument()
+    expect(screen.getAllByText('계산 불가').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('-10,000원').length).toBeGreaterThanOrEqual(2)
   })
 
   it('uses Household today for Statistics Paw and preserves Calendar, Budget, and disabled Assets', async () => {

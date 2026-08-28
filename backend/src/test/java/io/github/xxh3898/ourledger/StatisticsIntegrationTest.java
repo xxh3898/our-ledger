@@ -47,6 +47,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -239,11 +240,12 @@ class StatisticsIntegrationTest {
             assertThat(month.month()).isEqualTo(YearMonth.of(2026, 8));
             assertThat(month.savingsAmount()).isEqualTo(900_000);
         });
-        assertThat(statisticsService.findSavingsActivities(
+        List<SavingsActivityResponse> activities = statisticsService.findSavingsActivities(
                 currentHousehold,
                 LocalDate.of(2026, 8, 1),
                 LocalDate.of(2026, 8, 31)
-        )).extracting(
+        );
+        assertThat(activities).extracting(
                 SavingsActivityResponse::savingsImpactAmount,
                 item -> item.sourceAccount().name(),
                 item -> item.destinationAccount().name()
@@ -251,6 +253,9 @@ class StatisticsIntegrationTest {
                 tuple(-100_000L, "결혼 적금", "생활비"),
                 tuple(1_000_000L, "생활비", "결혼 적금")
         );
+        assertThat(activities.stream()
+                .mapToLong(SavingsActivityResponse::savingsImpactAmount)
+                .sum()).isEqualTo(response.summary().savingsAmount());
     }
 
     @Test
