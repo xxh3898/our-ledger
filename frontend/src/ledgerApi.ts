@@ -166,6 +166,72 @@ export type BudgetInput = {
   amount: number
 }
 
+export type StatisticsData = {
+  period: {
+    from: string
+    to: string
+    timezone: string
+  }
+  summary: {
+    incomeAmount: number
+    netSpendingAmount: number
+    savingsAmount: number | null
+    savingsRate: number | null
+  }
+  comparison: {
+    from: string
+    to: string
+    incomeAmount: number
+    netSpendingAmount: number
+    savingsAmount: number | null
+    savingsRate: number | null
+    incomeDifferenceAmount: number
+    netSpendingDifferenceAmount: number
+    savingsDifferenceAmount: number | null
+    incomePercentChange: number | null
+    netSpendingPercentChange: number | null
+    savingsPercentChange: number | null
+    savingsRateDifferencePoints: number | null
+  } | null
+  subjects: Array<{
+    scope: 'PERSONAL' | 'SHARED'
+    owner: BudgetOwner | null
+    netSpendingAmount: number
+  }>
+  categories: Array<{
+    category: { id: number; name: string; archived: boolean }
+    netSpendingAmount: number
+    shareRate: number | null
+  }>
+  accounts: Array<{
+    account: {
+      id: number
+      name: string
+      type: Account['type']
+      nature: Account['nature']
+      archived: boolean
+    }
+    netSpendingAmount: number
+  }>
+  months: Array<{
+    month: string
+    incomeAmount: number
+    netSpendingAmount: number
+    savingsAmount: number | null
+    savingsRate: number | null
+  }>
+}
+
+export type SavingsActivity = {
+  transactionId: number
+  occurredAt: string
+  amount: number
+  savingsImpactAmount: number
+  sourceAccount: { id: number; name: string }
+  destinationAccount: { id: number; name: string }
+  memo: string | null
+}
+
 export type AccountInput = {
   name: string
   institution: string | null
@@ -333,6 +399,57 @@ export function loadDayTransactions(
 export function loadBudgetMonth(month: string, signal?: AbortSignal) {
   const parameters = new URLSearchParams({ month })
   return request<BudgetMonth>(`/api/v1/budgets?${parameters}`, { signal })
+}
+
+export function loadStatistics(
+  range: {
+    from: string
+    to: string
+    compareFrom: string
+    compareTo: string
+  },
+  filter: CalendarFilter,
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams(range)
+  applyCalendarFilter(parameters, filter)
+  return request<StatisticsData>(`/api/v1/statistics?${parameters}`, { signal })
+}
+
+export function loadStatisticsTransactions(
+  range: { from: string; to: string },
+  filter: CalendarFilter,
+  target: {
+    type: 'INCOME' | 'EXPENSE'
+    categoryId?: number
+    accountId?: number
+  },
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams({
+    from: range.from,
+    to: range.to,
+    type: target.type,
+  })
+  applyCalendarFilter(parameters, filter)
+  if (target.categoryId !== undefined) {
+    parameters.set('categoryId', target.categoryId.toString())
+  }
+  if (target.accountId !== undefined) {
+    parameters.set('accountId', target.accountId.toString())
+  }
+  return request<LedgerTransaction[]>(`/api/v1/transactions?${parameters}`, { signal })
+}
+
+export function loadSavingsActivities(
+  range: { from: string; to: string },
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams(range)
+  return request<SavingsActivity[]>(
+    `/api/v1/statistics/savings-activities?${parameters}`,
+    { signal },
+  )
 }
 
 function lastDayOfMonth(month: string) {

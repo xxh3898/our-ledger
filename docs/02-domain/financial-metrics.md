@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-28
 related:
   - 07-quality/financial-invariants.md
@@ -61,6 +61,10 @@ AND destination.savings_enabled=true
 ```
 
 총수입이 0이면 `null`이다. 0%로 표시하지 않는다.
+
+Statistics API의 저축률과 증감률은 소수점 한 자리에서 `HALF_UP` 반올림한다. 이전 기간 금액이 0이면 percent change는 `null`이며 금액 차이는 유지한다. 저축률 비교는 percent change가 아니라 percentage point 차이다.
+
+TRANSFER에는 Scope가 없으므로 V1 Statistics의 저축액과 저축률은 ALL에서만 계산한다. PERSONAL/SHARED에서는 Account ownership으로 귀속을 추론하지 않고 `null`로 제공한다.
 
 ## Account 잔액
 

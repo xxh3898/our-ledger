@@ -4,6 +4,7 @@ import { BudgetScreen } from './BudgetScreen.tsx'
 import { QuickEntrySheet } from './QuickEntrySheet.tsx'
 import { RefundSheet } from './RefundSheet.tsx'
 import { SettingsSheet } from './SettingsSheet.tsx'
+import { StatisticsScreen } from './StatisticsScreen.tsx'
 import {
   currentBudgetMonth,
   isBudgetScreen,
@@ -35,6 +36,20 @@ import {
   loadRefundSummary,
 } from './ledgerApi.ts'
 import { entryByRole } from './transactionUtils.ts'
+import {
+  isStatisticsScreen,
+  normalizeStatisticsState,
+  serializeStatisticsState,
+  type StatisticsNavigationState,
+} from './statisticsState.ts'
+
+type WorkspaceScreen = 'calendar' | 'budget' | 'statistics'
+
+function screenFromSearch(search: string): WorkspaceScreen {
+  if (isStatisticsScreen(search)) return 'statistics'
+  if (isBudgetScreen(search)) return 'budget'
+  return 'calendar'
+}
 
 type ViewState =
   | { status: 'loading' }
@@ -600,8 +615,8 @@ function BottomNavigation({
   active,
   onNavigate,
 }: {
-  active: 'calendar' | 'budget'
-  onNavigate: (destination: 'calendar' | 'budget') => void
+  active: WorkspaceScreen
+  onNavigate: (destination: WorkspaceScreen) => void
 }) {
   return (
     <nav className="bottom-navigation" aria-label="주요 메뉴">
@@ -621,7 +636,14 @@ function BottomNavigation({
       >
         <span aria-hidden="true">◔</span>예산
       </button>
-      <button type="button" disabled><span aria-hidden="true">⌁</span>통계<span>준비 중</span></button>
+      <button
+        type="button"
+        className={active === 'statistics' ? 'is-active' : ''}
+        aria-current={active === 'statistics' ? 'page' : undefined}
+        onClick={() => onNavigate('statistics')}
+      >
+        <span aria-hidden="true">⌁</span>통계
+      </button>
       <button type="button" disabled><span aria-hidden="true">◇</span>자산<span>준비 중</span></button>
     </nav>
   )
@@ -635,14 +657,16 @@ function CalendarWorkspace({
   initialReferences: ReferenceData
 }) {
   const [references, setReferences] = useState(initialReferences)
-  const [activeScreen, setActiveScreen] = useState<'calendar' | 'budget'>(() =>
-    isBudgetScreen(window.location.search) ? 'budget' : 'calendar')
+  const [activeScreen, setActiveScreen] = useState<WorkspaceScreen>(() =>
+    screenFromSearch(window.location.search))
   const [navigation, setNavigation] = useState(() =>
     normalizeCalendarState(window.location.search, initialReferences.household))
   const [budgetMonth, setBudgetMonth] = useState(() =>
     isBudgetScreen(window.location.search)
       ? normalizeBudgetMonth(window.location.search, initialReferences.household.timezone)
       : currentBudgetMonth(initialReferences.household.timezone))
+  const [statisticsNavigation, setStatisticsNavigation] = useState<StatisticsNavigationState>(() =>
+    normalizeStatisticsState(window.location.search, initialReferences.household))
   const [monthState, setMonthState] = useState<AsyncState<CalendarMonth>>({ status: 'loading' })
   const [dayState, setDayState] = useState<AsyncState<LedgerTransaction[]>>({ status: 'loading' })
   const [revision, setRevision] = useState(0)
@@ -715,8 +739,16 @@ function CalendarWorkspace({
   }, [activeScreen, budgetMonth])
 
   useEffect(() => {
+    if (activeScreen !== 'statistics') return
+    const normalizedSearch = serializeStatisticsState(statisticsNavigation)
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
+    }
+  }, [activeScreen, statisticsNavigation])
+
+  useEffect(() => {
     const onPopState = () => {
-      const nextScreen = isBudgetScreen(window.location.search) ? 'budget' : 'calendar'
+      const nextScreen = screenFromSearch(window.location.search)
       setActiveScreen(nextScreen)
       if (nextScreen === 'budget') {
         const nextBudgetMonth = normalizeBudgetMonth(
@@ -728,6 +760,16 @@ function CalendarWorkspace({
           window.history.replaceState(window.history.state, '', normalizedSearch)
         }
         setBudgetMonth(nextBudgetMonth)
+      } else if (nextScreen === 'statistics') {
+        const nextStatistics = normalizeStatisticsState(
+          window.location.search,
+          references.household,
+        )
+        const normalizedSearch = serializeStatisticsState(nextStatistics)
+        if (window.location.search !== normalizedSearch) {
+          window.history.replaceState(window.history.state, '', normalizedSearch)
+        }
+        setStatisticsNavigation(nextStatistics)
       } else {
         setNavigation(normalizeCalendarState(window.location.search, references.household))
       }
@@ -785,9 +827,9 @@ function CalendarWorkspace({
   function openEntry(
     editing: LedgerTransaction | null,
     opener?: HTMLElement,
-    selectedDate = activeScreen === 'budget'
-      ? todayInTimeZone(references.household.timezone)
-      : navigation.date,
+    selectedDate = activeScreen === 'calendar'
+      ? navigation.date
+      : todayInTimeZone(references.household.timezone),
   ) {
     openerRef.current = opener ?? (document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -815,11 +857,16 @@ function CalendarWorkspace({
     setRefundMode({ original, summary })
   }
 
-  function navigate(destination: 'calendar' | 'budget') {
+  function navigate(destination: WorkspaceScreen) {
     if (destination === activeScreen) return
     if (destination === 'budget') {
       window.history.pushState({}, '', serializeBudgetState(budgetMonth))
       setActiveScreen('budget')
+      return
+    }
+    if (destination === 'statistics') {
+      window.history.pushState({}, '', serializeStatisticsState(statisticsNavigation))
+      setActiveScreen('statistics')
       return
     }
     window.history.pushState({}, '', serializeCalendarState(navigation))
@@ -830,6 +877,12 @@ function CalendarWorkspace({
     const nextMonth = moveBudgetMonth(budgetMonth, offset)
     window.history.pushState({}, '', serializeBudgetState(nextMonth))
     setBudgetMonth(nextMonth)
+  }
+
+  function updateStatisticsNavigation(next: StatisticsNavigationState) {
+    window.history.pushState({}, '', serializeStatisticsState(next))
+    setStatisticsNavigation(next)
+    setActiveScreen('statistics')
   }
 
   function closeSettings() {
@@ -890,7 +943,7 @@ function CalendarWorkspace({
               onDeleted={() => setRevision((current) => current + 1)}
             />
           </>
-        ) : (
+        ) : activeScreen === 'budget' ? (
           <BudgetScreen
             month={budgetMonth}
             household={references.household}
@@ -899,14 +952,21 @@ function CalendarWorkspace({
             onMoveMonth={moveBudget}
             onChanged={() => setRevision((current) => current + 1)}
           />
+        ) : (
+          <StatisticsScreen
+            navigation={statisticsNavigation}
+            household={references.household}
+            revision={revision}
+            onChange={updateStatisticsNavigation}
+          />
         )}
       </main>
       <button
         className="paw-fab"
         type="button"
-        aria-label={`${activeScreen === 'budget'
-          ? todayInTimeZone(references.household.timezone)
-          : navigation.date} 빠른 입력 열기`}
+        aria-label={`${activeScreen === 'calendar'
+          ? navigation.date
+          : todayInTimeZone(references.household.timezone)} 빠른 입력 열기`}
         onClick={(event) => openEntry(null, event.currentTarget)}
       >
         <span aria-hidden="true">🐾</span>

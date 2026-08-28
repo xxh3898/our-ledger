@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-28
 related:
   - ADR-008
@@ -95,6 +95,21 @@ Pre-Statistics Refund Correctness Gate는 추가로 다음을 실제 PostgreSQL�
 - Refund generic PATCH 거부, version 기반 logical delete, delete 뒤 cap·Account·Calendar·Budget 복원
 - dedicated Refund endpoint의 인증·CSRF·IDOR와 REST Docs canonical request/summary/error/delete
 
+Statistics Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
+
+- NORMAL INCOME, NORMAL EXPENSE - REFUND EXPENSE와 논리삭제 제외
+- 카드 구매 포함, 카드대금 TRANSFER 제외, PRIMARY Account breakdown 검산
+- ALL/각 PERSONAL Member/SHARED Scope, foreign Member 404, invalid owner 조합 400
+- Household timezone 포함 날짜와 custom partial month, 빈 calendar month 0 row
+- current/comparison 독립 계산, previous 0 percent null, income 0 savings rate null
+- subject 합과 Account 합이 summary 순소비와 정확히 일치
+- Refund가 같은 Category/PRIMARY Account에서 차감되고 archived reference가 유지됨
+- 비저축→저축, 저축→비저축, 저축→저축, 비저축→비저축 Transfer matrix
+- savings Account EXPENSE가 저축 인출로 계산되지 않음
+- PERSONAL/SHARED savings amount/rate unavailable
+- savings activity impact 합과 ALL summary savings amount 일치
+- 인증, validation, canonical Statistics/savings activity REST Docs
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -182,6 +197,18 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - month/scope/owner/category `type=EXPENSE` drill-down과 REFUND 표시
 - Budget Paw FAB의 Household timezone 오늘 날짜
 
+같은 test와 `statisticsState.test.ts`는 Statistics Slice에서 다음 계약을 추가로 검증한다.
+
+- Statistics destination 활성/`aria-current`, Assets disabled와 Calendar/Budget 이동 회귀
+- 이번 달 ALL 기본값, 모든 preset의 이전 calendar range, custom same-day-count comparison
+- invalid date/range/foreign Member canonicalization과 direct/back/forward URL state
+- Member/SHARED API query mapping과 pending 중 stale 숫자 제거
+- summary/comparison/month/Category/subject/Account의 amount와 계산 불가 text
+- PERSONAL/SHARED 저축 unavailable 설명
+- Transaction drill-down의 기간/Scope/type/Category/Account query와 REFUND `+금액`
+- savings activity endpoint, Sheet focus/Escape/backdrop/opener 복귀
+- Statistics Paw FAB의 Household timezone 오늘 날짜
+
 `budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
 
 ## Production 보안 검증
@@ -200,7 +227,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
 
 ## 회귀 우선순위
 

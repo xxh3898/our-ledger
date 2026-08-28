@@ -89,6 +89,87 @@ const incomeCategory = {
   type: 'INCOME',
 }
 
+const statisticsData = {
+  period: { from: '2026-08-01', to: '2026-08-31', timezone: 'Asia/Seoul' },
+  summary: {
+    incomeAmount: 3_000_000,
+    netSpendingAmount: 128_450,
+    savingsAmount: 1_000_000,
+    savingsRate: 33.3,
+  },
+  comparison: {
+    from: '2026-07-01',
+    to: '2026-07-31',
+    incomeAmount: 2_800_000,
+    netSpendingAmount: 150_000,
+    savingsAmount: 900_000,
+    savingsRate: 32.1,
+    incomeDifferenceAmount: 200_000,
+    netSpendingDifferenceAmount: -21_550,
+    savingsDifferenceAmount: 100_000,
+    incomePercentChange: 7.1,
+    netSpendingPercentChange: -14.4,
+    savingsPercentChange: 11.1,
+    savingsRateDifferencePoints: 1.2,
+  },
+  subjects: [
+    {
+      scope: 'PERSONAL',
+      owner: { memberId: 100, userId: 1, displayName: 'Owner' },
+      netSpendingAmount: 80_000,
+    },
+    {
+      scope: 'PERSONAL',
+      owner: { memberId: 101, userId: 2, displayName: 'Member' },
+      netSpendingAmount: 30_000,
+    },
+    { scope: 'SHARED', owner: null, netSpendingAmount: 18_450 },
+  ],
+  categories: [
+    {
+      category: { id: 300, name: '식비', archived: false },
+      netSpendingAmount: 100_000,
+      shareRate: 77.9,
+    },
+    {
+      category: { id: 302, name: '지난 취미', archived: true },
+      netSpendingAmount: 28_450,
+      shareRate: 22.1,
+    },
+  ],
+  accounts: [
+    {
+      account: {
+        id: 200,
+        name: '주거래 통장',
+        type: 'CHECKING',
+        nature: 'ASSET',
+        archived: false,
+      },
+      netSpendingAmount: 128_450,
+    },
+  ],
+  months: [
+    {
+      month: '2026-08',
+      incomeAmount: 3_000_000,
+      netSpendingAmount: 128_450,
+      savingsAmount: 1_000_000,
+      savingsRate: 33.3,
+    },
+  ],
+}
+
+const savingsActivities = [{
+  transactionId: 900,
+  occurredAt: '2026-08-10T12:00:00+09:00',
+  amount: 1_000_000,
+  savingsImpactAmount: 1_000_000,
+  sourceAccount: { id: 200, name: '주거래 통장' },
+  destinationAccount: { id: 201, name: '비상금 통장' },
+  memo: '결혼자금',
+}]
+
 function primaryTransaction({
   id,
   amount,
@@ -222,6 +303,9 @@ type RouterOptions = {
   failBudgetUpdate?: boolean
   budgetCreateGate?: Promise<void>
   refundCreateGate?: Promise<void>
+  statistics?: Record<string, unknown>
+  savingsActivities?: Array<Record<string, unknown>>
+  statisticsGate?: Promise<void>
 }
 
 function transactionDate(occurredAt: string) {
@@ -520,6 +604,13 @@ function installLedgerRouter(options: RouterOptions = {}) {
     if (url.pathname === '/api/v1/calendar/month' && method === 'GET') {
       return jsonResponse(calendarResponse(url))
     }
+    if (url.pathname === '/api/v1/statistics/savings-activities' && method === 'GET') {
+      return jsonResponse(options.savingsActivities ?? savingsActivities)
+    }
+    if (url.pathname === '/api/v1/statistics' && method === 'GET') {
+      if (options.statisticsGate) await options.statisticsGate
+      return jsonResponse(options.statistics ?? statisticsData)
+    }
     if (url.pathname === '/api/v1/budgets' && method === 'GET') {
       return jsonResponse(budgetMonthResponse(url))
     }
@@ -670,6 +761,10 @@ function useCalendarUrl(search = '?month=2026-08&view=all&date=2026-08-27') {
 
 function useBudgetUrl(month = '2026-08') {
   window.history.replaceState({}, '', `/?screen=budget&month=${month}`)
+}
+
+function useStatisticsUrl(search = 'preset=this-month&view=all') {
+  window.history.replaceState({}, '', `/?screen=statistics&${search}`)
 }
 
 describe('App', () => {
@@ -1219,7 +1314,7 @@ describe('App', () => {
       input === '/api/v1/accounts' && init?.method === 'POST')).toBe(true)
   })
 
-  it('activates Budget while keeping remaining unimplemented tabs disabled', async () => {
+  it('keeps Budget and Statistics active while Assets remains disabled', async () => {
     useCalendarUrl()
     installLedgerRouter()
     render(<App />)
@@ -1228,7 +1323,7 @@ describe('App', () => {
     expect(within(navigation).getByRole('button', { name: /Calendar/ }))
       .toHaveAttribute('aria-current', 'page')
     expect(within(navigation).getByRole('button', { name: /예산/ })).not.toBeDisabled()
-    expect(within(navigation).getByRole('button', { name: /통계/ })).toBeDisabled()
+    expect(within(navigation).getByRole('button', { name: /통계/ })).not.toBeDisabled()
     expect(within(navigation).getByRole('button', { name: /자산/ })).toBeDisabled()
   })
 
@@ -1594,5 +1689,150 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '우리 전체' }))
       .not.toBeInTheDocument())
     await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('activates Statistics and renders backend summary, comparison, trend, and breakdowns', async () => {
+    useStatisticsUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '이번 기간 요약' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '통계' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: /자산/ })).toBeDisabled()
+    expect(screen.getAllByText('3,000,000원').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('128,450원').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('33.3%').length).toBeGreaterThan(0)
+    expect(screen.getByText('200,000원 증가 · 7.1% 증가')).toBeInTheDocument()
+    expect(screen.getByText('21,550원 감소 · 14.4% 감소')).toBeInTheDocument()
+    expect(screen.getByText('2026-08')).toBeInTheDocument()
+    expect(screen.getByText('지난 취미')).toBeInTheDocument()
+    expect(screen.getByText('보관됨')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/statistics?')
+        && url.includes('from=2026-08-01')
+        && url.includes('to=2026-08-31')
+        && url.includes('compareFrom=2026-07-01')
+        && url.includes('compareTo=2026-07-31')
+        && !url.includes('scope=')
+    })).toBe(true)
+  })
+
+  it('maps Statistics member scope and hides stale all-scope numbers while pending', async () => {
+    useStatisticsUrl()
+    const options: RouterOptions = {}
+    const { fetchMock } = installLedgerRouter(options)
+    render(<App />)
+    await waitFor(() => expect(screen.getAllByText('3,000,000원').length).toBeGreaterThan(0))
+
+    let releaseStatistics!: () => void
+    options.statisticsGate = new Promise<void>((resolve) => {
+      releaseStatistics = resolve
+    })
+    const scope = screen.getByRole('navigation', { name: '통계 보기 범위' })
+    fireEvent.click(within(scope).getByRole('button', { name: 'Member' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('선택한 조건의 통계를 계산하고 있어요.')
+    expect(screen.queryAllByText('3,000,000원')).toHaveLength(0)
+    expect(window.location.search)
+      .toBe('?screen=statistics&preset=this-month&view=member&memberId=101')
+    releaseStatistics()
+
+    expect(await screen.findByText('저축·저축률은 전체 보기에서 제공해요.'))
+      .toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/statistics?')
+        && url.includes('scope=PERSONAL')
+        && url.includes('ownerMemberId=101')
+    })).toBe(true)
+  })
+
+  it('keeps custom Statistics periods in canonical URL and restores popstate scope', async () => {
+    useStatisticsUrl('preset=custom&from=2026-02-30&to=2026-01-01&view=member&memberId=999')
+    installLedgerRouter()
+    render(<App />)
+    await screen.findByRole('heading', { name: '이번 기간 요약' })
+    expect(window.location.search).toBe('?screen=statistics&preset=this-month&view=all')
+
+    fireEvent.change(screen.getByLabelText('통계 기간'), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-06-15' } })
+    fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-08-20' } })
+    fireEvent.click(screen.getByRole('button', { name: '기간 적용' }))
+    expect(window.location.search)
+      .toBe('?screen=statistics&preset=custom&view=all&from=2026-06-15&to=2026-08-20')
+
+    window.history.pushState(
+      {},
+      '',
+      '/?screen=statistics&preset=recent-3-months&view=shared',
+    )
+    fireEvent(window, new PopStateEvent('popstate'))
+
+    await waitFor(() => expect(screen.getByLabelText('통계 기간'))
+      .toHaveValue('recent-3-months'))
+    expect(within(screen.getByRole('navigation', { name: '통계 보기 범위' }))
+      .getByRole('button', { name: '공동' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('loads filtered transaction and savings drill-downs with refund semantics and focus return', async () => {
+    useStatisticsUrl()
+    const normal = primaryTransaction({ id: 400, amount: 12_000 })
+    const refund = {
+      ...primaryTransaction({ id: 401, amount: 2_000, memo: '부분 환불' }),
+      adjustmentType: 'REFUND',
+    }
+    const { fetchMock } = installLedgerRouter({ transactions: [normal, refund] })
+    render(<App />)
+    const categorySection = (await screen.findByRole('heading', { name: '어디에 썼나요' }))
+      .closest('section') as HTMLElement
+    const categoryOpener = within(categorySection).getByRole('button', { name: /식비/ })
+
+    fireEvent.click(categoryOpener)
+
+    const categoryDialog = await screen.findByRole('dialog', { name: '식비 소비·환불' })
+    expect(within(categoryDialog).getByText('식비 환불')).toBeInTheDocument()
+    expect(within(categoryDialog).getByText('+2,000원')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = String(input)
+      return url.includes('/api/v1/transactions?')
+        && url.includes('type=EXPENSE')
+        && url.includes('categoryId=300')
+        && url.includes('from=2026-08-01')
+        && url.includes('to=2026-08-31')
+    })).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(categoryOpener).toHaveFocus())
+
+    const summarySection = screen.getByRole('heading', { name: '이번 기간 요약' })
+      .closest('section') as HTMLElement
+    const savingsOpener = within(summarySection).getByRole('button', { name: /저축.*원장 보기/ })
+    fireEvent.click(savingsOpener)
+    const savingsDialog = await screen.findByRole('dialog', { name: '저축 활동' })
+    expect(within(savingsDialog).getByText('주거래 통장 → 비상금 통장')).toBeInTheDocument()
+    expect(within(savingsDialog).getByText('+1,000,000원')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) =>
+      String(input).includes('/api/v1/statistics/savings-activities?from=2026-08-01&to=2026-08-31')))
+      .toBe(true)
+  })
+
+  it('uses Household today for Statistics Paw and preserves Calendar, Budget, and disabled Assets', async () => {
+    useStatisticsUrl()
+    installLedgerRouter()
+    render(<App />)
+    await screen.findByRole('heading', { name: '통계' })
+
+    const quickEntry = screen.getByRole('button', { name: '2026-08-28 빠른 입력 열기' })
+    fireEvent.click(quickEntry)
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    expect(within(dialog).getByLabelText('날짜')).toHaveValue('2026-08-28')
+    fireEvent.click(within(dialog).getByRole('button', { name: '빠른 입력 닫기' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Calendar' }))
+      .toHaveAttribute('aria-current', 'page'))
+    fireEvent.click(screen.getByRole('button', { name: '예산' }))
+    expect(await screen.findByRole('heading', { name: '예산' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /자산/ })).toBeDisabled()
   })
 })

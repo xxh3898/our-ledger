@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.7
+version: 0.8
 last_updated: 2026-08-28
 related:
   - 01-product/benchmark-weple-money.md
@@ -61,9 +61,9 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 - Bottom Navigation과 중앙 Paw FAB는 viewport 하단에 고정하고 본문에는 safe-area와 겹치지 않는 여백을 둔다.
 - 설정은 상단 프로필 또는 더보기 메뉴에 둔다.
 - 결혼자금은 달력 요약 카드와 자산 화면에서 접근한다.
-- Calendar와 Budget은 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
-- Statistics와 Assets는 구현 Slice 전까지 disabled 상태와 `준비 중` text를 유지한다.
-- Budget의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
+- Calendar, Budget, Statistics는 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
+- Assets는 구현 Slice 전까지 disabled 상태와 `준비 중` text를 유지한다.
+- Budget과 Statistics의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
 
 ## 달력 중심 Home
 
@@ -72,6 +72,10 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 ## Budget 화면
 
 Budget은 같은 Couple header와 하단 탐색을 유지하고 월 이동, HOUSEHOLD/실제 Member PERSONAL/SHARED 기본 카드, 사용자 설정 Category Budget을 세로 흐름으로 제공한다. 생성·수정·삭제와 사용 내역은 Bottom Sheet로 progressive disclosure한다. 세부 계약은 [예산 화면](budget-screen.md)을 따른다.
+
+## Statistics 화면
+
+Statistics는 같은 Couple header와 하단 탐색을 유지하고 기간, 실제 Member/공동 Scope, summary, comparison, monthly trend, Category/subject/Account breakdown을 하나의 vertical scroll로 제공한다. 주요 숫자는 Bottom Sheet에서 원장을 on-demand 조회하며 저축만 전용 savings activity read model을 사용한다. 세부 계약은 [통계 화면](statistics-screen.md)을 따른다.
 
 ## 전역 필터
 
