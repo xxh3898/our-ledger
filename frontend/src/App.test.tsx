@@ -623,6 +623,32 @@ describe('App', () => {
     expect(within(dialog).getByLabelText('Owner')).toHaveValue('100')
   })
 
+  it('clears Category on actual type changes and preserves inputs for the same type', async () => {
+    useCalendarUrl()
+    installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const category = within(dialog).getByLabelText('Category')
+    const account = within(dialog).getByLabelText('Account')
+
+    expect(category).toHaveValue('300')
+    expect(account).toHaveValue('200')
+    fireEvent.click(within(dialog).getByRole('button', { name: '지출' }))
+    expect(category).toHaveValue('300')
+    expect(account).toHaveValue('200')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '수입' }))
+    expect(category).toHaveValue('')
+    fireEvent.change(category, { target: { value: '301' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '수입' }))
+    expect(category).toHaveValue('301')
+    expect(account).toHaveValue('200')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '지출' }))
+    expect(category).toHaveValue('')
+  })
+
   it('closes Quick Entry with Escape and restores focus to its opener', async () => {
     useCalendarUrl()
     installLedgerRouter()

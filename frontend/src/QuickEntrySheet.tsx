@@ -142,27 +142,28 @@ export function QuickEntrySheet({
     const currentMemberId = household.members
       .find((member) => member.userId === currentUserId)
       ?.memberId.toString() ?? ''
-    setForm((current) => ({
-      ...current,
-      type,
-      categoryId: type === 'TRANSFER'
-        ? ''
-        : categories.find((category) => category.type === type)?.id.toString() ?? '',
-      accountId: type === 'TRANSFER'
-        ? ''
-        : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
-      sourceAccountId: type === 'TRANSFER' ? nextSource : '',
-      destinationAccountId: type === 'TRANSFER'
-        ? accounts.find((account) => !account.archived && account.id.toString() !== nextSource)
-          ?.id.toString() ?? ''
-        : '',
-      ownerMemberId: type === 'TRANSFER'
-        ? current.ownerMemberId
-        : current.ownerMemberId || currentMemberId,
-      payerMemberId: type === 'EXPENSE'
-        ? current.payerMemberId || currentMemberId
-        : '',
-    }))
+    setForm((current) => {
+      if (current.type === type) return current
+      return {
+        ...current,
+        type,
+        categoryId: '',
+        accountId: type === 'TRANSFER'
+          ? ''
+          : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
+        sourceAccountId: type === 'TRANSFER' ? nextSource : '',
+        destinationAccountId: type === 'TRANSFER'
+          ? accounts.find((account) => !account.archived && account.id.toString() !== nextSource)
+            ?.id.toString() ?? ''
+          : '',
+        ownerMemberId: type === 'TRANSFER'
+          ? current.ownerMemberId
+          : current.ownerMemberId || currentMemberId,
+        payerMemberId: type === 'EXPENSE'
+          ? current.payerMemberId || currentMemberId
+          : '',
+      }
+    })
   }
 
   async function submit(event: FormEvent) {
