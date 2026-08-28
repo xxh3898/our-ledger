@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { AssetsScreen, type AssetsViewState } from './AssetsScreen.tsx'
 import { BudgetScreen } from './BudgetScreen.tsx'
 import { GoalAccountLinkSheet } from './GoalAccountLinkSheet.tsx'
 import { MarriageGoalCard, type GoalViewState } from './MarriageGoalCard.tsx'
@@ -9,6 +10,12 @@ import { QuickEntrySheet } from './QuickEntrySheet.tsx'
 import { RefundSheet } from './RefundSheet.tsx'
 import { SettingsSheet } from './SettingsSheet.tsx'
 import { StatisticsScreen } from './StatisticsScreen.tsx'
+import {
+  type AssetsNavigationState,
+  isAssetsScreen,
+  normalizeAssetsState,
+  serializeAssetsState,
+} from './assetsState.ts'
 import {
   currentBudgetMonth,
   isBudgetScreen,
@@ -34,6 +41,7 @@ import {
   type RefundSummary,
   LedgerApiError,
   deleteTransaction,
+  loadAssets,
   loadCalendarMonth,
   loadCurrentUser,
   loadDayTransactions,
@@ -50,10 +58,11 @@ import {
   type StatisticsNavigationState,
 } from './statisticsState.ts'
 
-type WorkspaceScreen = 'calendar' | 'budget' | 'statistics' | 'goal'
+type WorkspaceScreen = 'calendar' | 'budget' | 'statistics' | 'assets' | 'goal'
 
 function screenFromSearch(search: string): WorkspaceScreen {
   if (new URLSearchParams(search).get('screen') === 'goal') return 'goal'
+  if (isAssetsScreen(search)) return 'assets'
   if (isStatisticsScreen(search)) return 'statistics'
   if (isBudgetScreen(search)) return 'budget'
   return 'calendar'
@@ -644,7 +653,14 @@ function BottomNavigation({
       >
         <span aria-hidden="true">⌁</span>통계
       </button>
-      <button type="button" disabled><span aria-hidden="true">◇</span>자산<span>준비 중</span></button>
+      <button
+        type="button"
+        className={active === 'assets' ? 'is-active' : ''}
+        aria-current={active === 'assets' ? 'page' : undefined}
+        onClick={() => onNavigate('assets')}
+      >
+        <span aria-hidden="true">◇</span>자산
+      </button>
     </nav>
   )
 }
@@ -667,8 +683,11 @@ function CalendarWorkspace({
       : currentBudgetMonth(initialReferences.household.timezone))
   const [statisticsNavigation, setStatisticsNavigation] = useState<StatisticsNavigationState>(() =>
     normalizeStatisticsState(window.location.search, initialReferences.household))
+  const [assetsNavigation, setAssetsNavigation] = useState<AssetsNavigationState>(() =>
+    normalizeAssetsState(window.location.search, initialReferences.household))
   const [monthState, setMonthState] = useState<AsyncState<CalendarMonth>>({ status: 'loading' })
   const [dayState, setDayState] = useState<AsyncState<LedgerTransaction[]>>({ status: 'loading' })
+  const [assetsState, setAssetsState] = useState<AssetsViewState>({ status: 'loading' })
   const [goalState, setGoalState] = useState<GoalViewState>({ status: 'loading' })
   const [goalRevision, setGoalRevision] = useState(0)
   const [revision, setRevision] = useState(0)
@@ -780,6 +799,14 @@ function CalendarWorkspace({
   }, [activeScreen, statisticsNavigation])
 
   useEffect(() => {
+    if (activeScreen !== 'assets') return
+    const normalizedSearch = serializeAssetsState(assetsNavigation)
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
+    }
+  }, [activeScreen, assetsNavigation])
+
+  useEffect(() => {
     if (activeScreen !== 'goal') return
     const normalizedSearch = '?screen=goal'
     if (window.location.search !== normalizedSearch) {
@@ -811,6 +838,16 @@ function CalendarWorkspace({
           window.history.replaceState(window.history.state, '', normalizedSearch)
         }
         setStatisticsNavigation(nextStatistics)
+      } else if (nextScreen === 'assets') {
+        const nextAssets = normalizeAssetsState(
+          window.location.search,
+          references.household,
+        )
+        const normalizedSearch = serializeAssetsState(nextAssets)
+        if (window.location.search !== normalizedSearch) {
+          window.history.replaceState(window.history.state, '', normalizedSearch)
+        }
+        setAssetsNavigation(nextAssets)
       } else if (nextScreen === 'goal') {
         // Goal has no additional URL state in Slice 8.
       } else {
@@ -837,6 +874,20 @@ function CalendarWorkspace({
     references.household,
     refundMode,
   ])
+
+  useEffect(() => {
+    if (activeScreen !== 'assets') return
+    const controller = new AbortController()
+    setAssetsState({ status: 'loading' })
+    void loadAssets(controller.signal)
+      .then((data) => setAssetsState({ status: 'ready', data }))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setAssetsState({ status: 'error', message: errorMessage(error) })
+        }
+      })
+    return () => controller.abort()
+  }, [activeScreen, revision])
 
   useEffect(() => {
     if (activeScreen !== 'calendar' && activeScreen !== 'goal') return
@@ -946,6 +997,11 @@ function CalendarWorkspace({
       setActiveScreen('statistics')
       return
     }
+    if (destination === 'assets') {
+      window.history.pushState({}, '', serializeAssetsState(assetsNavigation))
+      setActiveScreen('assets')
+      return
+    }
     if (destination === 'goal') {
       window.history.pushState({}, '', '?screen=goal')
       setActiveScreen('goal')
@@ -965,6 +1021,19 @@ function CalendarWorkspace({
     window.history.pushState({}, '', serializeStatisticsState(next))
     setStatisticsNavigation(next)
     setActiveScreen('statistics')
+  }
+
+  function updateAssetsNavigation(next: AssetsNavigationState) {
+    window.history.pushState({}, '', serializeAssetsState(next))
+    setAssetsNavigation(next)
+    setActiveScreen('assets')
+  }
+
+  function openSettings(opener?: HTMLElement) {
+    settingsButtonRef.current = opener ?? (document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null)
+    setSettingsOpen(true)
   }
 
   function closeSettings() {
@@ -994,12 +1063,7 @@ function CalendarWorkspace({
         <CoupleHeader
           user={user}
           household={references.household}
-          onOpenSettings={() => {
-            settingsButtonRef.current = document.activeElement instanceof HTMLElement
-              ? document.activeElement
-              : null
-            setSettingsOpen(true)
-          }}
+          onOpenSettings={() => openSettings()}
         />
         {activeScreen === 'calendar' ? (
           <>
@@ -1062,12 +1126,20 @@ function CalendarWorkspace({
             onMoveMonth={moveBudget}
             onChanged={() => setRevision((current) => current + 1)}
           />
-        ) : (
+        ) : activeScreen === 'statistics' ? (
           <StatisticsScreen
             navigation={statisticsNavigation}
             household={references.household}
             revision={revision}
             onChange={updateStatisticsNavigation}
+          />
+        ) : (
+          <AssetsScreen
+            state={assetsState}
+            navigation={assetsNavigation}
+            onChange={updateAssetsNavigation}
+            onRetry={() => setRevision((current) => current + 1)}
+            onManageAccounts={openSettings}
           />
         )}
       </main>

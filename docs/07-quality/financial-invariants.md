@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-29
 related:
   - 02-domain/financial-metrics.md
@@ -25,7 +25,7 @@ related:
 12. 비저축 ASSET에서 저축 ASSET으로의 순이체만 저축액에 반영한다.
 13. Goal 현재 보유금은 연결 Account의 유효 잔액과 일치한다.
 14. Goal 기여금을 별도 수동 합계로 저장해 Transaction과 이중 집계하지 않는다.
-15. LIABILITY 잔액은 양수 부채로 저장하고 순자산 계산에서 차감한다.
+15. LIABILITY 잔액은 signed 실제 원장값이며 양수 부채는 순자산에서 차감하고 음수 과납은 clamp하지 않는다.
 16. `amount`는 양수이며 음수 방향은 Entry 또는 REFUND 의미로만 표현한다.
 17. Household timezone의 월 경계가 달력·Budget·통계에서 동일하다.
 18. 총수입이 0이면 저축률은 0%가 아니라 계산 불가 `null`이다.
@@ -44,5 +44,10 @@ related:
 31. Goal Account link snapshot과 같은 Account Transaction posting은 Account row lock에서 직렬화돼 partial balance를 저장할 수 없다.
 32. 이미 연결된 archived Account는 unlink 전까지 실제 잔액과 함께 Goal에 남는다.
 33. Goal target의 동시 PATCH는 optimistic version으로 한 요청만 반영한다.
+34. Assets 현재 합계와 Account row는 active·archived Account를 모두 포함하고 logical delete Transaction은 제외한다.
+35. Assets PERSONAL/SHARED 소계는 Transaction Scope가 아니라 Account ownership과 actual owner로 귀속한다.
+36. Assets 월 추이는 Household timezone의 직전 11개 완료 월말과 현재 한 점이며 Account opening date 이전 기여는 0이다.
+37. Assets 현재 trend 점은 같은 조회 snapshot의 current Household summary와 정확히 일치한다.
+38. Goal Account link/unlink와 `starting_balance` snapshot은 Assets Account 잔액·순자산을 바꾸지 않는다.
 
 각 Slice는 관련 불변식의 단위·통합 테스트를 추가한다. 일반 happy path 테스트만으로 완료 처리하지 않는다.

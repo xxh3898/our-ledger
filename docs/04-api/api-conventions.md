@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.1
+version: 1.2
 last_updated: 2026-08-29
 related:
   - 04-api/error-contract.md
@@ -379,6 +379,27 @@ GET /api/v1/statistics/savings-activities?from=2026-08-01&to=2026-08-31
 `savings-activities`는 비저축 ASSET→저축 ASSET의 양수 impact와 저축 ASSET→비저축 목적지의 음수 impact만 반환한다. impact가 0인 Transfer, 논리삭제 Transaction, 다른 Household data는 제외하며 item은 Transaction ID, occurredAt, 원 amount, savings impact, source/destination Account의 ID·name, memo만 포함한다. item impact 합은 같은 기간 ALL summary savings amount와 일치한다.
 
 실제 request/response는 `StatisticsApiDocsTest`의 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet으로 검증한다. Statistics는 별도 table/cache가 없는 원장 파생 read model이다.
+
+## Assets read model
+
+```text
+GET /api/v1/assets
+```
+
+request에 Household ID나 기간·소유 filter를 받지 않는다. 인증된 current Household의 actual Member, active·archived Account와 유효 Account Entry만 읽으며 다른 Household data는 포함하지 않는다. 응답은 한 repeatable-read transaction에서 다음을 제공한다.
+
+- `asOf`, Household `timezone`
+- `household`: signed `totalAssets`, signed `totalLiabilities`, `netWorth=totalAssets-totalLiabilities`
+- `members`: actual Member ID·display name과 PERSONAL Account 기준 세 값
+- `shared`: SHARED Account 기준 세 값
+- `accounts`: ID·name·nullable institution, type/nature/ownership, nullable owner, opening balance/date, ledger delta, current balance, currency, savings/archive/sort 상태
+- `monthlyTrend`: Household timezone 기준 직전 11개 완료 월말과 현재 한 점의 month, complete, asOf, assets, liabilities, netWorth
+
+Account는 ASSET→LIABILITY, actual Member PERSONAL→SHARED, `sortOrder`, ID 순으로 안정 정렬한다. 음수와 0 balance를 제거하거나 clamp하지 않으며 archived Account도 포함한다. `lastFour`와 전체 계좌번호는 응답하지 않는다. 현재 trend 점은 같은 응답의 Household summary와 정확히 일치한다.
+
+과거 월은 Account opening date 이전 기여도를 0으로 보고 해당 월말까지의 active Transaction Entry를 합산한다. 논리삭제 Transaction은 제외하고 generated recurring Transaction은 일반 원장과 동일하게 포함한다. Goal link/unlink는 결과를 바꾸지 않는다. 별도 Assets aggregate table이나 cache는 사용하지 않는다.
+
+실제 response와 인증 오류는 `AssetsApiDocsTest`의 `assets-read-model`, `assets-authentication-required` snippet으로 검증한다.
 
 ## 인증 상태와 CSRF
 

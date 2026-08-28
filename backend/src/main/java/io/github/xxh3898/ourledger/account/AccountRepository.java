@@ -56,4 +56,27 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             @Param("householdId") Long householdId,
             @Param("accountId") Long accountId
     );
+
+    @Query(value = """
+            SELECT entry.account_id AS "accountId",
+                   SUM(entry.balance_delta) AS "ledgerDelta"
+            FROM transaction_account_entries entry
+            JOIN transactions ledger_transaction
+              ON ledger_transaction.id = entry.transaction_id
+             AND ledger_transaction.household_id = entry.household_id
+            WHERE entry.household_id = :householdId
+              AND ledger_transaction.deleted_at IS NULL
+            GROUP BY entry.account_id
+            ORDER BY entry.account_id
+            """, nativeQuery = true)
+    List<AccountBalanceDelta> sumActiveBalanceDeltas(
+            @Param("householdId") Long householdId
+    );
+
+    interface AccountBalanceDelta {
+
+        Long getAccountId();
+
+        Long getLedgerDelta();
+    }
 }

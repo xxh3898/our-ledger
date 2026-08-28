@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -31,6 +31,10 @@ related:
 - Goal 내부 이동, 연결 전 거래, INCOME/EXPENSE/REFUND를 신규 Goal 저축으로 중복 집계하지 않는다.
 - concurrent Goal 생성·Account 연결·snapshot posting·target PATCH가 PostgreSQL 제약과 lock/version 계약을 지킨다.
 - Home과 Goal 상세가 실제 read model 또는 정상 empty/error 상태를 표시하고 수동 Goal 기여금 action을 제공하지 않는다.
+- Assets의 현재 Account 잔액, 총자산·총부채·순자산이 opening balance와 유효 Entry에서 파생되고 active·archived, 양수·0·음수를 그대로 포함한다.
+- Assets의 actual Member PERSONAL/SHARED 소계는 Account ownership으로 귀속되고 합이 Household와 일치하며 다른 Household data를 포함하지 않는다.
+- Assets가 Household timezone 직전 11개 완료 월말과 현재 한 점을 반환하고 opening date, logical delete, generated recurring 거래를 같은 원장 의미로 처리한다.
+- Assets 화면이 canonical all/Member/shared URL, accessible 추이 표, loading/error/empty, Account Settings와 Quick Entry 경로를 제공한다.
 - CSV로 지정 기간 데이터를 내보낼 수 있다.
 - PWA를 모바일 홈 화면에 설치할 수 있다.
 

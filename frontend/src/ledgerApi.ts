@@ -224,6 +224,51 @@ export type StatisticsData = {
   }>
 }
 
+export type AssetsSummary = {
+  totalAssets: number
+  totalLiabilities: number
+  netWorth: number
+}
+
+export type AssetsData = {
+  asOf: string
+  timezone: string
+  household: AssetsSummary
+  members: Array<{
+    memberId: number
+    displayName: string
+    totalAssets: number
+    totalLiabilities: number
+    netWorth: number
+  }>
+  shared: AssetsSummary
+  accounts: Array<{
+    id: number
+    name: string
+    institution: string | null
+    type: Account['type']
+    nature: Account['nature']
+    ownership: Account['ownership']
+    owner: { memberId: number; displayName: string } | null
+    openingBalance: number
+    openingBalanceAsOf: string
+    ledgerDelta: number
+    currentBalance: number
+    currency: string
+    savingsEnabled: boolean
+    archived: boolean
+    sortOrder: number
+  }>
+  monthlyTrend: Array<{
+    month: string
+    complete: boolean
+    asOf: string
+    assets: number
+    liabilities: number
+    netWorth: number
+  }>
+}
+
 export type SavingsActivity = {
   transactionId: number
   occurredAt: string
@@ -520,6 +565,10 @@ export function loadStatistics(
   const parameters = new URLSearchParams(range)
   applyCalendarFilter(parameters, filter)
   return request<StatisticsData>(`/api/v1/statistics?${parameters}`, { signal })
+}
+
+export function loadAssets(signal?: AbortSignal) {
+  return request<AssetsData>('/api/v1/assets', { signal })
 }
 
 export function loadStatisticsTransactions(

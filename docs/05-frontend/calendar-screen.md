@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - 01-product/user-flows.md
@@ -145,5 +145,5 @@ Slice 8은 loading에서 이전 수치를 지우고 `GET /api/v1/goals/marriage`
 - 중앙 Paw FAB는 선택 날짜를 Quick Entry에 전달하지만 Calendar scope를 입력 기본값으로 복사하지 않는다.
 - NORMAL EXPENSE row는 Refund summary를 current Household 경계에서 읽고 partial/full 상태 및 Refund Sheet 진입을 제공한다.
 - REFUND row는 별도 sign/text, no generic edit, 2단계 logical delete를 제공한다.
-- 예산·통계·자산 tab은 `준비 중`과 disabled 상태로만 표시하며 가짜 화면으로 이동하지 않는다.
+- 예산·통계·자산은 실제 하단 destination이며 현재 화면에만 `aria-current=page`를 적용한다.
 - 계좌·Category 관리는 상단 설정 Sheet에서 계속 접근할 수 있다.

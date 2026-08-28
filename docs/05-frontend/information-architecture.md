@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.9
+version: 1.0
 last_updated: 2026-08-29
 related:
   - 01-product/benchmark-weple-money.md
@@ -8,6 +8,7 @@ related:
   - 05-frontend/recurring-transactions.md
   - 05-frontend/quick-entry.md
   - 05-frontend/marriage-goal.md
+  - 05-frontend/assets-screen.md
   - 05-frontend/design-system.md
   - 05-frontend/interaction-motion.md
   - 06-security/authentication.md
@@ -50,7 +51,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 | [Couple-first 디자인 시스템](design-system.md) | 색상, 고양이 정체성, Concept Mockup 사용 경계 | 해당 화면 Slice |
 | [Motion과 상호작용](interaction-motion.md) | 전환, feedback, reduced motion | 해당 화면 Slice |
 
-이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4, Budget destination은 Slice 5, Marriage Goal 실제 지표·상세는 Slice 8에서 활성화됐다. production illustration은 별도 asset 범위다.
+이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4, Budget destination은 Slice 5, Marriage Goal 실제 지표·상세는 Slice 8, Assets destination은 Slice 9에서 활성화됐다. production illustration은 별도 asset 범위다.
 
 ## 하단 탐색
 
@@ -62,9 +63,8 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 - Bottom Navigation과 중앙 Paw FAB는 viewport 하단에 고정하고 본문에는 safe-area와 겹치지 않는 여백을 둔다.
 - 설정은 상단 프로필 또는 더보기 메뉴에 둔다.
 - 결혼자금은 Calendar Home 요약 카드에서 상세로 접근한다. Slice 8은 새 하단 tab이나 Assets 화면을 만들지 않는다.
-- Calendar, Budget, Statistics는 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
-- Assets는 구현 Slice 전까지 disabled 상태와 `준비 중` text를 유지한다.
-- Budget과 Statistics의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
+- Calendar, Budget, Statistics, Assets는 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
+- Calendar 외 destination의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
 
 ## 달력 중심 Home
 
@@ -77,6 +77,10 @@ Budget은 같은 Couple header와 하단 탐색을 유지하고 월 이동, HOUS
 ## Statistics 화면
 
 Statistics는 같은 Couple header와 하단 탐색을 유지하고 기간, 실제 Member/공동 Scope, summary, comparison, monthly trend, Category/subject/Account breakdown을 하나의 vertical scroll로 제공한다. 주요 숫자는 Bottom Sheet에서 원장을 on-demand 조회하며 저축만 전용 savings activity read model을 사용한다. 세부 계약은 [통계 화면](statistics-screen.md)을 따른다.
+
+## Assets 화면
+
+Assets는 같은 Couple header와 하단 탐색을 유지하고 Household 순자산 hero, 고정 Household 월 추이, actual Member/공동 소유 filter, 선택 소계, ASSET/LIABILITY Account 목록을 하나의 vertical scroll로 제공한다. Account 생성·수정·보관은 중복 UI를 만들지 않고 기존 Settings로 이동한다. 세부 계약은 [자산 화면](assets-screen.md)을 따른다.
 
 ## 반복 거래 설정
 
@@ -96,7 +100,7 @@ Calendar Home은 Goal 없음이면 생성 CTA, Goal 존재면 실제 current/tar
 전체 | 실제 Member A | 실제 Member B | 공동
 ```
 
-개인 항목은 API가 반환한 실제 Member 이름을 사용한다. `ME`나 `PARTNER`를 data model에 추가하지 않는다. 선택값은 달력·예산·통계의 조회 조건에 반영하되 화면별로 부적절한 경우 명확히 비활성화한다.
+개인 항목은 API가 반환한 실제 Member 이름을 사용한다. `ME`나 `PARTNER`를 data model에 추가하지 않는다. 선택값은 달력·예산·통계의 조회 조건과 Assets Account ownership filter에 반영하되 화면별로 부적절한 경우 명확히 비활성화한다. Assets의 월 추이는 현재 소유 filter와 무관하게 Household 전체를 유지한다.
 
 ## 반응형
 
