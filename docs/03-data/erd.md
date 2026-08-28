@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-28
 related:
   - ADR-001
   - ADR-002
@@ -75,7 +75,7 @@ household_members
 - V1의 최대 2명 규칙은 다중 행 제약이므로 locked service transaction과 PostgreSQL 통합 테스트로 보완한다.
 - password, 자체 credential, Account/Transaction table은 V2에 없다.
 
-## Slice 2 물리 schema
+## Slice 3 물리 schema
 
 `V3__accounts_categories_transactions.sql`은 다음 table을 추가한다.
 
@@ -104,6 +104,8 @@ transactions
 transaction_account_entries
   id, household_id, transaction_id, account_id, entry_role, balance_delta
 ```
+
+`V5__credit_card_liability_constraint.sql`은 `accounts.type='CREDIT_CARD'`이면 nature가 반드시 `LIABILITY`이도록 additive CHECK를 추가한다. 과거에 잘못된 row가 있으면 자동 수정하지 않고 migration을 실패시킨다.
 
 Account owner, Transaction owner/payer/audit, Category Group/Category type, Transaction/Category type, Entry/Transaction/Account는 모두 `household_id`를 포함한 composite FK로 연결한다. V3는 이 target을 위해 `household_members (id, household_id)` unique를 additive로 추가한다.
 

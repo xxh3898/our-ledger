@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-28
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
@@ -26,11 +26,11 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 9. Assets | 자산·부채·순자산·월 추이 | 재무 상태 확인 가능 |
 | 10. Production | PWA, CSV, backup, Cloudflare Access/Tunnel, Mac mini 배포 | 허용된 두 사용자의 실제 운영 시작 |
 
-## Slice 2 구현 경계
+## Slice 3 구현 경계
 
-Basic Ledger는 Account·Category 수동 설정, ASSET Account의 INCOME/EXPENSE NORMAL posting, 빠른 입력과 최근 거래 수정·논리삭제까지를 한 Slice로 묶는다. `Transaction` schema는 future type을 표현하지만 `TRANSFER`, `REFUND`, CREDIT_CARD/LIABILITY posting은 Slice 3 이후까지 Service/API에서 거부한다.
+Transfer/Card는 Basic Ledger의 Account·Category 수동 설정과 INCOME/EXPENSE에 ASSET→ASSET 이체, CREDIT_CARD/LIABILITY 지출, ASSET→LIABILITY 카드대금 납부를 추가한다. 거래 수정은 지원 유형 사이에서 expected Entry set을 완전히 재구성한다.
 
-Category seed, Calendar/Statistics aggregation, 최종 Home 디자인은 Basic Ledger 완료 조건이 아니다.
+LIABILITY source 이체, REFUND, 카드 명세·결제일·한도·할부, Category seed, Calendar/Statistics aggregation과 최종 Home 디자인은 Slice 3 완료 조건이 아니다.
 
 ## Release Gate
 

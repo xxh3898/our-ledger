@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 2 — Basic Ledger
-- 구현 코드: Auth/Household 경계, Account·Category 관리, INCOME/EXPENSE NORMAL 거래와 React 빠른 입력
+- 단계: Slice 3 — Transfer/Card
+- 구현 코드: Auth/Household 경계, Account·Category 관리, 수입·지출·이체 원장과 신용카드 부채·카드대금 처리, React 빠른 입력
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -62,20 +62,21 @@ Backend는 `Cf-Access-Jwt-Assertion`의 RS256 서명, issuer, audience, 시간, 
 - `CLOUDFLARE_ACCESS_JWK_SET_URI`
 - `CLOUDFLARE_ACCESS_AUDIENCE`
 
-## Basic Ledger 범위
+## Transfer/Card Ledger 범위
 
-Slice 2는 현재 Household의 Account, Category Group/Category를 수동으로 만들고 ASSET Account에 INCOME/EXPENSE NORMAL 거래를 기록하는 최소 가계부다.
+Slice 3는 Basic Ledger에 Account Entry 기반 이체, 신용카드 지출과 카드대금 납부를 추가한다.
 
 - `GET/POST/PATCH /api/v1/accounts`
 - `GET/POST/PATCH /api/v1/category-groups`
 - `GET/POST/PATCH /api/v1/categories`
 - `GET/POST/PATCH/DELETE /api/v1/transactions`
-- 거래당 `PRIMARY` Entry 정확히 1개, 수입 `+amount`, 지출 `-amount`
+- 수입·일반 지출·카드 지출은 `PRIMARY` Entry 1개, 이체는 `SOURCE`와 `DESTINATION` Entry 각 1개
+- ASSET 지출 `-amount`, CREDIT_CARD/LIABILITY 지출 `+amount`, ASSET→LIABILITY 카드대금 납부는 양쪽 `-amount`
 - Account 현재 잔액 = 기초 잔액 + 미삭제 Transaction Entry 합
 - Account/Category/Group은 물리삭제 대신 archive, Transaction은 optimistic version을 요구하는 논리삭제
 - 다른 Household의 Member/Account/Category/Transaction은 모두 현재 Household 조건으로 차단
 
-TRANSFER, REFUND, CREDIT_CARD/LIABILITY posting은 후속 Slice이며 현재 API는 stable `422` error code로 거부한다. 기본 Category seed는 자동 생성하지 않는다.
+LIABILITY source 이체와 REFUND는 후속 Slice이며 현재 API가 stable `422` error code로 거부한다. 기본 Category seed는 자동 생성하지 않는다.
 
 ## 저장소 구조
 

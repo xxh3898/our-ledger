@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.2
+last_updated: 2026-08-28
 related:
   - 05-frontend/calendar-screen.md
 ---
@@ -23,7 +23,7 @@ V1 데이터 규모와 구현 단순성을 고려해 offset pagination을 사용
 ```text
 from=2026-08-01
 to=2026-08-31
-transactionType=EXPENSE
+type=EXPENSE
 scope=PERSONAL
 ownerMemberId=1
 payerMemberId=2
@@ -36,6 +36,8 @@ query=점심
 page=0
 size=30
 ```
+
+`accountId`는 Transaction의 PRIMARY, SOURCE, DESTINATION Entry 중 하나라도 해당 Account를 참조하면 일치한다. 따라서 이체는 출금·입금 Account 양쪽에서 조회된다.
 
 ## 전역 주체 필터
 

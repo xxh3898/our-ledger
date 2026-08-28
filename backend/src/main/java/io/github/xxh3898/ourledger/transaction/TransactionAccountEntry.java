@@ -50,25 +50,20 @@ public class TransactionAccountEntry {
         this.balanceDelta = balanceDelta;
     }
 
-    public static TransactionAccountEntry primary(
+    public static TransactionAccountEntry create(
             Long householdId,
             Long transactionId,
             Long accountId,
+            EntryRole entryRole,
             long balanceDelta
     ) {
         return new TransactionAccountEntry(
                 householdId,
                 transactionId,
                 accountId,
-                EntryRole.PRIMARY,
+                entryRole,
                 balanceDelta
         );
-    }
-
-    public void updatePrimary(Long accountId, long balanceDelta) {
-        this.accountId = accountId;
-        this.entryRole = EntryRole.PRIMARY;
-        this.balanceDelta = balanceDelta;
     }
 
     public Long getId() {

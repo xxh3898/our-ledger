@@ -20,9 +20,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class TransactionService {
@@ -111,6 +113,8 @@ public class TransactionService {
                 request.payerMemberId(),
                 request.categoryId(),
                 request.accountId(),
+                request.sourceAccountId(),
+                request.destinationAccountId(),
                 request.occurredAt(),
                 request.memo(),
                 request.adjustmentType(),
@@ -131,12 +135,7 @@ public class TransactionService {
                 request.reversesTransactionId(),
                 actor.getId()
         ));
-        entryRepository.saveAndFlush(TransactionAccountEntry.primary(
-                currentHousehold.householdId(),
-                transaction.getId(),
-                posting.account().getId(),
-                posting.balanceDelta()
-        ));
+        saveEntries(transaction, posting.entries());
         return toResponse(transaction);
     }
 
@@ -150,6 +149,7 @@ public class TransactionService {
         LedgerTransaction transaction = requireTransaction(
                 currentHousehold.householdId(), transactionId);
         rejectStaleVersion(transaction, request.version());
+        requireValidEntries(transaction);
         ValidatedPosting posting = validatePosting(
                 currentHousehold,
                 request.type(),
@@ -159,6 +159,8 @@ public class TransactionService {
                 request.payerMemberId(),
                 request.categoryId(),
                 request.accountId(),
+                request.sourceAccountId(),
+                request.destinationAccountId(),
                 request.occurredAt(),
                 request.memo(),
                 request.adjustmentType(),
@@ -178,10 +180,11 @@ public class TransactionService {
                 request.reversesTransactionId(),
                 actor.getId()
         );
-        TransactionAccountEntry entry = requirePrimaryEntry(transaction);
-        entry.updatePrimary(posting.account().getId(), posting.balanceDelta());
         transactionRepository.flush();
+        entryRepository.deleteAllForTransaction(
+                transaction.getId(), transaction.getHouseholdId());
         entryRepository.flush();
+        saveEntries(transaction, posting.entries());
         return toResponse(transaction);
     }
 
@@ -194,6 +197,7 @@ public class TransactionService {
         LedgerTransaction transaction = requireTransaction(
                 currentHousehold.householdId(), transactionId);
         rejectStaleVersion(transaction, version);
+        requireValidEntries(transaction);
         HouseholdMember actor = householdMemberResolver.requireCurrent(currentHousehold);
         transaction.delete(actor.getId());
         transactionRepository.flush();
@@ -216,33 +220,18 @@ public class TransactionService {
             Long payerMemberId,
             Long categoryId,
             Long accountId,
+            Long sourceAccountId,
+            Long destinationAccountId,
             Instant occurredAt,
             String memo,
             AdjustmentType adjustmentType,
             Long reversesTransactionId
     ) {
-        new RequestValidator().required(type, "type").throwIfInvalid();
-        if (type == TransactionType.TRANSFER) {
-            throw new ApiException(
-                    HttpStatus.UNPROCESSABLE_ENTITY,
-                    ApiErrorCode.UNSUPPORTED_TRANSACTION_TYPE
-            );
-        }
-
-        new RequestValidator().required(adjustmentType, "adjustmentType").throwIfInvalid();
-        if (adjustmentType != AdjustmentType.NORMAL || reversesTransactionId != null) {
-            throw new ApiException(
-                    HttpStatus.UNPROCESSABLE_ENTITY,
-                    ApiErrorCode.UNSUPPORTED_ADJUSTMENT_TYPE
-            );
-        }
-
         RequestValidator validator = new RequestValidator()
+                .required(type, "type")
                 .required(amount, "amount")
-                .required(scope, "scope")
-                .required(categoryId, "categoryId")
-                .required(accountId, "accountId")
-                .required(occurredAt, "occurredAt");
+                .required(occurredAt, "occurredAt")
+                .required(adjustmentType, "adjustmentType");
         if (amount != null) {
             validator.check(amount > 0, "amount", "positive", "1 이상이어야 합니다.");
         }
@@ -252,6 +241,122 @@ public class TransactionService {
         }
         validator.throwIfInvalid();
 
+        if (adjustmentType != AdjustmentType.NORMAL || reversesTransactionId != null) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.UNSUPPORTED_ADJUSTMENT_TYPE
+            );
+        }
+        if (type == TransactionType.TRANSFER) {
+            return validateTransfer(
+                    currentHousehold,
+                    amount,
+                    scope,
+                    ownerMemberId,
+                    payerMemberId,
+                    categoryId,
+                    accountId,
+                    sourceAccountId,
+                    destinationAccountId
+            );
+        }
+        return validatePrimaryPosting(
+                currentHousehold,
+                type,
+                amount,
+                scope,
+                ownerMemberId,
+                payerMemberId,
+                categoryId,
+                accountId,
+                sourceAccountId,
+                destinationAccountId
+        );
+    }
+
+    private ValidatedPosting validateTransfer(
+            CurrentHousehold currentHousehold,
+            long amount,
+            TransactionScope scope,
+            Long ownerMemberId,
+            Long payerMemberId,
+            Long categoryId,
+            Long accountId,
+            Long sourceAccountId,
+            Long destinationAccountId
+    ) {
+        new RequestValidator()
+                .required(sourceAccountId, "sourceAccountId")
+                .required(destinationAccountId, "destinationAccountId")
+                .check(scope == null, "scope", "mustBeNull", "TRANSFER에는 scope를 지정하지 않습니다.")
+                .check(ownerMemberId == null, "ownerMemberId", "mustBeNull", "TRANSFER에는 owner를 지정하지 않습니다.")
+                .check(payerMemberId == null, "payerMemberId", "mustBeNull", "TRANSFER에는 payer를 지정하지 않습니다.")
+                .check(categoryId == null, "categoryId", "mustBeNull", "TRANSFER에는 Category를 지정하지 않습니다.")
+                .check(accountId == null, "accountId", "mustBeNull", "TRANSFER에는 PRIMARY Account를 지정하지 않습니다.")
+                .throwIfInvalid();
+
+        if (sourceAccountId.equals(destinationAccountId)) {
+            accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.TRANSFER_SAME_ACCOUNT_NOT_ALLOWED
+            );
+        }
+        Account source;
+        Account destination;
+        if (sourceAccountId.compareTo(destinationAccountId) < 0) {
+            source = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
+            destination = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), destinationAccountId);
+        } else {
+            destination = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), destinationAccountId);
+            source = accountService.requireAccountForPosting(
+                    currentHousehold.householdId(), sourceAccountId);
+        }
+        requireActive(source);
+        requireActive(destination);
+        requireValidCreditCardNature(source);
+        requireValidCreditCardNature(destination);
+        if (source.getNature() != AccountNature.ASSET) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.UNSUPPORTED_TRANSFER_SOURCE
+            );
+        }
+
+        long sourceDelta = Math.negateExact(amount);
+        long destinationDelta = destination.getNature() == AccountNature.ASSET
+                ? amount
+                : Math.negateExact(amount);
+        return new ValidatedPosting(List.of(
+                new ExpectedEntry(source, EntryRole.SOURCE, sourceDelta),
+                new ExpectedEntry(destination, EntryRole.DESTINATION, destinationDelta)
+        ));
+    }
+
+    private ValidatedPosting validatePrimaryPosting(
+            CurrentHousehold currentHousehold,
+            TransactionType type,
+            long amount,
+            TransactionScope scope,
+            Long ownerMemberId,
+            Long payerMemberId,
+            Long categoryId,
+            Long accountId,
+            Long sourceAccountId,
+            Long destinationAccountId
+    ) {
+        new RequestValidator()
+                .required(scope, "scope")
+                .required(categoryId, "categoryId")
+                .required(accountId, "accountId")
+                .check(sourceAccountId == null, "sourceAccountId", "mustBeNull", "INCOME/EXPENSE에는 source를 지정하지 않습니다.")
+                .check(destinationAccountId == null, "destinationAccountId", "mustBeNull", "INCOME/EXPENSE에는 destination을 지정하지 않습니다.")
+                .throwIfInvalid();
+
         validateScope(scope, ownerMemberId);
         if (type != TransactionType.EXPENSE && payerMemberId != null) {
             throw new ApiException(
@@ -259,7 +364,6 @@ public class TransactionService {
                     ApiErrorCode.TRANSACTION_INVALID_SCOPE
             );
         }
-
         if (ownerMemberId != null) {
             householdMemberResolver.require(currentHousehold.householdId(), ownerMemberId);
         }
@@ -283,25 +387,59 @@ public class TransactionService {
             );
         }
 
-        Account account = accountService.requireAccount(
+        Account account = accountService.requireAccountForPosting(
                 currentHousehold.householdId(), accountId);
+        requireActive(account);
+        requireValidCreditCardNature(account);
+        long balanceDelta = primaryBalanceDelta(type, amount, account);
+        return new ValidatedPosting(List.of(
+                new ExpectedEntry(account, EntryRole.PRIMARY, balanceDelta)
+        ));
+    }
+
+    private long primaryBalanceDelta(TransactionType type, long amount, Account account) {
+        if (type == TransactionType.INCOME) {
+            if (account.getNature() != AccountNature.ASSET
+                    || account.getType() == AccountType.CREDIT_CARD) {
+                throw unsupportedAccountPosting();
+            }
+            return amount;
+        }
+        if (account.getType() == AccountType.CREDIT_CARD
+                && account.getNature() == AccountNature.LIABILITY) {
+            return amount;
+        }
+        if (account.getNature() == AccountNature.ASSET
+                && account.getType() != AccountType.CREDIT_CARD) {
+            return Math.negateExact(amount);
+        }
+        throw unsupportedAccountPosting();
+    }
+
+    private ApiException unsupportedAccountPosting() {
+        return new ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.UNSUPPORTED_ACCOUNT_POSTING
+        );
+    }
+
+    private void requireActive(Account account) {
         if (account.isArchived()) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     ApiErrorCode.ARCHIVED_ACCOUNT_NOT_ALLOWED
             );
         }
-        if (account.getNature() != AccountNature.ASSET
-                || account.getType() == AccountType.CREDIT_CARD) {
+    }
+
+    private void requireValidCreditCardNature(Account account) {
+        if (account.getType() == AccountType.CREDIT_CARD
+                && account.getNature() != AccountNature.LIABILITY) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
-                    ApiErrorCode.UNSUPPORTED_ACCOUNT_POSTING
+                    ApiErrorCode.CREDIT_CARD_NATURE_REQUIRED
             );
         }
-        long balanceDelta = type == TransactionType.INCOME
-                ? amount
-                : Math.negateExact(amount);
-        return new ValidatedPosting(account, balanceDelta);
     }
 
     private void validateScope(TransactionScope scope, Long ownerMemberId) {
@@ -315,6 +453,22 @@ public class TransactionService {
         }
     }
 
+    private void saveEntries(
+            LedgerTransaction transaction,
+            List<ExpectedEntry> expectedEntries
+    ) {
+        List<TransactionAccountEntry> entries = expectedEntries.stream()
+                .map(expected -> TransactionAccountEntry.create(
+                        transaction.getHouseholdId(),
+                        transaction.getId(),
+                        expected.account().getId(),
+                        expected.role(),
+                        expected.balanceDelta()
+                ))
+                .toList();
+        entryRepository.saveAllAndFlush(entries);
+    }
+
     private LedgerTransaction requireTransaction(Long householdId, Long transactionId) {
         return transactionRepository.findByIdAndHouseholdIdAndDeletedAtIsNull(
                         transactionId, householdId)
@@ -324,16 +478,88 @@ public class TransactionService {
                 ));
     }
 
-    private TransactionAccountEntry requirePrimaryEntry(LedgerTransaction transaction) {
-        return entryRepository.findByTransactionIdAndHouseholdIdAndEntryRole(
-                        transaction.getId(),
-                        transaction.getHouseholdId(),
-                        EntryRole.PRIMARY
-                )
-                .orElseThrow(() -> new ApiException(
-                        HttpStatus.CONFLICT,
-                        ApiErrorCode.RESOURCE_STATE_CONFLICT
-                ));
+    private List<TransactionAccountEntry> requireValidEntries(LedgerTransaction transaction) {
+        List<TransactionAccountEntry> entries = entryRepository
+                .findAllByTransactionIdAndHouseholdId(
+                        transaction.getId(), transaction.getHouseholdId())
+                .stream()
+                .sorted(Comparator.comparingInt(entry -> entry.getEntryRole().ordinal()))
+                .toList();
+        if (!hasValidEntrySet(transaction, entries)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCode.TRANSACTION_ENTRY_SET_INVALID
+            );
+        }
+        return entries;
+    }
+
+    private boolean hasValidEntrySet(
+            LedgerTransaction transaction,
+            List<TransactionAccountEntry> entries
+    ) {
+        if (transaction.getType() == TransactionType.TRANSFER) {
+            if (entries.size() != 2 || roles(entries).size() != 2) {
+                return false;
+            }
+            TransactionAccountEntry source = entry(entries, EntryRole.SOURCE);
+            TransactionAccountEntry destination = entry(entries, EntryRole.DESTINATION);
+            if (source == null || destination == null
+                    || source.getAccountId().equals(destination.getAccountId())) {
+                return false;
+            }
+            Account sourceAccount = accountService.requireAccount(
+                    transaction.getHouseholdId(), source.getAccountId());
+            Account destinationAccount = accountService.requireAccount(
+                    transaction.getHouseholdId(), destination.getAccountId());
+            long expectedDestinationDelta = destinationAccount.getNature() == AccountNature.ASSET
+                    ? transaction.getAmount()
+                    : Math.negateExact(transaction.getAmount());
+            return sourceAccount.getNature() == AccountNature.ASSET
+                    && sourceAccount.getType() != AccountType.CREDIT_CARD
+                    && source.getBalanceDelta() == Math.negateExact(transaction.getAmount())
+                    && destination.getBalanceDelta() == expectedDestinationDelta;
+        }
+
+        if (entries.size() != 1 || entries.getFirst().getEntryRole() != EntryRole.PRIMARY) {
+            return false;
+        }
+        TransactionAccountEntry primary = entries.getFirst();
+        Account account = accountService.requireAccount(
+                transaction.getHouseholdId(), primary.getAccountId());
+        long expectedDelta;
+        if (transaction.getType() == TransactionType.INCOME
+                && account.getNature() == AccountNature.ASSET
+                && account.getType() != AccountType.CREDIT_CARD) {
+            expectedDelta = transaction.getAmount();
+        } else if (transaction.getType() == TransactionType.EXPENSE
+                && account.getType() == AccountType.CREDIT_CARD
+                && account.getNature() == AccountNature.LIABILITY) {
+            expectedDelta = transaction.getAmount();
+        } else if (transaction.getType() == TransactionType.EXPENSE
+                && account.getNature() == AccountNature.ASSET
+                && account.getType() != AccountType.CREDIT_CARD) {
+            expectedDelta = Math.negateExact(transaction.getAmount());
+        } else {
+            return false;
+        }
+        return primary.getBalanceDelta() == expectedDelta;
+    }
+
+    private Set<EntryRole> roles(List<TransactionAccountEntry> entries) {
+        return entries.stream()
+                .map(TransactionAccountEntry::getEntryRole)
+                .collect(Collectors.toSet());
+    }
+
+    private TransactionAccountEntry entry(
+            List<TransactionAccountEntry> entries,
+            EntryRole role
+    ) {
+        return entries.stream()
+                .filter(entry -> entry.getEntryRole() == role)
+                .findFirst()
+                .orElse(null);
     }
 
     private void rejectStaleVersion(LedgerTransaction transaction, Long requestedVersion) {
@@ -354,11 +580,22 @@ public class TransactionService {
                 ? null
                 : householdMemberResolver.require(
                         transaction.getHouseholdId(), transaction.getPayerMemberId());
-        Category category = categoryService.requireCategory(
-                transaction.getHouseholdId(), transaction.getCategoryId());
-        Account account = accountService.requireAccount(
-                transaction.getHouseholdId(), requirePrimaryEntry(transaction).getAccountId());
-        TransactionAccountEntry entry = requirePrimaryEntry(transaction);
+        Category category = transaction.getCategoryId() == null
+                ? null
+                : categoryService.requireCategory(
+                        transaction.getHouseholdId(), transaction.getCategoryId());
+        List<TransactionResponse.Entry> entries = requireValidEntries(transaction).stream()
+                .map(entry -> {
+                    Account account = accountService.requireAccount(
+                            transaction.getHouseholdId(), entry.getAccountId());
+                    return new TransactionResponse.Entry(
+                            entry.getId(),
+                            entry.getEntryRole(),
+                            entry.getBalanceDelta(),
+                            toAccountReference(account)
+                    );
+                })
+                .toList();
         return new TransactionResponse(
                 transaction.getId(),
                 transaction.getType(),
@@ -366,27 +603,36 @@ public class TransactionService {
                 transaction.getScope(),
                 toMember(owner),
                 toMember(payer),
-                new TransactionResponse.CategoryReference(
-                        category.getId(),
-                        category.getName(),
-                        category.getType(),
-                        categoryService.isEffectivelyArchived(category)
-                ),
-                new TransactionResponse.AccountReference(
-                        account.getId(),
-                        account.getName(),
-                        account.getType(),
-                        account.getNature(),
-                        account.isArchived()
-                ),
+                toCategoryReference(category),
                 transaction.getOccurredAt(),
                 transaction.getMemo(),
                 transaction.getAdjustmentType(),
                 transaction.getVersion(),
-                new TransactionResponse.Entry(
-                        entry.getId(), entry.getEntryRole(), entry.getBalanceDelta()),
+                entries,
                 transaction.getCreatedAt(),
                 transaction.getUpdatedAt()
+        );
+    }
+
+    private TransactionResponse.CategoryReference toCategoryReference(Category category) {
+        if (category == null) {
+            return null;
+        }
+        return new TransactionResponse.CategoryReference(
+                category.getId(),
+                category.getName(),
+                category.getType(),
+                categoryService.isEffectivelyArchived(category)
+        );
+    }
+
+    private TransactionResponse.AccountReference toAccountReference(Account account) {
+        return new TransactionResponse.AccountReference(
+                account.getId(),
+                account.getName(),
+                account.getType(),
+                account.getNature(),
+                account.isArchived()
         );
     }
 
@@ -401,6 +647,12 @@ public class TransactionService {
         );
     }
 
-    private record ValidatedPosting(Account account, long balanceDelta) {
+    private record ExpectedEntry(Account account, EntryRole role, long balanceDelta) {
+    }
+
+    private record ValidatedPosting(List<ExpectedEntry> entries) {
+        private ValidatedPosting {
+            entries = List.copyOf(entries);
+        }
     }
 }

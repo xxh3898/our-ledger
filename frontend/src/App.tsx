@@ -163,10 +163,12 @@ function AccessState({ state }: { state: ViewState }) {
 }
 
 function AccountSetup({
+  currentUserId,
   household,
   accounts,
   onChanged,
 }: {
+  currentUserId: number
   household: CurrentHousehold
   accounts: Account[]
   onChanged: () => Promise<void>
@@ -176,7 +178,7 @@ function AccountSetup({
   const [nature, setNature] = useState<Account['nature']>('ASSET')
   const [ownership, setOwnership] = useState<Account['ownership']>('PERSONAL')
   const [ownerMemberId, setOwnerMemberId] = useState(
-    household.members[0]?.memberId.toString() ?? '',
+    household.members.find((member) => member.userId === currentUserId)?.memberId.toString() ?? '',
   )
   const [openingBalance, setOpeningBalance] = useState('0')
   const [openingBalanceAsOf, setOpeningBalanceAsOf] = useState(
@@ -302,6 +304,9 @@ function AccountSetup({
             onChange={(event) => setOpeningBalanceAsOf(event.target.value)}
           />
         </label>
+        {type === 'CREDIT_CARD' && (
+          <p className="field-hint">신용카드는 LIABILITY로 기록하며 저축 Account로 사용할 수 없습니다.</p>
+        )}
         <input type="hidden" value={nature} readOnly />
         <button className="primary-button" type="submit" disabled={pending}>
           {pending ? '저장 중…' : '계좌 추가'}
@@ -491,28 +496,58 @@ function CategorySetup({
 type TransactionFormState = {
   type: LedgerTransaction['type']
   amount: string
-  scope: LedgerTransaction['scope']
+  scope: Exclude<LedgerTransaction['scope'], null>
   ownerMemberId: string
   payerMemberId: string
   categoryId: string
   accountId: string
+  sourceAccountId: string
+  destinationAccountId: string
   occurredOn: string
   memo: string
 }
 
+function isPrimaryAccountForType(type: LedgerTransaction['type'], account: Account) {
+  if (account.archived || type === 'TRANSFER') return false
+  if (type === 'INCOME') {
+    return account.nature === 'ASSET' && account.type !== 'CREDIT_CARD'
+  }
+  return (account.nature === 'ASSET' && account.type !== 'CREDIT_CARD')
+    || (account.type === 'CREDIT_CARD' && account.nature === 'LIABILITY')
+}
+
+function entryByRole(
+  transaction: LedgerTransaction,
+  role: LedgerTransaction['entries'][number]['role'],
+) {
+  return transaction.entries.find((entry) => entry.role === role)
+}
+
 function initialTransactionForm(
+  currentUserId: number,
   household: CurrentHousehold,
   accounts: Account[],
   categories: Category[],
 ): TransactionFormState {
+  const currentMemberId = household.members
+    .find((member) => member.userId === currentUserId)
+    ?.memberId.toString() ?? ''
+  const sourceAccountId = accounts
+    .find((account) => !account.archived && account.nature === 'ASSET')
+    ?.id.toString() ?? ''
   return {
     type: 'EXPENSE',
     amount: '',
     scope: 'PERSONAL',
-    ownerMemberId: household.members[0]?.memberId.toString() ?? '',
-    payerMemberId: household.members[0]?.memberId.toString() ?? '',
+    ownerMemberId: currentMemberId,
+    payerMemberId: currentMemberId,
     categoryId: categories.find((category) => category.type === 'EXPENSE')?.id.toString() ?? '',
-    accountId: accounts.find((account) => account.nature === 'ASSET')?.id.toString() ?? '',
+    accountId: accounts.find((account) => isPrimaryAccountForType('EXPENSE', account))
+      ?.id.toString() ?? '',
+    sourceAccountId,
+    destinationAccountId: accounts
+      .find((account) => !account.archived && account.id.toString() !== sourceAccountId)
+      ?.id.toString() ?? '',
     occurredOn: today(household.timezone),
     memo: '',
   }
@@ -525,17 +560,20 @@ function transactionToForm(
   return {
     type: transaction.type,
     amount: transaction.amount.toString(),
-    scope: transaction.scope,
+    scope: transaction.scope ?? 'PERSONAL',
     ownerMemberId: transaction.owner?.memberId.toString() ?? '',
     payerMemberId: transaction.payer?.memberId.toString() ?? '',
-    categoryId: transaction.category.id.toString(),
-    accountId: transaction.account.id.toString(),
+    categoryId: transaction.category?.id.toString() ?? '',
+    accountId: entryByRole(transaction, 'PRIMARY')?.account.id.toString() ?? '',
+    sourceAccountId: entryByRole(transaction, 'SOURCE')?.account.id.toString() ?? '',
+    destinationAccountId: entryByRole(transaction, 'DESTINATION')?.account.id.toString() ?? '',
     occurredOn: dateInTimeZone(new Date(transaction.occurredAt), timeZone),
     memo: transaction.memo ?? '',
   }
 }
 
 function QuickEntry({
+  currentUserId,
   household,
   accounts,
   categories,
@@ -543,6 +581,7 @@ function QuickEntry({
   onCancelEdit,
   onChanged,
 }: {
+  currentUserId: number
   household: CurrentHousehold
   accounts: Account[]
   categories: Category[]
@@ -550,7 +589,8 @@ function QuickEntry({
   onCancelEdit: () => void
   onChanged: () => Promise<void>
 }) {
-  const [form, setForm] = useState(() => initialTransactionForm(household, accounts, categories))
+  const [form, setForm] = useState(() =>
+    initialTransactionForm(currentUserId, household, accounts, categories))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -562,12 +602,46 @@ function QuickEntry({
   }, [editing, household.timezone])
 
   const matchingCategories = categories.filter((category) => category.type === form.type)
-  const assetAccounts = accounts.filter(
-    (account) => account.nature === 'ASSET' && account.type !== 'CREDIT_CARD',
+  const primaryAccounts = accounts.filter((account) => isPrimaryAccountForType(form.type, account))
+  const sourceAccounts = accounts.filter(
+    (account) => !account.archived
+      && account.nature === 'ASSET'
+      && account.type !== 'CREDIT_CARD',
+  )
+  const destinationAccounts = accounts.filter(
+    (account) => !account.archived && account.id.toString() !== form.sourceAccountId,
   )
 
   function change<K extends keyof TransactionFormState>(key: K, value: TransactionFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function selectType(type: LedgerTransaction['type']) {
+    const nextSource = sourceAccounts[0]?.id.toString() ?? ''
+    const currentMemberId = household.members
+      .find((member) => member.userId === currentUserId)
+      ?.memberId.toString() ?? ''
+    setForm((current) => ({
+      ...current,
+      type,
+      categoryId: type === 'TRANSFER'
+        ? ''
+        : categories.find((category) => category.type === type)?.id.toString() ?? '',
+      accountId: type === 'TRANSFER'
+        ? ''
+        : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
+      sourceAccountId: type === 'TRANSFER' ? nextSource : '',
+      destinationAccountId: type === 'TRANSFER'
+        ? accounts.find((account) => !account.archived && account.id.toString() !== nextSource)
+          ?.id.toString() ?? ''
+        : '',
+      ownerMemberId: type === 'TRANSFER'
+        ? current.ownerMemberId
+        : current.ownerMemberId || currentMemberId,
+      payerMemberId: type === 'EXPENSE'
+        ? current.payerMemberId || currentMemberId
+        : '',
+    }))
   }
 
   async function submit(event: FormEvent) {
@@ -575,18 +649,34 @@ function QuickEntry({
     setPending(true)
     setError(null)
     try {
-      if (!form.categoryId || !form.accountId || !form.amount) {
-        throw new Error('금액, Category, Account를 확인해 주세요.')
+      if (!form.amount) {
+        throw new Error('금액을 확인해 주세요.')
+      }
+      if (form.type === 'TRANSFER') {
+        if (!form.sourceAccountId || !form.destinationAccountId) {
+          throw new Error('출금 Account와 입금 Account를 확인해 주세요.')
+        }
+        if (form.sourceAccountId === form.destinationAccountId) {
+          throw new Error('출금 Account와 입금 Account는 달라야 합니다.')
+        }
+      } else if (!form.categoryId || !form.accountId) {
+        throw new Error('Category와 Account를 확인해 주세요.')
       }
       const input = {
         type: form.type,
         amount: Number(form.amount),
-        scope: form.scope,
-        ownerMemberId: form.scope === 'PERSONAL' ? Number(form.ownerMemberId) : null,
+        scope: form.type === 'TRANSFER' ? null : form.scope,
+        ownerMemberId:
+          form.type !== 'TRANSFER' && form.scope === 'PERSONAL'
+            ? Number(form.ownerMemberId)
+            : null,
         payerMemberId:
           form.type === 'EXPENSE' && form.payerMemberId ? Number(form.payerMemberId) : null,
-        categoryId: Number(form.categoryId),
-        accountId: Number(form.accountId),
+        categoryId: form.type === 'TRANSFER' ? null : Number(form.categoryId),
+        accountId: form.type === 'TRANSFER' ? null : Number(form.accountId),
+        sourceAccountId: form.type === 'TRANSFER' ? Number(form.sourceAccountId) : null,
+        destinationAccountId:
+          form.type === 'TRANSFER' ? Number(form.destinationAccountId) : null,
         occurredAt: noonInTimeZone(form.occurredOn, household.timezone),
         memo: form.memo.trim() || null,
         adjustmentType: 'NORMAL' as const,
@@ -597,7 +687,7 @@ function QuickEntry({
       } else {
         await createTransaction(input)
       }
-      setForm(initialTransactionForm(household, accounts, categories))
+      setForm(initialTransactionForm(currentUserId, household, accounts, categories))
       onCancelEdit()
       await onChanged()
     } catch (submitError) {
@@ -618,18 +708,14 @@ function QuickEntry({
       </div>
       <form className="entry-form" onSubmit={submit}>
         <div className="segmented-control" aria-label="거래 유형">
-          {(['EXPENSE', 'INCOME'] as const).map((type) => (
+          {(['EXPENSE', 'INCOME', 'TRANSFER'] as const).map((type) => (
             <button
               key={type}
               type="button"
               className={form.type === type ? 'is-active' : ''}
-              onClick={() => {
-                change('type', type)
-                change('categoryId', categories.find((item) => item.type === type)?.id.toString() ?? '')
-                if (type === 'INCOME') change('payerMemberId', '')
-              }}
+              onClick={() => selectType(type)}
             >
-              {type === 'EXPENSE' ? '지출' : '수입'}
+              {type === 'EXPENSE' ? '지출' : type === 'INCOME' ? '수입' : '이체'}
             </button>
           ))}
         </div>
@@ -644,17 +730,22 @@ function QuickEntry({
             onChange={(event) => change('amount', event.target.value)}
           /> 원</span>
         </label>
-        <label>
-          범위
-          <select
-            value={form.scope}
-            onChange={(event) => change('scope', event.target.value as LedgerTransaction['scope'])}
-          >
-            <option value="PERSONAL">개인</option>
-            <option value="SHARED">공동</option>
-          </select>
-        </label>
-        {form.scope === 'PERSONAL' && (
+        {form.type !== 'TRANSFER' && (
+          <label>
+            범위
+            <select
+              value={form.scope}
+              onChange={(event) => change(
+                'scope',
+                event.target.value as TransactionFormState['scope'],
+              )}
+            >
+              <option value="PERSONAL">개인</option>
+              <option value="SHARED">공동</option>
+            </select>
+          </label>
+        )}
+        {form.type !== 'TRANSFER' && form.scope === 'PERSONAL' && (
           <label>
             Owner
             <select
@@ -682,32 +773,77 @@ function QuickEntry({
             </select>
           </label>
         )}
-        <label>
-          Category
-          <select
-            required
-            value={form.categoryId}
-            onChange={(event) => change('categoryId', event.target.value)}
-          >
-            <option value="">선택</option>
-            {matchingCategories.map((category) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Account
-          <select
-            required
-            value={form.accountId}
-            onChange={(event) => change('accountId', event.target.value)}
-          >
-            <option value="">선택</option>
-            {assetAccounts.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
-            ))}
-          </select>
-        </label>
+        {form.type !== 'TRANSFER' && (
+          <label>
+            Category
+            <select
+              required
+              value={form.categoryId}
+              onChange={(event) => change('categoryId', event.target.value)}
+            >
+              <option value="">선택</option>
+              {matchingCategories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {form.type !== 'TRANSFER' && (
+          <label>
+            Account
+            <select
+              required
+              value={form.accountId}
+              onChange={(event) => change('accountId', event.target.value)}
+            >
+              <option value="">선택</option>
+              {primaryAccounts.map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {form.type === 'TRANSFER' && (
+          <label>
+            출금 Account
+            <select
+              required
+              value={form.sourceAccountId}
+              onChange={(event) => {
+                const sourceAccountId = event.target.value
+                setForm((current) => ({
+                  ...current,
+                  sourceAccountId,
+                  destinationAccountId: current.destinationAccountId === sourceAccountId
+                    ? accounts.find((account) =>
+                      !account.archived && account.id.toString() !== sourceAccountId,
+                    )?.id.toString() ?? ''
+                    : current.destinationAccountId,
+                }))
+              }}
+            >
+              <option value="">선택</option>
+              {sourceAccounts.map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {form.type === 'TRANSFER' && (
+          <label>
+            입금 Account
+            <select
+              required
+              value={form.destinationAccountId}
+              onChange={(event) => change('destinationAccountId', event.target.value)}
+            >
+              <option value="">선택</option>
+              {destinationAccounts.map((account) => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           날짜
           <input
@@ -777,22 +913,24 @@ function TransactionList({
           {transactions.map((transaction) => (
             <li key={transaction.id}>
               <div className={`transaction-sign transaction-sign--${transaction.type.toLowerCase()}`}>
-                {transaction.type === 'INCOME' ? '+' : '−'}
+                {transaction.type === 'TRANSFER' ? '↔' : transaction.type === 'INCOME' ? '+' : '−'}
               </div>
               <div className="transaction-copy">
-                <strong>{transaction.category.name}</strong>
+                <strong>{transaction.type === 'TRANSFER' ? '이체' : transaction.category?.name}</strong>
                 <span>
                   {new Intl.DateTimeFormat('ko-KR', {
                     dateStyle: 'medium',
                     timeZone,
                   }).format(new Date(transaction.occurredAt))}
-                  {' · '}{transaction.scope === 'SHARED' ? '공동' : transaction.owner?.displayName}
-                  {' · '}{transaction.account.name}
+                  {' · '}
+                  {transaction.type === 'TRANSFER'
+                    ? `${entryByRole(transaction, 'SOURCE')?.account.name ?? '출금 Account'} → ${entryByRole(transaction, 'DESTINATION')?.account.name ?? '입금 Account'}`
+                    : `${transaction.scope === 'SHARED' ? '공동' : transaction.owner?.displayName} · ${entryByRole(transaction, 'PRIMARY')?.account.name ?? 'Account'}`}
                 </span>
                 {transaction.memo && <small>{transaction.memo}</small>}
               </div>
               <b className="transaction-amount">
-                {transaction.type === 'INCOME' ? '+' : '−'}
+                {transaction.type === 'TRANSFER' ? '↔ ' : transaction.type === 'INCOME' ? '+' : '−'}
                 {transaction.amount.toLocaleString('ko-KR')}원
               </b>
               <div className="transaction-actions">
@@ -815,7 +953,16 @@ function TransactionList({
               {expanded === transaction.id && (
                 <dl className="transaction-details">
                   <div><dt>Payer</dt><dd>{transaction.payer?.displayName ?? '지정 안 함'}</dd></div>
-                  <div><dt>Entry</dt><dd>{transaction.entry.role} {transaction.entry.balanceDelta.toLocaleString('ko-KR')}</dd></div>
+                  <div>
+                    <dt>Entries</dt>
+                    <dd>
+                      {transaction.entries.map((entry) => (
+                        <span key={entry.id}>
+                          {entry.role} {entry.account.name} {entry.balanceDelta.toLocaleString('ko-KR')}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
                   <div><dt>Version</dt><dd>{transaction.version}</dd></div>
                 </dl>
               )}
@@ -844,7 +991,7 @@ function BalanceSummary({ accounts }: { accounts: Account[] }) {
   )
 }
 
-function LedgerDashboard() {
+function LedgerDashboard({ user }: { user: CurrentUser }) {
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'ready'; data: LedgerData }
@@ -894,11 +1041,17 @@ function LedgerDashboard() {
     <div className="ledger-dashboard">
       <BalanceSummary accounts={accounts} />
       <div className="setup-grid">
-        <AccountSetup household={household} accounts={accounts} onChanged={refresh} />
+        <AccountSetup
+          currentUserId={user.userId}
+          household={household}
+          accounts={accounts}
+          onChanged={refresh}
+        />
         <CategorySetup groups={groups} categories={categories} onChanged={refresh} />
       </div>
       <div className="ledger-grid">
         <QuickEntry
+          currentUserId={user.userId}
           household={household}
           accounts={accounts}
           categories={categories}
@@ -943,13 +1096,13 @@ function App() {
         <p className="eyebrow">둘이 함께 쌓는 하나의 기록</p>
         <h1 id="page-title">우리의 장부</h1>
         <p className="hero-copy">
-          검증된 Household 경계 안에서 Account와 Category, 수입과 지출을 함께 기록합니다.
+          검증된 Household 경계 안에서 수입과 지출, 이체와 카드 부채를 함께 기록합니다.
         </p>
       </section>
 
       <section className="identity" aria-labelledby="identity-title">
         <div>
-          <p className="section-kicker">Slice 2</p>
+          <p className="section-kicker">Slice 3</p>
           <h2 id="identity-title">안전한 가계부</h2>
           <p className="section-copy">
             현재 사용자와 Household를 확인한 뒤 이 Household의 장부만 엽니다.
@@ -958,7 +1111,7 @@ function App() {
         <AccessState state={state} />
       </section>
 
-      {state.status === 'ready' && <LedgerDashboard />}
+      {state.status === 'ready' && <LedgerDashboard user={state.user} />}
     </main>
   )
 }

@@ -61,24 +61,28 @@ export type Category = {
 
 export type LedgerTransaction = {
   id: number
-  type: 'INCOME' | 'EXPENSE'
+  type: 'INCOME' | 'EXPENSE' | 'TRANSFER'
   amount: number
-  scope: 'PERSONAL' | 'SHARED'
+  scope: 'PERSONAL' | 'SHARED' | null
   owner: { memberId: number; userId: number; displayName: string } | null
   payer: { memberId: number; userId: number; displayName: string } | null
-  category: { id: number; name: string; type: 'INCOME' | 'EXPENSE'; archived: boolean }
-  account: {
-    id: number
-    name: string
-    type: Account['type']
-    nature: Account['nature']
-    archived: boolean
-  }
+  category: { id: number; name: string; type: 'INCOME' | 'EXPENSE'; archived: boolean } | null
   occurredAt: string
   memo: string | null
   adjustmentType: 'NORMAL'
   version: number
-  entry: { id: number; role: 'PRIMARY'; balanceDelta: number }
+  entries: Array<{
+    id: number
+    role: 'PRIMARY' | 'SOURCE' | 'DESTINATION'
+    balanceDelta: number
+    account: {
+      id: number
+      name: string
+      type: Account['type']
+      nature: Account['nature']
+      archived: boolean
+    }
+  }>
 }
 
 export type AccountInput = {
@@ -117,8 +121,10 @@ export type TransactionInput = {
   scope: LedgerTransaction['scope']
   ownerMemberId: number | null
   payerMemberId: number | null
-  categoryId: number
-  accountId: number
+  categoryId: number | null
+  accountId: number | null
+  sourceAccountId: number | null
+  destinationAccountId: number | null
   occurredAt: string
   memo: string | null
   adjustmentType: 'NORMAL'

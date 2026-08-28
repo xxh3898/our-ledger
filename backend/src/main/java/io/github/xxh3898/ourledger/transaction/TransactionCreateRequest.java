@@ -10,6 +10,8 @@ public record TransactionCreateRequest(
         Long payerMemberId,
         Long categoryId,
         Long accountId,
+        Long sourceAccountId,
+        Long destinationAccountId,
         Instant occurredAt,
         String memo,
         AdjustmentType adjustmentType,

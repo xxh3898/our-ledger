@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-28
 related:
   - 06-security/authorization.md
 ---
@@ -52,7 +52,7 @@ related:
 - `RESOURCE_NOT_FOUND`
 - `TRANSACTION_VERSION_CONFLICT`
 - `TRANSACTION_INVALID_SCOPE`
-- `TRANSACTION_INVALID_ACCOUNT_ENTRY`
+- `TRANSACTION_ENTRY_SET_INVALID`
 - `TRANSACTION_REFUND_ORIGINAL_REQUIRED`
 - `TRANSACTION_REFUND_EXCEEDS_ORIGINAL`
 - `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`
@@ -61,7 +61,7 @@ related:
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`
 
-### Basic Ledger code
+### Ledger code
 
 - `INVALID_REQUEST`: JSON, enum/date/query 형식과 필수·크기·숫자 범위 validation 실패 (`400`)
 - `RESOURCE_NOT_FOUND`: current Household에서 Member/Account/Category/Transaction을 찾을 수 없음 (`404`)
@@ -73,15 +73,19 @@ related:
 - `ARCHIVED_ACCOUNT_NOT_ALLOWED`, `ARCHIVED_CATEGORY_NOT_ALLOWED`: 보관 기준정보의 신규 posting (`422`)
 - `TRANSACTION_INVALID_SCOPE`: PERSONAL/SHARED owner 조합 또는 INCOME payer 규칙 위반 (`422`)
 - `TRANSACTION_VERSION_CONFLICT`: stale PATCH/DELETE version (`409`)
-- `UNSUPPORTED_TRANSACTION_TYPE`: Slice 2의 TRANSFER 요청 (`422`)
-- `UNSUPPORTED_ADJUSTMENT_TYPE`: Slice 2의 REFUND/reversal 요청 (`422`)
-- `UNSUPPORTED_ACCOUNT_POSTING`: CREDIT_CARD 또는 LIABILITY posting (`422`)
+- `TRANSACTION_ENTRY_SET_INVALID`: 저장된 거래의 role/delta/Account Entry exact set 불일치 (`409`)
+- `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`: source와 destination 동일 (`422`)
+- `UNSUPPORTED_TRANSFER_SOURCE`: LIABILITY source 이체 (`422`)
+- `CREDIT_CARD_NATURE_REQUIRED`: CREDIT_CARD/ASSET 조합 (`422`)
+- `ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`: Entry가 연결된 Account의 posting 분류 변경 (`409`)
+- `UNSUPPORTED_ADJUSTMENT_TYPE`: REFUND/reversal 요청 (`422`)
+- `UNSUPPORTED_ACCOUNT_POSTING`: Transaction 유형과 Account nature/type 조합 불일치 (`422`)
 
 ## 보안
 
 다른 Household의 리소스가 실제로 존재하는지 구분할 수 없도록 404 또는 일반화된 403 정책을 일관되게 적용한다. stack trace와 SQL을 응답하지 않는다.
 
-Basic Ledger의 ID로 지정된 Member/Account/Category/Transaction은 미존재와 cross-household를 모두 `404 RESOURCE_NOT_FOUND`로 처리한다. 목록 filter는 current Household query 경계 안에서만 평가하며 다른 Household 데이터를 반환하지 않는다.
+Ledger의 ID로 지정된 Member/Account/Category/Transaction은 미존재와 cross-household를 모두 `404 RESOURCE_NOT_FOUND`로 처리한다. 목록 filter는 current Household query 경계 안에서만 평가하며 다른 Household 데이터를 반환하지 않는다.
 
 - Access JWT가 없거나 signature/issuer/audience/time/email 검증에 실패하면 `401 AUTHENTICATION_REQUIRED`다.
 - JWT가 유효하지만 내부 User가 없으면 `403 USER_NOT_REGISTERED`, 비활성이면 `403 USER_DISABLED`다.

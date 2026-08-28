@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.4
-last_updated: 2026-08-27
+version: 0.5
+last_updated: 2026-08-28
 related:
   - 03-data/erd.md
   - ADR-008
@@ -89,15 +89,15 @@ FOREIGN KEY (category_id, household_id)
 
 일부 다중 행 규칙은 CHECK로 표현할 수 없으므로 서비스와 통합 테스트로 강제한다.
 
-## Slice 2 제약
+## Slice 3 제약
 
-- Account: PERSONAL owner 필수/SHARED owner null, owner composite FK, `currency='KRW'`, nullable 숫자 4자리 `last_four`, ASSET-only savings flag, nonnegative sort order
+- Account: PERSONAL owner 필수/SHARED owner null, owner composite FK, `currency='KRW'`, nullable 숫자 4자리 `last_four`, ASSET-only savings flag, CREDIT_CARD/LIABILITY, nonnegative sort order
 - Category Group: `(id, household_id, type)` unique target
 - Category: Group과 `(group_id, household_id, type)` composite FK, `(id, household_id, type)` unique target, active `(household_id, type, lower(name))` partial unique
 - Transaction: positive amount, INCOME/EXPENSE scope/category, PERSONAL owner/SHARED owner null, NORMAL/reversal null 또는 EXPENSE REFUND/reversal 필수, audit member와 deleted audit 쌍
 - Entry: same-household Transaction/Account composite FK, nonzero delta, `(transaction_id, entry_role)` unique
 
-Transaction당 Entry 정확히 1개는 단일 row CHECK로 표현할 수 없다. Slice 2는 transaction-role unique로 중복 PRIMARY를 막고 transactional service가 정확히 하나를 생성·갱신하며 PostgreSQL 통합 테스트로 검증한다.
+Transaction별 exact Entry set은 단일 row CHECK로 표현할 수 없다. Service가 INCOME/EXPENSE의 PRIMARY 1개와 TRANSFER의 SOURCE/DESTINATION 각 1개를 원자적으로 구성하고 PostgreSQL 통합 테스트로 검증한다.
 
 ## Migration
 
@@ -108,9 +108,10 @@ V1__foundation.sql
 V2__users_households.sql
 V3__accounts_categories_transactions.sql
 V4__transaction_account_entries.sql
-V5__budgets.sql
-V6__recurring_transactions.sql
-V7__goals.sql
+V5__credit_card_liability_constraint.sql
+V6__budgets.sql
+V7__recurring_transactions.sql
+V8__goals.sql
 ```
 
 실제 이름과 번호는 bootstrap 이후 연속성을 유지한다. 적용된 migration 파일은 수정하지 않는다.

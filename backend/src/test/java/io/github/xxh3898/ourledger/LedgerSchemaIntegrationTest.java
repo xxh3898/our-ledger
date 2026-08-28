@@ -32,7 +32,7 @@ class LedgerSchemaIntegrationTest {
     }
 
     @Test
-    void should_applyLedgerTables_when_v3AndV4MigrationsRun() {
+    void should_applyLedgerTables_when_v3ThroughV5MigrationsRun() {
         assertThat(jdbcTemplate.queryForList(
                 """
                 SELECT table_name
@@ -55,6 +55,47 @@ class LedgerSchemaIntegrationTest {
                 "transaction_account_entries",
                 "transactions"
         );
+    }
+
+    @Test
+    void should_rejectCreditCardAssetNature_when_v5ConstraintApplies() {
+        Fixture fixture = createFixture("card@example.test", "Card Household");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                INSERT INTO accounts (
+                    household_id, name, type, nature, ownership, owner_member_id,
+                    opening_balance, opening_balance_as_of, currency,
+                    savings_enabled, sort_order
+                ) VALUES (?, 'Invalid card', 'CREDIT_CARD', 'ASSET', 'PERSONAL', ?,
+                          0, DATE '2026-08-01', 'KRW', FALSE, 0)
+                """,
+                fixture.householdId(), fixture.memberId()
+        )).isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                """
+                INSERT INTO accounts (
+                    household_id, name, type, nature, ownership, owner_member_id,
+                    opening_balance, opening_balance_as_of, currency,
+                    savings_enabled, sort_order
+                ) VALUES (?, 'Invalid savings card', 'CREDIT_CARD', 'LIABILITY', 'PERSONAL', ?,
+                          0, DATE '2026-08-01', 'KRW', TRUE, 0)
+                """,
+                fixture.householdId(), fixture.memberId()
+        )).isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(jdbcTemplate.update(
+                """
+                INSERT INTO accounts (
+                    household_id, name, type, nature, ownership, owner_member_id,
+                    opening_balance, opening_balance_as_of, currency,
+                    savings_enabled, sort_order
+                ) VALUES (?, 'Valid card', 'CREDIT_CARD', 'LIABILITY', 'PERSONAL', ?,
+                          0, DATE '2026-08-01', 'KRW', FALSE, 0)
+                """,
+                fixture.householdId(), fixture.memberId()
+        )).isEqualTo(1);
     }
 
     @Test
