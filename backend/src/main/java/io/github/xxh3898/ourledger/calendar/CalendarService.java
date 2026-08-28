@@ -3,11 +3,10 @@ package io.github.xxh3898.ourledger.calendar;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.household.HouseholdMemberResolver;
 import io.github.xxh3898.ourledger.security.CurrentHousehold;
-import io.github.xxh3898.ourledger.transaction.AdjustmentType;
 import io.github.xxh3898.ourledger.transaction.LedgerTransaction;
 import io.github.xxh3898.ourledger.transaction.LedgerTransactionRepository;
+import io.github.xxh3898.ourledger.transaction.NetSpendingCalculator;
 import io.github.xxh3898.ourledger.transaction.TransactionScope;
-import io.github.xxh3898.ourledger.transaction.TransactionType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,7 +63,7 @@ public class CalendarService {
         for (LedgerTransaction transaction : transactions) {
             LocalDate occurredOn = transaction.getOccurredAt().atZone(zoneId).toLocalDate();
             YearMonth occurredMonth = YearMonth.from(occurredOn);
-            long netSpending = netSpending(transaction);
+            long netSpending = NetSpendingCalculator.amountOf(transaction);
             if (month.equals(occurredMonth)) {
                 currentNetSpending = Math.addExact(currentNetSpending, netSpending);
                 currentDays.computeIfAbsent(occurredOn, ignored -> new MutableDay())
@@ -139,16 +138,6 @@ public class CalendarService {
         }
         return transaction.getScope() == TransactionScope.PERSONAL
                 && Objects.equals(transaction.getOwnerMemberId(), ownerMemberId);
-    }
-
-    private long netSpending(LedgerTransaction transaction) {
-        if (transaction.getType() != TransactionType.EXPENSE) {
-            return 0;
-        }
-        if (transaction.getAdjustmentType() == AdjustmentType.REFUND) {
-            return Math.negateExact(transaction.getAmount());
-        }
-        return transaction.getAmount();
     }
 
     private static final class MutableDay {

@@ -993,3 +993,304 @@ select {
     transform: translateX(-50%);
   }
 }
+
+.budget-heading {
+  padding: 1.4rem;
+  border: 1px solid var(--pink-200);
+  border-radius: 1.4rem;
+  background: linear-gradient(145deg, var(--neutral-0), var(--pink-100));
+}
+
+.budget-heading h2,
+.budget-heading p {
+  margin: 0;
+}
+
+.budget-heading h2 {
+  margin-block: 0.25rem;
+  font-size: clamp(1.8rem, 8vw, 2.5rem);
+}
+
+.budget-heading > p:last-child {
+  color: var(--neutral-700);
+}
+
+.budget-month-navigation {
+  margin-top: 0.25rem;
+}
+
+.budget-page-state {
+  padding: 2rem;
+  border-radius: 1.2rem;
+  background: var(--neutral-0);
+  text-align: center;
+}
+
+.budget-scope-section,
+.category-budget-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.budget-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.budget-card {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+  padding: 1.05rem;
+  border: 1px solid var(--neutral-100);
+  border-radius: 1.25rem;
+  background: var(--neutral-0);
+  box-shadow: 0 0.5rem 1.5rem rgb(87 74 79 / 8%);
+}
+
+.budget-card:first-child,
+.budget-card:last-child {
+  grid-column: 1 / -1;
+}
+
+.budget-card.is-over,
+.category-budget-list > li.is-over {
+  border-color: var(--danger);
+}
+
+.budget-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.budget-card h3,
+.budget-card p {
+  margin: 0;
+}
+
+.budget-card > header > button,
+.category-budget-actions button,
+.budget-spending-link {
+  min-height: 2.75rem;
+  border: 1px solid var(--pink-300);
+  border-radius: 999px;
+  background: var(--pink-100);
+  color: var(--accent-text);
+  font-weight: 800;
+}
+
+.budget-values {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.budget-values > strong:first-child {
+  font-size: 1.08rem;
+}
+
+.budget-values dl {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.budget-values dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.budget-values dt {
+  color: var(--neutral-500);
+}
+
+.budget-values dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.budget-progress {
+  overflow: hidden;
+  height: 0.65rem;
+  border-radius: 999px;
+  background: var(--neutral-100);
+}
+
+.budget-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+.budget-rate {
+  color: var(--neutral-700);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.budget-overrun {
+  color: var(--danger);
+}
+
+.budget-spending-link {
+  justify-self: start;
+  padding-inline: 0.9rem;
+}
+
+.category-budget-list,
+.budget-transaction-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category-budget-list > li {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.8fr) minmax(11rem, 1.5fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--neutral-100);
+  border-radius: 1.15rem;
+  background: var(--neutral-0);
+}
+
+.category-budget-copy,
+.category-budget-copy > strong {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.category-budget-copy > span,
+.category-budget-copy small {
+  color: var(--neutral-500);
+  font-size: 0.84rem;
+}
+
+.category-budget-copy small {
+  color: var(--danger);
+}
+
+.category-budget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.category-budget-actions button {
+  padding-inline: 0.8rem;
+}
+
+.add-budget-button {
+  justify-self: stretch;
+  min-height: 3.25rem;
+}
+
+.budget-sheet {
+  max-height: min(90dvh, 52rem);
+  overflow-y: auto;
+}
+
+.danger-outline-button {
+  width: 100%;
+  min-height: 3rem;
+  margin-top: 0.75rem;
+  border: 1px solid var(--danger);
+  border-radius: 0.9rem;
+  background: var(--neutral-0);
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.budget-delete-confirm {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--danger);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--danger) 7%, white);
+}
+
+.budget-delete-confirm p {
+  margin: 0;
+}
+
+.budget-delete-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.budget-delete-confirm button {
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--neutral-300);
+  border-radius: 0.8rem;
+  background: var(--neutral-0);
+  font-weight: 800;
+}
+
+.budget-delete-confirm button:last-child {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.budget-drilldown-sheet {
+  max-height: min(85dvh, 46rem);
+  overflow-y: auto;
+}
+
+.budget-transaction-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.8rem;
+  border-bottom: 1px solid var(--neutral-100);
+}
+
+.budget-transaction-list > li > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.budget-transaction-list span {
+  color: var(--neutral-500);
+  font-size: 0.88rem;
+}
+
+.budget-transaction-list b {
+  color: var(--expense);
+  white-space: nowrap;
+}
+
+.budget-transaction-list b.is-refund {
+  color: var(--income);
+}
+
+@media (max-width: 42rem) {
+  .budget-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .budget-card:first-child,
+  .budget-card:last-child {
+    grid-column: auto;
+  }
+
+  .category-budget-list > li {
+    grid-template-columns: 1fr;
+  }
+
+  .category-budget-actions {
+    justify-content: flex-start;
+  }
+}

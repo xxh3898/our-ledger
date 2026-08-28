@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.7
+version: 0.8
 last_updated: 2026-08-28
 related:
   - 04-api/error-contract.md
@@ -170,6 +170,85 @@ GET /api/v1/calendar/month?month=2026-08&scope=SHARED
 현재월과 이전월은 같은 Household timezone과 scope로 계산한다. 순소비는 `NORMAL EXPENSE - REFUND EXPENSE`이며 INCOME, TRANSFER, 논리삭제 거래는 0이다. TRANSFER는 ALL의 `transactionCount`에는 포함하지만 PERSONAL/SHARED에는 포함하지 않는다. `days`는 요청 월 안에서 거래가 존재하는 날짜만 반환하고 Calendar가 나머지 날짜를 0건·0원으로 채운다. 값은 Transaction에서 매번 파생하며 별도 집계 table이나 cache를 사용하지 않는다.
 
 선택일 목록은 기존 `GET /api/v1/transactions?from={date}&to={date}`에 같은 scope/owner를 적용한다. 실제 월 request/response는 `LedgerApiDocsTest`의 `ledger-calendar-month` snippet으로 검증한다.
+
+## Budget API
+
+모든 Budget endpoint는 `CurrentHousehold.householdId`를 적용하고 request에 `householdId`를 받지 않는다.
+
+```text
+GET    /api/v1/budgets?month=2026-08
+POST   /api/v1/budgets
+PATCH  /api/v1/budgets/{budgetId}
+DELETE /api/v1/budgets/{budgetId}?version={version}
+```
+
+### 생성과 수정
+
+POST는 다음 identity와 amount를 받는다.
+
+```json
+{
+  "month": "2026-08",
+  "scope": "PERSONAL",
+  "ownerMemberId": 100,
+  "categoryId": 300,
+  "amount": 300000
+}
+```
+
+PATCH는 같은 field에 현재 `version`을 추가한다. V1은 month/scope/owner/category/amount를 함께 수정할 수 있다.
+
+- HOUSEHOLD/SHARED는 `ownerMemberId=null`, PERSONAL은 current Household Member ID가 필수다.
+- `categoryId=null`은 해당 Scope 전체이며 값이 있으면 active EXPENSE Category만 허용한다.
+- amount는 0 이상 정수다.
+- 같은 identity의 service pre-check와 DB unique race는 모두 `409 BUDGET_DUPLICATE`다.
+- stale PATCH/DELETE는 `409 BUDGET_VERSION_CONFLICT`다.
+- 다른 Household Budget/Member/Category는 미존재와 같은 `404 RESOURCE_NOT_FOUND`다.
+- DELETE는 Budget row만 제거하며 Transaction을 변경하지 않는다.
+
+mutation response는 canonical `id`, `month`, `scope`, nullable owner/category, `amount`, `version`, timestamp를 반환한다.
+
+### 월 read model
+
+GET은 Budget row와 Transaction 파생 사용액의 단일 화면 계약이다.
+
+```json
+{
+  "month": "2026-08",
+  "timezone": "Asia/Seoul",
+  "scopes": [
+    {
+      "scope": "HOUSEHOLD",
+      "owner": null,
+      "budgetId": 1,
+      "version": 0,
+      "budgetAmount": 1500000,
+      "spentAmount": 1284500,
+      "remainingAmount": 215500,
+      "exceeded": false
+    },
+    {
+      "scope": "PERSONAL",
+      "owner": {
+        "memberId": 100,
+        "userId": 1,
+        "displayName": "실제 Member"
+      },
+      "budgetId": null,
+      "version": null,
+      "budgetAmount": null,
+      "spentAmount": 420000,
+      "remainingAmount": null,
+      "exceeded": false
+    }
+  ],
+  "categories": []
+}
+```
+
+`scopes`는 HOUSEHOLD, current Household의 각 실제 Member PERSONAL, SHARED를 Budget 설정 여부와 무관하게 포함한다. 미설정은 `budgetId/version/budgetAmount/remainingAmount=null`이다. `categories`는 실제 생성된 Category Budget만 반환하고 archived Category도 `archived=true`로 식별한다.
+
+사용액은 같은 month/scope/category의 `NORMAL EXPENSE - REFUND EXPENSE`다. INCOME, TRANSFER, 논리삭제는 제외한다. 실제 request/response는 `BudgetApiDocsTest`의 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, Budget conflict snippet으로 검증한다.
 
 ## 인증 상태와 CSRF
 

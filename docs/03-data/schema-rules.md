@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-28
 related:
   - 03-data/erd.md
@@ -98,6 +98,16 @@ FOREIGN KEY (category_id, household_id)
 - Entry: same-household Transaction/Account composite FK, nonzero delta, `(transaction_id, entry_role)` unique
 
 Transaction별 exact Entry set은 단일 row CHECK로 표현할 수 없다. Service가 INCOME/EXPENSE의 PRIMARY 1개와 TRANSFER의 SOURCE/DESTINATION 각 1개를 원자적으로 구성하고 PostgreSQL 통합 테스트로 검증한다.
+
+## Slice 5 Budget 제약
+
+- `budget_month`는 `EXTRACT(DAY)=1` CHECK로 월 1일만 허용한다.
+- `scope`는 `HOUSEHOLD`, `PERSONAL`, `SHARED`다.
+- PERSONAL은 owner가 필수이고 HOUSEHOLD/SHARED owner는 null이다.
+- `amount >= 0`, `version >= 0`이다.
+- Member와 Category는 같은 Household의 `(id, household_id)`만 참조한다.
+- `UNIQUE NULLS NOT DISTINCT (household_id, budget_month, scope, owner_member_id, category_id)`로 null 포함 identity 중복을 DB에서 차단한다.
+- EXPENSE/active Category 신규 연결은 Service에서 검사한다. archive된 기존 Category FK와 Budget row는 유지한다.
 
 ## Migration
 

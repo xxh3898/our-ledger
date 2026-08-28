@@ -105,6 +105,67 @@ export type CalendarFilter =
   | { scope: 'PERSONAL'; ownerMemberId: number }
   | { scope: 'SHARED'; ownerMemberId: null }
 
+export type BudgetScope = 'HOUSEHOLD' | 'PERSONAL' | 'SHARED'
+
+export type BudgetOwner = {
+  memberId: number
+  userId: number
+  displayName: string
+}
+
+export type BudgetCategory = {
+  id: number
+  name: string
+  type: 'EXPENSE'
+  archived: boolean
+}
+
+export type BudgetResponse = {
+  id: number
+  month: string
+  scope: BudgetScope
+  owner: BudgetOwner | null
+  category: BudgetCategory | null
+  amount: number
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type BudgetMonth = {
+  month: string
+  timezone: string
+  scopes: Array<{
+    scope: BudgetScope
+    owner: BudgetOwner | null
+    budgetId: number | null
+    version: number | null
+    budgetAmount: number | null
+    spentAmount: number
+    remainingAmount: number | null
+    exceeded: boolean
+  }>
+  categories: Array<{
+    budgetId: number
+    version: number
+    scope: BudgetScope
+    owner: BudgetOwner | null
+    category: BudgetCategory
+    budgetAmount: number
+    spentAmount: number
+    remainingAmount: number
+    exceeded: boolean
+  }>
+}
+
+export type BudgetInput = {
+  month: string
+  scope: BudgetScope
+  ownerMemberId: number | null
+  categoryId: number | null
+  amount: number
+}
+
 export type AccountInput = {
   name: string
   institution: string | null
@@ -247,6 +308,58 @@ export function loadDayTransactions(
   const parameters = new URLSearchParams({ from: date, to: date })
   applyCalendarFilter(parameters, filter)
   return request<LedgerTransaction[]>(`/api/v1/transactions?${parameters}`, { signal })
+}
+
+export function loadBudgetMonth(month: string, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ month })
+  return request<BudgetMonth>(`/api/v1/budgets?${parameters}`, { signal })
+}
+
+function lastDayOfMonth(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  return `${month}-${String(new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()).padStart(2, '0')}`
+}
+
+export function loadBudgetTransactions(
+  month: string,
+  scope: BudgetScope,
+  ownerMemberId: number | null,
+  categoryId: number | null,
+  signal?: AbortSignal,
+) {
+  const parameters = new URLSearchParams({
+    from: `${month}-01`,
+    to: lastDayOfMonth(month),
+    type: 'EXPENSE',
+  })
+  if (scope === 'PERSONAL' && ownerMemberId !== null) {
+    parameters.set('scope', 'PERSONAL')
+    parameters.set('ownerMemberId', ownerMemberId.toString())
+  } else if (scope === 'SHARED') {
+    parameters.set('scope', 'SHARED')
+  }
+  if (categoryId !== null) parameters.set('categoryId', categoryId.toString())
+  return request<LedgerTransaction[]>(`/api/v1/transactions?${parameters}`, { signal })
+}
+
+export function createBudget(input: BudgetInput) {
+  return request<BudgetResponse>('/api/v1/budgets', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateBudget(budgetId: number, version: number, input: BudgetInput) {
+  return request<BudgetResponse>(`/api/v1/budgets/${budgetId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ version, ...input }),
+  })
+}
+
+export function deleteBudget(budgetId: number, version: number) {
+  return request<void>(`/api/v1/budgets/${budgetId}?version=${version}`, {
+    method: 'DELETE',
+  })
 }
 
 export function createAccount(input: AccountInput) {

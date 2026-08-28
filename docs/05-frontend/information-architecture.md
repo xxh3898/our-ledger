@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.6
+version: 0.7
 last_updated: 2026-08-28
 related:
   - 01-product/benchmark-weple-money.md
@@ -49,7 +49,7 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 | [Couple-first 디자인 시스템](design-system.md) | 색상, 고양이 정체성, Concept Mockup 사용 경계 | 해당 화면 Slice |
 | [Motion과 상호작용](interaction-motion.md) | 전환, feedback, reduced motion | 해당 화면 Slice |
 
-이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4에서 활성화됐고 Marriage Goal 실제 지표·상세는 Slice 8, production illustration은 별도 asset 범위다.
+이 문서들의 `active` 상태는 현재 디자인 계약이라는 뜻이다. Calendar Home과 Quick Entry Sheet는 Slice 4, Budget destination은 Slice 5에서 활성화됐다. Marriage Goal 실제 지표·상세는 Slice 8, production illustration은 별도 asset 범위다.
 
 ## 하단 탐색
 
@@ -61,10 +61,17 @@ Issue #8에서 확정한 Couple-first 방향은 다음 문서가 나누어 소�
 - Bottom Navigation과 중앙 Paw FAB는 viewport 하단에 고정하고 본문에는 safe-area와 겹치지 않는 여백을 둔다.
 - 설정은 상단 프로필 또는 더보기 메뉴에 둔다.
 - 결혼자금은 달력 요약 카드와 자산 화면에서 접근한다.
+- Calendar와 Budget은 실제 destination이며 현재 화면 button에 `aria-current=page`를 적용한다.
+- Statistics와 Assets는 구현 Slice 전까지 disabled 상태와 `준비 중` text를 유지한다.
+- Budget의 Paw FAB는 Household timezone 오늘 날짜 Quick Entry를 연다.
 
 ## 달력 중심 Home
 
 메인 화면은 Couple identity, 월 소비 요약, 결혼자금 hero, Scope filter, 달력, 선택일 거래 목록을 하나의 자연스러운 세로 흐름에 제공한다. 별도의 복잡한 dashboard 탭이나 nested vertical scroll을 만들지 않는다. 세부 계약은 [Home/달력 화면](calendar-screen.md)을 따른다.
+
+## Budget 화면
+
+Budget은 같은 Couple header와 하단 탐색을 유지하고 월 이동, HOUSEHOLD/실제 Member PERSONAL/SHARED 기본 카드, 사용자 설정 Category Budget을 세로 흐름으로 제공한다. 생성·수정·삭제와 사용 내역은 Bottom Sheet로 progressive disclosure한다. 세부 계약은 [예산 화면](budget-screen.md)을 따른다.
 
 ## 전역 필터
 

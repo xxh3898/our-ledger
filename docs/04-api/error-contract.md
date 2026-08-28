@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-28
 related:
   - 06-security/authorization.md
@@ -58,6 +58,7 @@ related:
 - `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`
 - `CATEGORY_TYPE_MISMATCH`
 - `BUDGET_DUPLICATE`
+- `BUDGET_VERSION_CONFLICT`
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`
 
@@ -80,6 +81,15 @@ related:
 - `ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`: Entry가 연결된 Account의 posting 분류 변경 (`409`)
 - `UNSUPPORTED_ADJUSTMENT_TYPE`: REFUND/reversal 요청 (`422`)
 - `UNSUPPORTED_ACCOUNT_POSTING`: Transaction 유형과 Account nature/type 조합 불일치 (`422`)
+
+### Budget code
+
+- `INVALID_REQUEST`: month/amount 형식, 음수 amount, scope-owner 조합 오류 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household에서 Budget/Member/Category를 찾을 수 없음 (`404`)
+- `CATEGORY_TYPE_MISMATCH`: INCOME Category를 Budget에 연결 (`422`)
+- `ARCHIVED_CATEGORY_NOT_ALLOWED`: archived Category를 신규 생성·수정 identity에 연결 (`422`)
+- `BUDGET_DUPLICATE`: service pre-check 또는 `uq_budgets_identity` DB race (`409`)
+- `BUDGET_VERSION_CONFLICT`: stale PATCH/DELETE optimistic version (`409`)
 
 ## 보안
 

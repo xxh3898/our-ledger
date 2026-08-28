@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { BudgetScreen } from './BudgetScreen.tsx'
 import { QuickEntrySheet } from './QuickEntrySheet.tsx'
 import { SettingsSheet } from './SettingsSheet.tsx'
+import {
+  currentBudgetMonth,
+  isBudgetScreen,
+  moveBudgetMonth,
+  normalizeBudgetMonth,
+  serializeBudgetState,
+} from './budgetState.ts'
 import {
   type CalendarNavigationState,
   calendarDates,
@@ -473,13 +481,31 @@ function SelectedDayTransactions({
   )
 }
 
-function BottomNavigation() {
+function BottomNavigation({
+  active,
+  onNavigate,
+}: {
+  active: 'calendar' | 'budget'
+  onNavigate: (destination: 'calendar' | 'budget') => void
+}) {
   return (
     <nav className="bottom-navigation" aria-label="주요 메뉴">
-      <button type="button" className="is-active" aria-current="page">
+      <button
+        type="button"
+        className={active === 'calendar' ? 'is-active' : ''}
+        aria-current={active === 'calendar' ? 'page' : undefined}
+        onClick={() => onNavigate('calendar')}
+      >
         <span aria-hidden="true">▦</span>Calendar
       </button>
-      <button type="button" disabled><span aria-hidden="true">◔</span>예산<span>준비 중</span></button>
+      <button
+        type="button"
+        className={active === 'budget' ? 'is-active' : ''}
+        aria-current={active === 'budget' ? 'page' : undefined}
+        onClick={() => onNavigate('budget')}
+      >
+        <span aria-hidden="true">◔</span>예산
+      </button>
       <button type="button" disabled><span aria-hidden="true">⌁</span>통계<span>준비 중</span></button>
       <button type="button" disabled><span aria-hidden="true">◇</span>자산<span>준비 중</span></button>
     </nav>
@@ -494,8 +520,14 @@ function CalendarWorkspace({
   initialReferences: ReferenceData
 }) {
   const [references, setReferences] = useState(initialReferences)
+  const [activeScreen, setActiveScreen] = useState<'calendar' | 'budget'>(() =>
+    isBudgetScreen(window.location.search) ? 'budget' : 'calendar')
   const [navigation, setNavigation] = useState(() =>
     normalizeCalendarState(window.location.search, initialReferences.household))
+  const [budgetMonth, setBudgetMonth] = useState(() =>
+    isBudgetScreen(window.location.search)
+      ? normalizeBudgetMonth(window.location.search, initialReferences.household.timezone)
+      : currentBudgetMonth(initialReferences.household.timezone))
   const [monthState, setMonthState] = useState<AsyncState<CalendarMonth>>({ status: 'loading' })
   const [dayState, setDayState] = useState<AsyncState<LedgerTransaction[]>>({ status: 'loading' })
   const [revision, setRevision] = useState(0)
@@ -522,15 +554,38 @@ function CalendarWorkspace({
   }, [finishClosingEntry])
 
   useEffect(() => {
+    if (activeScreen !== 'calendar') return
     const normalizedSearch = serializeCalendarState(navigation)
     if (window.location.search !== normalizedSearch) {
       window.history.replaceState(window.history.state, '', normalizedSearch)
     }
-  }, [navigation])
+  }, [activeScreen, navigation])
+
+  useEffect(() => {
+    if (activeScreen !== 'budget') return
+    const normalizedSearch = serializeBudgetState(budgetMonth)
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
+    }
+  }, [activeScreen, budgetMonth])
 
   useEffect(() => {
     const onPopState = () => {
-      setNavigation(normalizeCalendarState(window.location.search, references.household))
+      const nextScreen = isBudgetScreen(window.location.search) ? 'budget' : 'calendar'
+      setActiveScreen(nextScreen)
+      if (nextScreen === 'budget') {
+        const nextBudgetMonth = normalizeBudgetMonth(
+          window.location.search,
+          references.household.timezone,
+        )
+        const normalizedSearch = serializeBudgetState(nextBudgetMonth)
+        if (window.location.search !== normalizedSearch) {
+          window.history.replaceState(window.history.state, '', normalizedSearch)
+        }
+        setBudgetMonth(nextBudgetMonth)
+      } else {
+        setNavigation(normalizeCalendarState(window.location.search, references.household))
+      }
       if (entryMode && window.history.state?.ourLedgerSheet !== 'quick-entry') {
         finishClosingEntry()
       }
@@ -540,6 +595,7 @@ function CalendarWorkspace({
   }, [entryMode, finishClosingEntry, references.household])
 
   useEffect(() => {
+    if (activeScreen !== 'calendar') return
     const controller = new AbortController()
     setMonthState({ status: 'loading' })
     void loadCalendarMonth(navigation.month, filter, controller.signal)
@@ -550,9 +606,10 @@ function CalendarWorkspace({
         }
       })
     return () => controller.abort()
-  }, [filterKey, navigation.month, revision])
+  }, [activeScreen, filterKey, navigation.month, revision])
 
   useEffect(() => {
+    if (activeScreen !== 'calendar') return
     const controller = new AbortController()
     setDayState({ status: 'loading' })
     void loadDayTransactions(navigation.date, filter, controller.signal)
@@ -563,14 +620,21 @@ function CalendarWorkspace({
         }
       })
     return () => controller.abort()
-  }, [filterKey, navigation.date, revision])
+  }, [activeScreen, filterKey, navigation.date, revision])
 
   function updateNavigation(next: CalendarNavigationState) {
     window.history.pushState({}, '', serializeCalendarState(next))
+    setActiveScreen('calendar')
     setNavigation(next)
   }
 
-  function openEntry(editing: LedgerTransaction | null, opener?: HTMLElement) {
+  function openEntry(
+    editing: LedgerTransaction | null,
+    opener?: HTMLElement,
+    selectedDate = activeScreen === 'budget'
+      ? todayInTimeZone(references.household.timezone)
+      : navigation.date,
+  ) {
     openerRef.current = opener ?? (document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null)
@@ -579,7 +643,24 @@ function CalendarWorkspace({
       '',
       window.location.href,
     )
-    setEntryMode({ selectedDate: navigation.date, editing })
+    setEntryMode({ selectedDate, editing })
+  }
+
+  function navigate(destination: 'calendar' | 'budget') {
+    if (destination === activeScreen) return
+    if (destination === 'budget') {
+      window.history.pushState({}, '', serializeBudgetState(budgetMonth))
+      setActiveScreen('budget')
+      return
+    }
+    window.history.pushState({}, '', serializeCalendarState(navigation))
+    setActiveScreen('calendar')
+  }
+
+  function moveBudget(offset: number) {
+    const nextMonth = moveBudgetMonth(budgetMonth, offset)
+    window.history.pushState({}, '', serializeBudgetState(nextMonth))
+    setBudgetMonth(nextMonth)
   }
 
   function closeSettings() {
@@ -606,46 +687,61 @@ function CalendarWorkspace({
             setSettingsOpen(true)
           }}
         />
-        <SpendingHero
-          navigation={navigation}
-          household={references.household}
-          state={monthState}
-          onRetry={() => setRevision((current) => current + 1)}
-        />
-        <MarriageGoalShell />
-        <ScopeSelector
-          user={user}
-          household={references.household}
-          navigation={navigation}
-          onChange={updateNavigation}
-        />
-        <MonthNavigation
-          month={navigation.month}
-          onMove={(offset) => updateNavigation(moveCalendarMonth(navigation, offset))}
-        />
-        <CalendarGrid
-          household={references.household}
-          navigation={navigation}
-          state={monthState}
-          onSelect={(date) => updateNavigation({ ...navigation, date })}
-        />
-        <SelectedDayTransactions
-          date={navigation.date}
-          state={dayState}
-          onEdit={openEntry}
-          onDeleted={() => setRevision((current) => current + 1)}
-        />
+        {activeScreen === 'calendar' ? (
+          <>
+            <SpendingHero
+              navigation={navigation}
+              household={references.household}
+              state={monthState}
+              onRetry={() => setRevision((current) => current + 1)}
+            />
+            <MarriageGoalShell />
+            <ScopeSelector
+              user={user}
+              household={references.household}
+              navigation={navigation}
+              onChange={updateNavigation}
+            />
+            <MonthNavigation
+              month={navigation.month}
+              onMove={(offset) => updateNavigation(moveCalendarMonth(navigation, offset))}
+            />
+            <CalendarGrid
+              household={references.household}
+              navigation={navigation}
+              state={monthState}
+              onSelect={(date) => updateNavigation({ ...navigation, date })}
+            />
+            <SelectedDayTransactions
+              date={navigation.date}
+              state={dayState}
+              onEdit={openEntry}
+              onDeleted={() => setRevision((current) => current + 1)}
+            />
+          </>
+        ) : (
+          <BudgetScreen
+            month={budgetMonth}
+            household={references.household}
+            categories={references.categories}
+            revision={revision}
+            onMoveMonth={moveBudget}
+            onChanged={() => setRevision((current) => current + 1)}
+          />
+        )}
       </main>
       <button
         className="paw-fab"
         type="button"
-        aria-label={`${navigation.date} 빠른 입력 열기`}
+        aria-label={`${activeScreen === 'budget'
+          ? todayInTimeZone(references.household.timezone)
+          : navigation.date} 빠른 입력 열기`}
         onClick={(event) => openEntry(null, event.currentTarget)}
       >
         <span aria-hidden="true">🐾</span>
         <small>기록</small>
       </button>
-      <BottomNavigation />
+      <BottomNavigation active={activeScreen} onNavigate={navigate} />
       {entryMode && (
         <QuickEntrySheet
           currentUserId={user.userId}
