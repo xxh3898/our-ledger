@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.6
-last_updated: 2026-08-28
+version: 0.7
+last_updated: 2026-08-29
 related:
   - 06-security/authorization.md
 ---
@@ -66,7 +66,10 @@ related:
 - `RECURRING_REFERENCE_IN_USE`
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`
 - `RECURRING_TEMPLATE_INVALID`
+- `GOAL_ALREADY_EXISTS`
+- `GOAL_VERSION_CONFLICT`
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`
+- `GOAL_ACCOUNT_NOT_ELIGIBLE`
 
 ### Ledger code
 
@@ -111,6 +114,15 @@ related:
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`: 같은 규칙과 발생일의 생성 거래 중복 (`409`); scheduler는 기존 거래를 확인해 정상 멱등 결과로 흡수한다.
 - `RECURRING_TEMPLATE_INVALID`: 저장된 규칙 template이 canonical Transaction posting 계약을 더 이상 충족하지 않음 (`409`); 해당 규칙 발생만 실패시키고 다른 규칙은 계속 처리한다.
 - Transaction template의 scope, type, archived reference, Account posting 오류는 Basic Ledger와 같은 `422` code를 사용한다.
+
+### Goal code
+
+- `INVALID_REQUEST`: blank/100자 초과 이름, 0 이하 목표 금액, version 누락 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household의 Marriage Goal 또는 Account/link를 찾을 수 없음 (`404`)
+- `GOAL_ALREADY_EXISTS`: Household의 MARRIAGE Goal service pre-check 또는 DB partial unique race (`409`)
+- `GOAL_VERSION_CONFLICT`: stale Goal PATCH optimistic version (`409`)
+- `GOAL_ACCOUNT_ALREADY_ASSIGNED`: 같은 Account의 기존 link 또는 DB assignment unique race (`409`)
+- `GOAL_ACCOUNT_NOT_ELIGIBLE`: archived, non-ASSET, `savings_enabled=false` Account 신규 연결 (`422`)
 
 ## 보안
 

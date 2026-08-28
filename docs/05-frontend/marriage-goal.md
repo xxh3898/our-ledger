@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-28
+version: 1.0
+last_updated: 2026-08-29
 related:
   - 02-domain/goal.md
   - 02-domain/financial-metrics.md
@@ -15,7 +15,7 @@ related:
 
 ## 상태와 원칙
 
-이 문서는 Slice 8에서 구현할 Marriage Goal 상세 화면의 활성 디자인 계약이다. 현재 Goal 기능이 production에 구현됐다는 뜻은 아니다.
+이 문서는 Slice 8 Marriage Goal 상세 화면의 활성 구현 계약이다. production 배포나 실제 목표 data 입력을 뜻하지 않는다.
 
 - Home보다 감성 비중을 조금 높일 수 있지만 금액과 계산 근거를 우선한다.
 - 현재 금액과 저축은 연결된 실제 Account와 Transaction에서 계산한다.
@@ -25,7 +25,7 @@ related:
 
 ## 화면 구성
 
-1. 두 고양이와 집을 사용한 hero
+1. 교체 가능한 감성 표현을 가진 Goal hero
 2. Goal 이름과 현재/목표 금액
 3. 달성률 progress
 4. 남은 금액
@@ -70,13 +70,14 @@ related:
 ## Account와 최근 저축
 
 - 연결된 Account는 실제 Account 이름과 ownership을 표시한다.
-- inactive 또는 연결 해제된 Account의 처리와 과거 지표 영향은 domain/API 계약을 따른다.
-- 최근 저축 내역은 Goal Account로 유입된 유효 Transaction 근거를 보여 주며 별도 Goal 기여금 record를 만들지 않는다.
+- archive된 현재 연결 Account는 `보관됨`과 실제 잔액을 표시하고 명시적 연결 해제 전까지 합산한다.
+- 최근 저축 내역은 Goal 경계 impact가 0이 아닌 양·음수 Transfer 근거와 `반복` provenance를 보여 주며 별도 Goal 기여금 record를 만들지 않는다.
 - 전체 계좌번호나 private 금융 식별정보는 표시하지 않는다.
 
 ## 허용 action
 
 - `계좌 연결`
+- `연결 해제`
 - `목표 수정`
 
 `목표에 돈 추가` 또는 동등한 별도 금액 입력 action은 만들지 않는다. 저축 행위는 실제 Account 사이의 Transaction으로 기록한다.
@@ -93,3 +94,14 @@ related:
 - 일부 보조 지표가 실패해도 확인 가능한 현재/목표 금액까지 숨기지 않는다.
 - 고양이와 집은 text label, 금액, 달성률을 대체하지 않는다.
 - chart와 progress는 색상만으로 값을 전달하지 않고 screen reader와 keyboard 탐색에 동등한 정보를 제공한다.
+
+## 구현된 navigation과 Sheet
+
+- Home Goal card에서 router dependency 없이 `?screen=goal`로 이동한다.
+- direct refresh, back, forward는 기존 `history.pushState/replaceState/popstate` 흐름을 따른다.
+- Bottom Navigation에 Goal tab을 추가하지 않고 Calendar, Budget, Statistics, disabled Assets를 유지한다.
+- Goal 생성/수정 Sheet는 이름과 빈 초기 목표 금액을 받으며 silent default를 제출하지 않는다.
+- Account link Sheet는 eligible Account의 이름, ownership, current balance만 표시하고 사용자가 명시적으로 하나를 선택한다.
+- Sheet는 initial focus, Escape/backdrop/close, opener focus 복귀, pending 중 중복 제출 방지, 오류 뒤 입력/선택 보존을 제공한다.
+- loading 진입 시 이전 Goal 숫자를 숨기고 실패·Goal 없음·연결 없음·projection 이유를 서로 구분한다.
+- 월별 추이는 dependency 없는 accessible SVG와 동일 값의 semantic table을 함께 제공한다.

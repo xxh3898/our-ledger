@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-28
+version: 0.4
+last_updated: 2026-08-29
 related:
   - 03-data/transaction-ledger-rules.md
   - 06-security/privacy-model.md
@@ -54,6 +54,8 @@ current_balance = opening_balance + 유효 Account Entry의 balance_delta 합
 ## 보관
 
 거래가 연결된 Account는 물리삭제하지 않고 archive한다. archive 이후 새 거래 선택에서는 제외하되 과거 조회와 잔액 검산에는 남긴다.
+
+Goal에 이미 연결된 Account도 archive 자체를 막지 않는다. 새 Goal 연결만 active Account로 제한하고 기존 link는 사용자가 해제할 때까지 현재 잔액과 archived 상태를 Goal에 제공한다. Goal 연결 snapshot과 posting은 같은 Account row lock을 사용한다.
 
 ## Slice 3 계약
 

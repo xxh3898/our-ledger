@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.0
-last_updated: 2026-08-28
+version: 1.1
+last_updated: 2026-08-29
 related:
   - 04-api/error-contract.md
   - ADR-008
@@ -32,7 +32,7 @@ related:
 /api/v1/calendar/month
 /api/v1/budgets
 /api/v1/recurring-transactions
-/api/v1/goals
+/api/v1/goals/marriage
 /api/v1/statistics
 /api/v1/assets
 /api/v1/exports
@@ -307,6 +307,52 @@ response는 template/schedule 외에 role별 `accounts[]`, `nextRecurrenceDate`,
 
 실제 request/response와 CSRF, Household 격리, version conflict는 `RecurringApiDocsTest`의 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet으로 검증한다.
 
+## Marriage Goal API
+
+모든 endpoint는 `CurrentHousehold.householdId`를 적용하며 request에 `householdId`, `startingBalance`, `linkedAt`을 받지 않는다.
+
+```text
+GET    /api/v1/goals/marriage
+POST   /api/v1/goals/marriage
+PATCH  /api/v1/goals/marriage
+POST   /api/v1/goals/marriage/accounts/{accountId}
+DELETE /api/v1/goals/marriage/accounts/{accountId}
+```
+
+Goal 부재는 오류가 아닌 정상 제품 상태다. GET은 항상 wrapper를 반환하며 없을 때 `goal=null`, 연결 가능한 active 저축 ASSET 목록을 `eligibleAccounts`로 제공한다.
+
+```json
+{
+  "goal": null,
+  "eligibleAccounts": [
+    {
+      "id": 201,
+      "name": "결혼 적금",
+      "ownership": "PERSONAL",
+      "owner": {"memberId": 100, "displayName": "Owner"},
+      "currentBalance": 5000000
+    }
+  ]
+}
+```
+
+POST는 `name`, positive `targetAmount`를 받는다. PATCH는 같은 값과 현재 `version`을 받는다. Household의 MARRIAGE Goal은 최대 한 개이며 stale 수정과 concurrent create는 각각 `GOAL_VERSION_CONFLICT`, `GOAL_ALREADY_EXISTS` 409다. physical delete는 제공하지 않는다.
+
+Account link POST는 path ID만 받는다. server가 Account row write lock을 잡은 뒤 current balance를 계산하고 `startingBalance`, `linkedAt`, actor를 같은 transaction에서 저장한다. active ASSET, `savings_enabled=true`, 미할당 Account만 연결할 수 있다. DELETE는 link만 제거하고 Account/Transaction/Entry를 바꾸지 않는다. foreign Account/link는 일반화된 404, ineligible은 `GOAL_ACCOUNT_NOT_ELIGIBLE` 422, concurrent assignment는 `GOAL_ACCOUNT_ALREADY_ASSIGNED` 409다.
+
+Goal read model의 `goal`은 다음 필드를 제공한다.
+
+- identity: `id`, `type=MARRIAGE`, `name`, `targetAmount`, `version`, timestamp
+- current: `currentAmount`, 소수점 한 자리 `achievementRate`, `remainingAmount`
+- flow/projection: `thisMonthSavingsAmount`, nullable `recentAverageMonthlySavingsAmount`, `projectionStatus`, nullable `expectedAchievementMonth`
+- evidence: 고정 6개 `monthlyTrend`, `linkedAccounts`, 최대 10개 `recentSavingsActivities`
+
+`linkedAccounts`는 name, ownership, nullable owner, current/starting balance, linkedAt, archived만 제공한다. archive된 기존 link도 unlink 전까지 유지한다. 최근 활동은 impact가 0이 아닌 Transfer의 ID/occurredAt/amount/Goal impact/source·destination ID·name/memo와 nullable recurring provenance만 제공하며 전체 계좌번호를 노출하지 않는다.
+
+이번 달과 월별 추이는 Household timezone calendar month다. current month의 future occurrence를 임의 제거하지 않는다. 직전 완료 3개월 표본이 부족하면 평균은 null과 `INSUFFICIENT_HISTORY`, 평균이 0 이하면 `NON_POSITIVE_AVERAGE`, 달성하면 `ACHIEVED`, 양수 평균으로 예상 가능하면 `PROJECTED`와 `YYYY-MM`을 반환한다.
+
+실제 request/response와 CSRF/error는 `MarriageGoalApiDocsTest`의 `marriage-goal-*` snippet으로 검증한다.
+
 ## Statistics read model
 
 ```text
@@ -346,7 +392,7 @@ production 요청은 Cloudflare Access를 통과한 뒤 Spring Security가 `Cf-A
 
 ## 동시 수정
 
-Transaction과 Recurring Transaction 등 충돌 가능 리소스는 version을 요청에 포함한다. 오래된 version이면 `409 Conflict`와 명시적 오류 코드를 반환한다.
+Transaction, Recurring Transaction, Budget, Goal 등 충돌 가능 리소스는 version을 요청에 포함한다. 오래된 version이면 `409 Conflict`와 명시적 오류 코드를 반환한다.
 
 ## 멱등성
 

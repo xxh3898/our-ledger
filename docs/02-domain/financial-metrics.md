@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-28
+version: 0.4
+last_updated: 2026-08-29
 related:
   - 07-quality/financial-invariants.md
 ---
@@ -96,4 +96,19 @@ ASSET 잔액 합 - LIABILITY 잔액 합
 
 ## 예상 Goal 달성일
 
-최근 3개월 이상의 확정 월 순저축 평균을 기본값으로 사용한다. 남은 금액이 0 이하면 달성 상태다. 평균이 0 이하이면 예상일은 없다.
+Goal 지표의 저축 경계는 Household Statistics의 `savings_enabled` 경계와 다르다. 현재 연결과 Account별 `linked_at`이 발생 시점에 유효한 TRANSFER에 대해 비Goal→Goal은 양수, Goal→비Goal은 음수, Goal 내부 이동은 0이다. INCOME/EXPENSE/REFUND는 현재 잔액에는 반영하지만 Goal 순저축에는 포함하지 않는다.
+
+월별 추이는 Household timezone의 현재 월 포함 최근 6개월을 빈 월 0 row까지 반환한다. 이번 달은 현재 calendar month 전체의 유효 occurrence를 사용하며 현재 시각 이후로 입력된 같은 월 거래를 임의 제거하지 않는다.
+
+최근 평균은 current partial month를 제외한 직전 3개 완료 월의 순저축 합을 `floorDiv(sum, 3)`으로 정수화한다. 세 월 각각에 현재 Goal Account 연결이 월 종료 전에 한 번이라도 유효해야 하며 그렇지 않으면 표본 부족 `null`이다. 음수 합의 정수화도 바닥 방향이므로 예상일을 낙관적으로 앞당기지 않는다.
+
+```text
+remaining = max(targetAmount - currentAmount, 0)
+months = ceil(remaining / recentAverageMonthlySavingsAmount)
+expectedAchievementMonth = current Household month + months
+```
+
+- `ACHIEVED`: remaining이 0이며 예상 월은 null
+- `INSUFFICIENT_HISTORY`: 완료 월 표본이 3개 미만
+- `NON_POSITIVE_AVERAGE`: 평균이 0 이하
+- `PROJECTED`: 평균이 양수이며 `expectedAchievementMonth` 제공

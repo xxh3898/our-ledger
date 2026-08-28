@@ -69,4 +69,10 @@ public interface LedgerTransactionRepository
                     Instant fromInclusive,
                     Instant toExclusive
             );
+
+    List<LedgerTransaction>
+            findAllByHouseholdIdAndTypeAndDeletedAtIsNullOrderByOccurredAtDescIdDesc(
+                    Long householdId,
+                    TransactionType type
+            );
 }

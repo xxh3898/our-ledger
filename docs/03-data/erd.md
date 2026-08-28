@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.5
-last_updated: 2026-08-28
+version: 0.6
+last_updated: 2026-08-29
 related:
   - ADR-001
   - ADR-002
@@ -150,6 +150,26 @@ transactions 추가
 - generated lineage 두 column은 함께 null 또는 함께 값이며 generated row는 NORMAL이다.
 - `(generated_from_recurring_id, recurrence_date)` full unique는 논리삭제 row도 포함한다.
 - rule row는 ended/paused 뒤에도 history와 audit을 위해 유지한다.
+
+## Slice 8 물리 schema
+
+`V8__goals.sql`은 다음 table을 additive로 추가한다.
+
+```text
+goals
+  id, household_id, type, name, target_amount, version,
+  created_at/by, updated_at/by
+
+goal_accounts
+  goal_id, account_id, household_id, starting_balance,
+  linked_at, linked_by
+```
+
+- `goals (id, household_id)`와 기존 Account/Member composite key로 모든 참조의 tenant 경계를 강제한다.
+- Household의 `MARRIAGE`만 partial unique index로 한 개를 보장하고 future `CUSTOM` 여러 개는 닫지 않는다.
+- `goal_accounts`는 `(goal_id, account_id)` PK와 전체 `account_id` unique로 한 Account의 중복 Goal 할당을 막는다.
+- `starting_balance`는 연결 시 audit snapshot이며 현재 금액 aggregate column이 아니다.
+- Goal 계산 결과, 월별 aggregate, contribution table과 근거 없는 조회 index는 추가하지 않는다.
 
 ## 구현 순서
 

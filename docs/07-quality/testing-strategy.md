@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.9
-last_updated: 2026-08-28
+version: 1.0
+last_updated: 2026-08-29
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -126,6 +126,24 @@ Recurring Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
 - active reference lifecycle 차단, stale version, validation, Household IDOR, 인증·CSRF
 - canonical Recurring create/list/update/conflict REST Docs
 
+Marriage Goal Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
+
+- Flyway V1→V8 clean 적용과 JPA `ddl-auto=validate`
+- Goal name/type/positive target/version CHECK, Household MARRIAGE partial unique, future CUSTOM 비제한
+- Goal/Account/Member audit composite FK와 Account 전체 assignment unique
+- same Household 동시 MARRIAGE create 중 정확히 하나만 성공하고 stable `GOAL_ALREADY_EXISTS`
+- eligible active savings ASSET 연결, archived/savings-disabled/LIABILITY 거부, foreign Account 404
+- 동일 Account 동시 link 중 정확히 하나만 성공하고 stable `GOAL_ACCOUNT_ALREADY_ASSIGNED`
+- Goal link가 Account lock을 가진 동안 동시 posting이 실제로 대기하고 `starting_balance`가 pre/post 중 하나의 완전한 값임
+- current amount가 opening + active Entry delta 합이고 starting snapshot을 중복 가산하지 않음
+- logical delete, Refund balance 효과, linked archived Account 유지, unlink 즉시 제외와 원장 불변
+- Goal 경계 Transfer 네 방향, 다른 savings Account 유입, linked_at 이전, INCOME/EXPENSE/REFUND 비분류
+- Household timezone 현재 월, 빈 달 포함 6개월 추세, 완료 3개월 정수 평균
+- ACHIEVED/INSUFFICIENT_HISTORY/NON_POSITIVE_AVERAGE/PROJECTED와 ceil 예상 월
+- impact 0 제외 최근 활동, 안정 정렬, recurring provenance
+- 같은 version target 동시 PATCH 한 건만 성공, stale error, 인증·CSRF·Household 경계
+- canonical Goal empty/read/create/update/link/unlink/error REST Docs
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -234,6 +252,17 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - autofocus, Escape/backdrop close와 opener focus 복귀
 - Calendar, Budget, Statistics, savings activity의 `반복` text badge
 
+같은 `App.test.tsx`는 Marriage Goal Slice에서 다음 계약을 추가로 검증한다.
+
+- Home의 Goal 없음 CTA 또는 actual current/target/rate/이번 달 card와 hardcoded shell 제거
+- `?screen=goal` direct/refresh/back/forward와 새 Bottom tab 부재
+- 상세 current/target/rate/remaining, projection 이유, 6개월 accessible SVG/table, linked Account/activity
+- 생성 목표 금액 blank, 수정 version payload, pending 중복 submit 방지, stable error 뒤 입력 보존
+- eligible Account 명시 선택, conflict 뒤 선택 보존, 연결/해제 확인과 read refresh
+- archived linked Account와 `반복` provenance text, 수동 기여금 action 부재
+- Sheet initial focus, Escape/backdrop/close, opener focus 복귀
+- loading 중 이전 Goal 금융 수치 제거와 Goal 없음/연결 없음/error 분리
+
 `budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
 
 ## Production 보안 검증
@@ -252,7 +281,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
 
 ## 회귀 우선순위
 

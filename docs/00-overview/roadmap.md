@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.7
-last_updated: 2026-08-28
+version: 0.8
+last_updated: 2026-08-29
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
@@ -62,6 +62,14 @@ Recurring은 Household timezone의 `start_date` anchor와 `scheduled_local_time`
 V7은 rule/template Account table, generated lineage와 full occurrence unique, operational cursor를 additive로 추가한다. backend minute poll은 occurrence별 새 transaction에서 rule row lock과 due 재확인, generated 원장 저장, cursor advance를 원자 처리하고 bounded catch-up과 one-rule failure isolation을 제공한다.
 
 Settings Sheet는 active/paused/ended 목록, 생성·수정·중지·재개를 제공한다. pause 기간은 resume 시 소급 생성하지 않고 generated history는 rule edit와 독립적인 snapshot으로 유지한다. recurring REFUND, `auto_post=false`, LIABILITY source, 예정 거래 승인, 알림, 별도 하단 tab, production 작업은 포함하지 않는다.
+
+## Slice 8 Marriage Goal 구현 경계
+
+Marriage Goal은 Household당 MARRIAGE 하나와 실제 Account link를 저장하되 잔액·월별 aggregate·기여금 ledger를 저장하지 않는다. 현재 보유금은 연결 Account의 canonical current balance 합이고 순저축은 current link와 `linked_at` 이후 Goal 안팎을 오간 TRANSFER에서 파생한다.
+
+V8은 Goal/audit과 same-Household GoalAccount link, Household MARRIAGE partial unique, Account assignment unique를 additive로 추가한다. Account 연결은 기존 posting과 같은 Account row lock에서 snapshot을 잡고 target 수정은 optimistic version을 사용한다.
+
+Home shell은 Goal 없음/연결 없음/실제 card 상태로 교체되고 card에서 `?screen=goal` 상세로 이동한다. 상세는 current/target/rate/remaining, 이번 달, 완료 3개월 평균과 projection 상태, 6개월 추세, Account, Transfer 근거를 제공한다. CUSTOM UI, GoalContribution, Goal 삭제, Assets, production asset/deploy는 포함하지 않는다.
 
 ## Release Gate
 
