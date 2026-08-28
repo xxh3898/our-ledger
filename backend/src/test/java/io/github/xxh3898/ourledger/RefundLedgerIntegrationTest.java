@@ -130,6 +130,7 @@ class RefundLedgerIntegrationTest {
 
     private CurrentHousehold currentHousehold;
     private Long ownerMemberId;
+    private Long partnerMemberId;
 
     @BeforeEach
     void provisionHousehold() {
@@ -143,10 +144,17 @@ class RefundLedgerIntegrationTest {
         ));
         User owner = userRepository.findByEmail(OWNER_EMAIL).orElseThrow();
         Household household = householdRepository.findAll().getFirst();
-        ownerMemberId = householdMemberRepository
-                .findAllByHousehold_IdOrderByJoinedAtAscIdAsc(household.getId())
+        List<HouseholdMember> members = householdMemberRepository
+                .findAllByHousehold_IdOrderByJoinedAtAscIdAsc(household.getId());
+        ownerMemberId = members
                 .stream()
                 .filter(member -> member.getRole() == HouseholdRole.OWNER)
+                .findFirst()
+                .orElseThrow()
+                .getId();
+        partnerMemberId = members
+                .stream()
+                .filter(member -> member.getRole() == HouseholdRole.MEMBER)
                 .findFirst()
                 .orElseThrow()
                 .getId();
@@ -200,6 +208,14 @@ class RefundLedgerIntegrationTest {
                 .extracting(RefundSummaryResponse.Refund::id)
                 .isEqualTo(refund.id());
         assertDerivedSpending(30_000, 2);
+        assertThat(calendarService.findMonth(
+                currentHousehold, YearMonth.of(2026, 8), null, null).days())
+                .containsExactly(
+                        new CalendarMonthResponse.Day(
+                                LocalDate.of(2026, 8, 27), 1, 50_000),
+                        new CalendarMonthResponse.Day(
+                                LocalDate.of(2026, 8, 28), 1, -20_000)
+                );
 
         assertApiError(
                 ApiErrorCode.TRANSACTION_VERSION_CONFLICT,
@@ -215,6 +231,64 @@ class RefundLedgerIntegrationTest {
         assertThat(restored.refunds()).isEmpty();
         assertThat(currentBalance(account.id())).isEqualTo(50_000);
         assertDerivedSpending(50_000, 1);
+        assertThat(calendarService.findMonth(
+                currentHousehold, YearMonth.of(2026, 8), null, null).days())
+                .containsExactly(new CalendarMonthResponse.Day(
+                        LocalDate.of(2026, 8, 27), 1, 50_000));
+    }
+
+    @Test
+    void should_restoreSharedAndCategoryBuckets_when_sharedRefundIsDeleted() {
+        AccountResponse account = createSharedAccount(
+                "공동 생활비 통장", AccountType.CHECKING, AccountNature.ASSET, 100_000);
+        Category category = createCategory(CategoryType.EXPENSE, "공동 식비");
+        budgetService.create(currentHousehold, new BudgetCreateRequest(
+                YearMonth.of(2026, 8),
+                BudgetScope.SHARED,
+                null,
+                category.getId(),
+                100_000L
+        ));
+        TransactionResponse original = transactionService.create(
+                currentHousehold,
+                new TransactionCreateRequest(
+                        TransactionType.EXPENSE,
+                        40_000L,
+                        TransactionScope.SHARED,
+                        null,
+                        partnerMemberId,
+                        category.getId(),
+                        account.id(),
+                        null,
+                        null,
+                        ORIGINAL_OCCURRED_AT,
+                        "공동 지출",
+                        AdjustmentType.NORMAL,
+                        null
+                )
+        );
+
+        TransactionResponse refund = transactionService.createRefund(
+                currentHousehold,
+                original.id(),
+                refundRequest(15_000, "공동 부분 환불")
+        );
+
+        assertThat(refund.scope()).isEqualTo(TransactionScope.SHARED);
+        assertThat(refund.owner()).isNull();
+        assertThat(refund.payer()).isEqualTo(original.payer());
+        assertThat(refund.category()).isEqualTo(original.category());
+        assertThat(refund.entries()).singleElement().satisfies(entry -> {
+            assertThat(entry.account().id()).isEqualTo(account.id());
+            assertThat(entry.balanceDelta()).isEqualTo(15_000);
+        });
+        assertThat(currentBalance(account.id())).isEqualTo(75_000);
+        assertSharedSpending(25_000, 2);
+
+        transactionService.delete(currentHousehold, refund.id(), refund.version());
+
+        assertThat(currentBalance(account.id())).isEqualTo(60_000);
+        assertSharedSpending(40_000, 1);
     }
 
     @Test
@@ -505,6 +579,45 @@ class RefundLedgerIntegrationTest {
                         .isEqualTo(expectedSpent));
     }
 
+    private void assertSharedSpending(long expectedSpent, long expectedTransactionCount) {
+        CalendarMonthResponse calendar = calendarService.findMonth(
+                currentHousehold,
+                YearMonth.of(2026, 8),
+                TransactionScope.SHARED,
+                null
+        );
+        assertThat(calendar.summary().netSpendingAmount()).isEqualTo(expectedSpent);
+        if (expectedTransactionCount == 2) {
+            assertThat(calendar.days()).containsExactly(
+                    new CalendarMonthResponse.Day(
+                            LocalDate.of(2026, 8, 27), 1, 40_000),
+                    new CalendarMonthResponse.Day(
+                            LocalDate.of(2026, 8, 28), 1, -15_000)
+            );
+        } else {
+            assertThat(calendar.days()).containsExactly(
+                    new CalendarMonthResponse.Day(
+                            LocalDate.of(2026, 8, 27), 1, 40_000)
+            );
+        }
+
+        BudgetMonthResponse budget = budgetService.findMonth(
+                currentHousehold, YearMonth.of(2026, 8));
+        assertThat(budget.scopes())
+                .filteredOn(scope -> scope.scope() == BudgetScope.SHARED)
+                .singleElement()
+                .satisfies(scope -> assertThat(scope.spentAmount()).isEqualTo(expectedSpent));
+        assertThat(budget.scopes())
+                .filteredOn(scope -> scope.scope() == BudgetScope.PERSONAL)
+                .allSatisfy(scope -> assertThat(scope.spentAmount()).isZero());
+        assertThat(budget.categories())
+                .singleElement()
+                .satisfies(category -> {
+                    assertThat(category.scope()).isEqualTo(BudgetScope.SHARED);
+                    assertThat(category.spentAmount()).isEqualTo(expectedSpent);
+                });
+    }
+
     private TransactionResponse createExpense(long amount, Long categoryId, Long accountId) {
         return transactionService.create(
                 currentHousehold,
@@ -622,6 +735,28 @@ class RefundLedgerIntegrationTest {
                 nature,
                 AccountOwnership.PERSONAL,
                 ownerMemberId,
+                openingBalance,
+                LocalDate.of(2026, 8, 1),
+                "KRW",
+                null,
+                type == AccountType.SAVINGS,
+                (int) accountRepository.count()
+        ));
+    }
+
+    private AccountResponse createSharedAccount(
+            String name,
+            AccountType type,
+            AccountNature nature,
+            long openingBalance
+    ) {
+        return accountService.create(currentHousehold, new AccountCreateRequest(
+                name,
+                null,
+                type,
+                nature,
+                AccountOwnership.SHARED,
+                null,
                 openingBalance,
                 LocalDate.of(2026, 8, 1),
                 "KRW",
