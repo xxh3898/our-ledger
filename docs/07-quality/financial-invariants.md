@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.2
+last_updated: 2026-08-28
 related:
   - 02-domain/financial-metrics.md
   - 03-data/transaction-ledger-rules.md
@@ -29,5 +29,8 @@ related:
 16. `amount`는 양수이며 음수 방향은 Entry 또는 REFUND 의미로만 표현한다.
 17. Household timezone의 월 경계가 달력·Budget·통계에서 동일하다.
 18. 총수입이 0이면 저축률은 0%가 아니라 계산 불가 `null`이다.
+19. Refund는 원 NORMAL EXPENSE의 Scope, Owner, Payer, Category, PRIMARY Account를 상속한다.
+20. active Refund가 있는 원 거래의 금융 edit/delete는 lineage를 깨뜨릴 수 없다.
+21. 동시 Refund 생성도 original row lock 경계에서 직렬화돼 누적 상한을 우회할 수 없다.
 
 각 Slice는 관련 불변식의 단위·통합 테스트를 추가한다. 일반 happy path 테스트만으로 완료 처리하지 않는다.

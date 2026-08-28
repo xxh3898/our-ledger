@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-28
 related:
   - 04-api/error-contract.md
@@ -119,11 +119,37 @@ GET    /api/v1/transactions/{transactionId}
 POST   /api/v1/transactions
 PATCH  /api/v1/transactions/{transactionId}
 DELETE /api/v1/transactions/{transactionId}?version={version}
+GET    /api/v1/transactions/{originalTransactionId}/refunds
+POST   /api/v1/transactions/{originalTransactionId}/refunds
 ```
 
 POST의 공통 필드는 `type`, positive `amount`, ISO 8601 `occurredAt`, nullable `memo`, `adjustmentType=NORMAL`, nullable `reversesTransactionId=null`이다. INCOME/EXPENSE는 `scope`, nullable `ownerMemberId/payerMemberId`, `categoryId`, `accountId`를 사용하고 source/destination은 null이다. TRANSFER는 scope/owner/payer/category/account가 null이고 `sourceAccountId`, `destinationAccountId`가 필수다. PATCH는 같은 필드와 현재 `version`을 요구한다.
 
 response는 nullable owner/payer/Category, `version`, canonical `entries[]`를 포함한다. 각 Entry는 `id`, `role`, `balanceDelta`, Account reference를 제공하며 최상위 단일 `account`/`entry`는 제공하지 않는다. DELETE는 Transaction을 논리삭제하고 `204` 본문 없음으로 응답한다.
+
+Refund POST는 원 NORMAL EXPENSE 하위 resource에서 `amount`, `occurredAt`, nullable `memo`만 받는다. Scope, Owner, Payer, Category, PRIMARY Account는 원 거래에서 파생하고 canonical `TransactionResponse`를 반환한다. generic Transaction POST의 `adjustmentType=REFUND`와 Refund generic PATCH는 허용하지 않는다.
+
+Refund GET은 active Refund만 합산하고 다음 summary를 반환한다.
+
+```json
+{
+  "originalTransactionId": 100,
+  "originalAmount": 50000,
+  "refundedAmount": 20000,
+  "remainingRefundableAmount": 30000,
+  "refunds": [
+    {
+      "id": 101,
+      "amount": 20000,
+      "occurredAt": "2026-08-28T03:00:00Z",
+      "memo": "부분 환불",
+      "version": 0
+    }
+  ]
+}
+```
+
+current Household의 active `EXPENSE/NORMAL`과 valid PRIMARY Entry만 original이 될 수 있다. original row lock 뒤 cumulative cap을 검사한다. Refund DELETE는 기존 Transaction DELETE와 version 계약을 재사용한다. active Refund가 있는 original은 금융 edit/delete를 `409`로 거부하되 동일 금융 필드를 유지한 occurredAt/memo-only PATCH는 허용한다.
 
 목록은 `occurred_at DESC, id DESC`로 정렬하고 다음 optional query를 고정한다.
 
@@ -136,7 +162,7 @@ response는 nullable owner/payer/Category, `version`, canonical `entries[]`를 �
 | `categoryId` | Category ID |
 | `accountId` | PRIMARY/SOURCE/DESTINATION 중 일치하는 Entry Account ID |
 
-`from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*`, `ledger-card-expense-*`, `ledger-transfer-*` snippet으로 검증한다.
+`from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*`, `ledger-card-expense-*`, `ledger-transfer-*`, `ledger-refund-*` snippet으로 검증한다.
 
 ### Calendar month read model
 

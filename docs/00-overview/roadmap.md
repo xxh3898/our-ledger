@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-28
 related:
   - 01-product/feature-matrix.md
@@ -20,6 +20,7 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 3. Transfer/Card | Account Entry, 이체, 신용카드, 카드대금 | 잔액·부채 계산 가능 |
 | 4. Calendar | 월 달력, 일별 내역, 개인/공동 필터 | Weple형 메인 사용 흐름 완성 |
 | 5. Budget | 전체·개인·공동·카테고리 예산 | 월 예산 관리 가능 |
+| Pre-6 Refund Gate | 전체·부분 환불, 누적 상한, 원 거래 lineage 보호 | Statistics가 신뢰할 환불 원장 완성 |
 | 6. Statistics | 기간·카테고리·주체·전월 비교 | 소비 분석 가능 |
 | 7. Recurring | 월급·구독·적금 자동 생성 | 반복 입력 감소 |
 | 8. Marriage Goal | Goal/Account 연결, 달성률·예상일 | 결혼자금 추적 가능 |
@@ -37,6 +38,14 @@ LIABILITY source 이체, REFUND, 카드 명세·결제일·한도·할부, Categ
 Budget은 Household timezone 월 단위로 HOUSEHOLD, 실제 Member별 PERSONAL, SHARED와 선택 EXPENSE Category의 예산을 저장한다. 사용액은 Transaction의 `NORMAL EXPENSE - REFUND EXPENSE`에서 매번 파생하며 미설정과 0원, 초과 상태를 구분한다.
 
 Slice 5는 Budget CRUD, optimistic locking, 기본 Scope 카드, 사용자 설정 Category Budget, 월 이동과 기존 Transaction 목록을 재사용한 drill-down까지 포함한다. 자동 이월·전월 자동 복사, 거래 저장 차단, REFUND 생성, Statistics·Recurring·Goal·Assets 구현은 포함하지 않는다.
+
+## Pre-Statistics Refund Correctness Gate
+
+Slice 6에 들어가기 전에 ADR-004의 REFUND Transaction을 실제 write path로 활성화한다. 원 NORMAL EXPENSE 하위 resource에서 전체·부분 환불을 생성하고, 원 거래의 Scope/Owner/Payer/Category/PRIMARY Account와 Entry 방향을 상속한다.
+
+원 거래 row lock 뒤 active refund 합계를 계산해 동시 요청에서도 누적 환불액이 원 금액을 초과하지 않게 한다. active Refund가 있는 원 거래의 금융 edit/delete는 차단하고 Refund는 logical delete 후 필요하면 재생성한다. Calendar, Budget, Account 잔액은 active Refund 생성·삭제를 같은 원장 의미로 즉시 반영한다.
+
+이 Gate는 Slice 번호를 재정의하지 않으며 Statistics, Recurring, Goal, Assets, production 작업을 포함하지 않는다. 기존 V1~V6 schema가 계약을 지원하므로 migration을 추가하지 않는다.
 
 ## Release Gate
 

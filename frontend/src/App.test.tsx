@@ -179,6 +179,37 @@ function transferTransaction(id: number, occurredAt = '2026-08-27T04:00:00Z') {
   }
 }
 
+function refundTransaction({
+  id,
+  original,
+  amount,
+  occurredAt = '2026-08-27T05:00:00Z',
+  memo = '부분 환불',
+}: {
+  id: number
+  original: ReturnType<typeof primaryTransaction>
+  amount: number
+  occurredAt?: string
+  memo?: string | null
+}) {
+  const originalEntry = original.entries[0]
+  return {
+    ...original,
+    id,
+    amount,
+    occurredAt,
+    memo,
+    adjustmentType: 'REFUND',
+    reversesTransactionId: original.id,
+    version: 0,
+    entries: [{
+      ...originalEntry,
+      id: id + 1000,
+      balanceDelta: -originalEntry.balanceDelta / Math.abs(originalEntry.balanceDelta) * amount,
+    }],
+  }
+}
+
 type RouterOptions = {
   accounts?: Array<Record<string, unknown>>
   groups?: Array<Record<string, unknown>>
@@ -186,9 +217,11 @@ type RouterOptions = {
   transactions?: Array<Record<string, unknown>>
   budgets?: Array<Record<string, unknown>>
   failTransactionCreate?: boolean
+  failRefundCreate?: boolean
   failBudgetCreate?: boolean
   failBudgetUpdate?: boolean
   budgetCreateGate?: Promise<void>
+  refundCreateGate?: Promise<void>
 }
 
 function transactionDate(occurredAt: string) {
@@ -554,6 +587,58 @@ function installLedgerRouter(options: RouterOptions = {}) {
       state.transactions.unshift(created)
       return jsonResponse(created, 201)
     }
+    const refundMatch = url.pathname.match(/^\/api\/v1\/transactions\/(\d+)\/refunds$/)
+    if (refundMatch && method === 'GET') {
+      const originalId = Number(refundMatch[1])
+      const original = state.transactions.find(
+        (item) => Number(item.id) === originalId,
+      )
+      const refunds = state.transactions
+        .filter((item) => item.adjustmentType === 'REFUND'
+          && Number(item.reversesTransactionId) === originalId)
+        .map((item) => ({
+          id: item.id,
+          amount: item.amount,
+          occurredAt: item.occurredAt,
+          memo: item.memo,
+          version: item.version,
+        }))
+      const originalAmount = Number(original?.amount ?? 0)
+      const refundedAmount = refunds.reduce(
+        (sum, refund) => sum + Number(refund.amount),
+        0,
+      )
+      return jsonResponse({
+        originalTransactionId: originalId,
+        originalAmount,
+        refundedAmount,
+        remainingRefundableAmount: originalAmount - refundedAmount,
+        refunds,
+      })
+    }
+    if (refundMatch && method === 'POST') {
+      if (options.refundCreateGate) await options.refundCreateGate
+      if (options.failRefundCreate) {
+        return jsonResponse({
+          code: 'TRANSACTION_REFUND_EXCEEDS_ORIGINAL',
+          message: '환불 가능 금액을 초과했습니다.',
+        }, 422)
+      }
+      const originalId = Number(refundMatch[1])
+      const original = state.transactions.find(
+        (item) => Number(item.id) === originalId,
+      ) as ReturnType<typeof primaryTransaction>
+      const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      const created = refundTransaction({
+        id: 700 + state.transactions.length,
+        original,
+        amount: Number(inputBody.amount),
+        occurredAt: String(inputBody.occurredAt),
+        memo: inputBody.memo == null ? null : String(inputBody.memo),
+      })
+      state.transactions.unshift(created)
+      return jsonResponse(created, 201)
+    }
     if (/^\/api\/v1\/transactions\/\d+$/.test(url.pathname) && method === 'PATCH') {
       const transactionId = Number(url.pathname.split('/').at(-1))
       const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
@@ -883,6 +968,206 @@ describe('App', () => {
     expect(amount).toHaveValue(15000)
     expect(memo).toHaveValue('입력 유지')
     expect(dialog).toBeInTheDocument()
+  })
+
+  it('offers Refund only from a NORMAL EXPENSE and shows partial or full state', async () => {
+    useCalendarUrl()
+    const original = primaryTransaction({ id: 400, amount: 50_000 })
+    const income = primaryTransaction({
+      id: 401,
+      amount: 100_000,
+      type: 'INCOME',
+    })
+    const partialRefund = refundTransaction({
+      id: 402,
+      original,
+      amount: 20_000,
+    })
+    installLedgerRouter({
+      transactions: [original, income, transferTransaction(403), partialRefund],
+    })
+    render(<App />)
+
+    const originalRow = (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    expect(await within(originalRow).findByText(
+      '20,000원 환불됨 · 30,000원 환불 가능',
+    )).toBeInTheDocument()
+    expect(within(originalRow).getByRole('button', { name: '환불' })).toBeInTheDocument()
+    expect(within((screen.getByText('+100,000원').closest('li') as HTMLElement))
+      .queryByRole('button', { name: '환불' })).not.toBeInTheDocument()
+    expect(within((screen.getByText('↔ 3,000원').closest('li') as HTMLElement))
+      .queryByRole('button', { name: '환불' })).not.toBeInTheDocument()
+    const refundRow = screen.getByText('식비 환불').closest('li') as HTMLElement
+    expect(within(refundRow).queryByRole('button', { name: '환불' }))
+      .not.toBeInTheDocument()
+
+    cleanup()
+    installLedgerRouter({
+      transactions: [
+        original,
+        refundTransaction({ id: 404, original, amount: 50_000 }),
+      ],
+    })
+    render(<App />)
+    const fullyRefundedOriginal =
+      (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    expect(await within(fullyRefundedOriginal).findByText('전액 환불됨'))
+      .toBeInTheDocument()
+    expect(within(fullyRefundedOriginal).queryByRole('button', { name: '환불' }))
+      .not.toBeInTheDocument()
+  })
+
+  it('opens Refund with inherited context and restores focus after Escape', async () => {
+    useCalendarUrl()
+    const original = primaryTransaction({ id: 400, amount: 50_000 })
+    installLedgerRouter({
+      transactions: [
+        original,
+        refundTransaction({ id: 401, original, amount: 20_000 }),
+      ],
+    })
+    render(<App />)
+    const originalRow = (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    const trigger = await within(originalRow).findByRole('button', { name: '환불' })
+
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('dialog', { name: '환불 처리' })
+    expect(within(dialog).getByText('식비 · 50,000원')).toBeInTheDocument()
+    expect(within(dialog).getByText('주거래 통장')).toBeInTheDocument()
+    expect(within(dialog).getByText('20,000원')).toBeInTheDocument()
+    expect(within(dialog).getByText('30,000원')).toBeInTheDocument()
+    const amount = within(dialog).getByLabelText('환불 금액')
+    expect(amount).toHaveFocus()
+    expect(amount).toHaveAttribute('max', '30000')
+    expect(within(dialog).getByLabelText('날짜')).toHaveValue('2026-08-28')
+    expect(within(dialog).queryByLabelText('범위')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Category')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Account')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '환불 처리' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    fireEvent.click(trigger)
+    const reopenedDialog = await screen.findByRole('dialog', { name: '환불 처리' })
+    fireEvent.mouseDown(reopenedDialog.parentElement as HTMLElement)
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '환불 처리' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('prevents duplicate Refund submit and refreshes Calendar after success', async () => {
+    useCalendarUrl()
+    let releaseRefund!: () => void
+    const refundCreateGate = new Promise<void>((resolve) => {
+      releaseRefund = resolve
+    })
+    const original = primaryTransaction({ id: 400, amount: 50_000 })
+    const { fetchMock } = installLedgerRouter({
+      transactions: [original],
+      refundCreateGate,
+    })
+    render(<App />)
+    const originalRow = (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    fireEvent.click(await within(originalRow).findByRole('button', { name: '환불' }))
+    const dialog = await screen.findByRole('dialog', { name: '환불 처리' })
+    const amount = within(dialog).getByLabelText('환불 금액')
+    fireEvent.change(amount, { target: { value: '30000' } })
+    const submit = within(dialog).getByRole('button', { name: '30,000원 환불 기록' })
+
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+
+    expect(await within(dialog).findByRole('button', { name: '환불 기록 중…' }))
+      .toBeDisabled()
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/transactions/400/refunds'
+        && init?.method === 'POST')).toHaveLength(1)
+    releaseRefund()
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('환불을 기록했어요')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '환불 처리' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(
+      screen.getByRole('heading', { name: '이번 달 우리가 쓴 돈' }).closest('section'),
+    ).toHaveTextContent('20,000원'))
+    const refreshedOriginal =
+      (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    const refreshedRefundButton = await within(refreshedOriginal)
+      .findByRole('button', { name: '환불' })
+    await waitFor(() => expect(refreshedRefundButton).toHaveFocus())
+    fireEvent.click(await screen.findByRole('button', {
+      name: '28일, 오늘, 거래 1건',
+    }))
+    expect(await screen.findByText('+30,000원')).toBeInTheDocument()
+  })
+
+  it('keeps Refund inputs after client or server cap errors', async () => {
+    useCalendarUrl()
+    const original = primaryTransaction({ id: 400, amount: 50_000 })
+    const { fetchMock } = installLedgerRouter({
+      transactions: [
+        original,
+        refundTransaction({ id: 401, original, amount: 20_000 }),
+      ],
+      failRefundCreate: true,
+    })
+    render(<App />)
+    const originalRow = (await screen.findByText('−50,000원')).closest('li') as HTMLElement
+    fireEvent.click(await within(originalRow).findByRole('button', { name: '환불' }))
+    const dialog = await screen.findByRole('dialog', { name: '환불 처리' })
+    const amount = within(dialog).getByLabelText('환불 금액')
+    const memo = within(dialog).getByLabelText('메모 (선택)')
+
+    fireEvent.change(amount, { target: { value: '40000' } })
+    fireEvent.change(memo, { target: { value: '입력 유지' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '40,000원 환불 기록' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      '환불 가능 금액은 30,000원입니다.',
+    )
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/transactions/400/refunds'
+        && init?.method === 'POST')).toHaveLength(0)
+
+    fireEvent.change(amount, { target: { value: '30000' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '30,000원 환불 기록' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      '환불 가능 금액을 초과했습니다.',
+    )
+    expect(amount).toHaveValue(30000)
+    expect(memo).toHaveValue('입력 유지')
+    expect(dialog).toBeInTheDocument()
+  })
+
+  it('removes generic edit from Refund and confirms deletion before refresh', async () => {
+    useCalendarUrl()
+    const original = primaryTransaction({ id: 400, amount: 50_000 })
+    const refund = refundTransaction({ id: 401, original, amount: 20_000 })
+    const { fetchMock } = installLedgerRouter({ transactions: [original, refund] })
+    render(<App />)
+    const refundRow = (await screen.findByText('식비 환불')).closest('li') as HTMLElement
+    expect(within(refundRow).getByText('+20,000원')).toBeInTheDocument()
+    expect(within(refundRow).getByText('부분 환불 · 주거래 통장')).toBeInTheDocument()
+    expect(within(refundRow).getByText('원 지출을 상쇄한 환불 기록'))
+      .toBeInTheDocument()
+    expect(within(refundRow).queryByRole('button', { name: '수정' }))
+      .not.toBeInTheDocument()
+
+    fireEvent.click(within(refundRow).getByRole('button', { name: '삭제' }))
+    expect(within(refundRow).getByText('환불 기록만 삭제되며 원 지출은 유지됩니다.'))
+      .toBeInTheDocument()
+    expect(screen.getByText('+20,000원')).toBeInTheDocument()
+    fireEvent.click(within(refundRow).getByRole('button', { name: '삭제 확인' }))
+
+    await waitFor(() => expect(screen.queryByText('+20,000원')).not.toBeInTheDocument())
+    expect(screen.getByText('−50,000원')).toBeInTheDocument()
+    expect(await screen.findByText('50,000원 환불 가능')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      String(input).startsWith('/api/v1/transactions/401?version=')
+        && init?.method === 'DELETE')).toBe(true)
   })
 
   it('edits and deletes a selected-day transaction and refreshes month and day', async () => {

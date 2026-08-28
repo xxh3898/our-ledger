@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { BudgetScreen } from './BudgetScreen.tsx'
 import { QuickEntrySheet } from './QuickEntrySheet.tsx'
+import { RefundSheet } from './RefundSheet.tsx'
 import { SettingsSheet } from './SettingsSheet.tsx'
 import {
   currentBudgetMonth,
@@ -24,12 +25,14 @@ import {
   type CurrentHousehold,
   type CurrentUser,
   type LedgerTransaction,
+  type RefundSummary,
   LedgerApiError,
   deleteTransaction,
   loadCalendarMonth,
   loadCurrentUser,
   loadDayTransactions,
   loadReferenceData,
+  loadRefundSummary,
 } from './ledgerApi.ts'
 import { entryByRole } from './transactionUtils.ts'
 
@@ -389,22 +392,88 @@ function accountPath(transaction: LedgerTransaction) {
   return entryByRole(transaction, 'PRIMARY')?.account.name ?? 'Account'
 }
 
+function RefundAction({
+  transaction,
+  refreshKey,
+  onOpen,
+}: {
+  transaction: LedgerTransaction
+  refreshKey: number
+  onOpen: (
+    transaction: LedgerTransaction,
+    summary: RefundSummary,
+    opener: HTMLElement,
+  ) => void
+}) {
+  const [state, setState] = useState<AsyncState<RefundSummary>>({ status: 'loading' })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setState({ status: 'loading' })
+    void loadRefundSummary(transaction.id, controller.signal)
+      .then((data) => setState({ status: 'ready', data }))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setState({ status: 'error', message: errorMessage(error) })
+        }
+      })
+    return () => controller.abort()
+  }, [refreshKey, transaction.id])
+
+  if (state.status === 'loading') {
+    return <span className="refund-state">환불 정보 확인 중…</span>
+  }
+  if (state.status === 'error') {
+    return <span className="refund-state refund-state--error">환불 정보 확인 실패</span>
+  }
+  if (state.data.remainingRefundableAmount === 0) {
+    return <span className="refund-state">전액 환불됨</span>
+  }
+  return (
+    <>
+      <span className="refund-state">
+        {state.data.refundedAmount > 0
+          ? `${formatWon(state.data.refundedAmount)} 환불됨 · `
+          : ''}
+        {formatWon(state.data.remainingRefundableAmount)} 환불 가능
+      </span>
+      <button
+        type="button"
+        data-refund-opener={transaction.id}
+        onClick={(event) => onOpen(transaction, state.data, event.currentTarget)}
+      >
+        환불
+      </button>
+    </>
+  )
+}
+
 function SelectedDayTransactions({
   date,
   state,
+  refreshKey,
   onEdit,
+  onRefund,
   onDeleted,
 }: {
   date: string
   state: AsyncState<LedgerTransaction[]>
+  refreshKey: number
   onEdit: (transaction: LedgerTransaction, opener: HTMLElement) => void
+  onRefund: (
+    transaction: LedgerTransaction,
+    summary: RefundSummary,
+    opener: HTMLElement,
+  ) => void
   onDeleted: () => void
 }) {
   const [deleting, setDeleting] = useState<number | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  async function remove(transaction: LedgerTransaction) {
+  async function performDelete(transaction: LedgerTransaction) {
     setDeleting(transaction.id)
+    setConfirmingDelete(null)
     setDeleteError(null)
     try {
       await deleteTransaction(transaction.id, transaction.version)
@@ -421,7 +490,7 @@ function SelectedDayTransactions({
       <div className="section-heading">
         <div>
           <p className="section-kicker">Selected Day</p>
-          <h2 id="selected-day-title">
+          <h2 id="selected-day-title" tabIndex={-1}>
             {Number(date.slice(5, 7))}월 {Number(date.slice(8))}일의 기록
           </h2>
         </div>
@@ -440,7 +509,11 @@ function SelectedDayTransactions({
         <ul className="transaction-list">
           {state.data.map((transaction) => (
             <li key={transaction.id}>
-              <span className={`transaction-sign transaction-sign--${transaction.type.toLowerCase()}`}>
+              <span className={`transaction-sign transaction-sign--${
+                transaction.adjustmentType === 'REFUND'
+                  ? 'refund'
+                  : transaction.type.toLowerCase()
+              }`}>
                 {transaction.type === 'TRANSFER'
                   ? '↔'
                   : transaction.type === 'INCOME' || transaction.adjustmentType === 'REFUND'
@@ -450,28 +523,70 @@ function SelectedDayTransactions({
               <div className="transaction-copy">
                 <strong>{transactionTitle(transaction)}</strong>
                 <span>
-                  {accountPath(transaction)} · {transaction.scope === 'SHARED'
-                    ? '공동'
-                    : transaction.owner?.displayName ?? '이체'}
+                  {transaction.adjustmentType === 'REFUND'
+                    ? `${transaction.memo ? `${transaction.memo} · ` : ''}${accountPath(transaction)}`
+                    : `${accountPath(transaction)} · ${transaction.scope === 'SHARED'
+                      ? '공동'
+                      : transaction.owner?.displayName ?? '이체'}`}
                 </span>
-                {transaction.memo && <small>{transaction.memo}</small>}
+                {transaction.adjustmentType === 'REFUND'
+                  ? <small>원 지출을 상쇄한 환불 기록</small>
+                  : transaction.memo && <small>{transaction.memo}</small>}
               </div>
-              <b className="transaction-amount">{transactionAmount(transaction)}</b>
+              <b className={[
+                'transaction-amount',
+                transaction.adjustmentType === 'REFUND'
+                  ? 'transaction-amount--refund'
+                  : '',
+              ].filter(Boolean).join(' ')}>
+                {transactionAmount(transaction)}
+              </b>
               <div className="transaction-actions">
-                <button
-                  type="button"
-                  onClick={(event) => onEdit(transaction, event.currentTarget)}
-                >
-                  수정
-                </button>
+                {transaction.type === 'EXPENSE'
+                  && transaction.adjustmentType === 'NORMAL' && (
+                    <RefundAction
+                      transaction={transaction}
+                      refreshKey={refreshKey}
+                      onOpen={onRefund}
+                    />
+                  )}
+                {transaction.adjustmentType !== 'REFUND' && (
+                  <button
+                    type="button"
+                    onClick={(event) => onEdit(transaction, event.currentTarget)}
+                  >
+                    수정
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={deleting === transaction.id}
-                  onClick={() => void remove(transaction)}
+                  onClick={() => {
+                    if (transaction.adjustmentType === 'REFUND') {
+                      setConfirmingDelete(transaction.id)
+                    } else {
+                      void performDelete(transaction)
+                    }
+                  }}
                 >
                   {deleting === transaction.id ? '삭제 중…' : '삭제'}
                 </button>
               </div>
+              {confirmingDelete === transaction.id && (
+                <div className="refund-delete-confirm" role="group" aria-label="환불 삭제 확인">
+                  <p>환불 기록만 삭제되며 원 지출은 유지됩니다.</p>
+                  <button
+                    type="button"
+                    disabled={deleting === transaction.id}
+                    onClick={() => void performDelete(transaction)}
+                  >
+                    삭제 확인
+                  </button>
+                  <button type="button" onClick={() => setConfirmingDelete(null)}>
+                    취소
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -535,8 +650,14 @@ function CalendarWorkspace({
     selectedDate: string
     editing: LedgerTransaction | null
   } | null>(null)
+  const [refundMode, setRefundMode] = useState<{
+    original: LedgerTransaction
+    summary: RefundSummary
+  } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const openerRef = useRef<HTMLElement | null>(null)
+  const refundOpenerRef = useRef<HTMLElement | null>(null)
+  const refundOriginalIdRef = useRef<number | null>(null)
   const settingsButtonRef = useRef<HTMLElement | null>(null)
 
   const filter = useMemo(() => calendarFilter(navigation), [navigation])
@@ -552,6 +673,30 @@ function CalendarWorkspace({
     finishClosingEntry()
     if (ownsHistoryEntry) window.history.back()
   }, [finishClosingEntry])
+
+  const finishClosingRefund = useCallback(() => {
+    const opener = refundOpenerRef.current
+    const originalId = refundOriginalIdRef.current
+    setRefundMode(null)
+    window.setTimeout(() => {
+      const currentOpener = originalId === null
+        ? null
+        : document.querySelector(`[data-refund-opener="${originalId}"]`)
+      if (currentOpener instanceof HTMLElement) {
+        currentOpener.focus()
+      } else if (opener?.isConnected) {
+        opener.focus()
+      } else {
+        document.getElementById('selected-day-title')?.focus()
+      }
+    }, 0)
+  }, [])
+
+  const requestCloseRefund = useCallback(() => {
+    const ownsHistoryEntry = window.history.state?.ourLedgerSheet === 'refund'
+    finishClosingRefund()
+    if (ownsHistoryEntry) window.history.back()
+  }, [finishClosingRefund])
 
   useEffect(() => {
     if (activeScreen !== 'calendar') return
@@ -589,10 +734,19 @@ function CalendarWorkspace({
       if (entryMode && window.history.state?.ourLedgerSheet !== 'quick-entry') {
         finishClosingEntry()
       }
+      if (refundMode && window.history.state?.ourLedgerSheet !== 'refund') {
+        finishClosingRefund()
+      }
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [entryMode, finishClosingEntry, references.household])
+  }, [
+    entryMode,
+    finishClosingEntry,
+    finishClosingRefund,
+    references.household,
+    refundMode,
+  ])
 
   useEffect(() => {
     if (activeScreen !== 'calendar') return
@@ -644,6 +798,21 @@ function CalendarWorkspace({
       window.location.href,
     )
     setEntryMode({ selectedDate, editing })
+  }
+
+  function openRefund(
+    original: LedgerTransaction,
+    summary: RefundSummary,
+    opener: HTMLElement,
+  ) {
+    refundOpenerRef.current = opener
+    refundOriginalIdRef.current = original.id
+    window.history.pushState(
+      { ...window.history.state, ourLedgerSheet: 'refund' },
+      '',
+      window.location.href,
+    )
+    setRefundMode({ original, summary })
   }
 
   function navigate(destination: 'calendar' | 'budget') {
@@ -715,7 +884,9 @@ function CalendarWorkspace({
             <SelectedDayTransactions
               date={navigation.date}
               state={dayState}
+              refreshKey={revision}
               onEdit={openEntry}
+              onRefund={openRefund}
               onDeleted={() => setRevision((current) => current + 1)}
             />
           </>
@@ -751,6 +922,15 @@ function CalendarWorkspace({
           selectedDate={entryMode.selectedDate}
           editing={entryMode.editing}
           onRequestClose={requestCloseEntry}
+          onSaved={() => setRevision((current) => current + 1)}
+        />
+      )}
+      {refundMode && (
+        <RefundSheet
+          household={references.household}
+          original={refundMode.original}
+          initialSummary={refundMode.summary}
+          onRequestClose={requestCloseRefund}
           onSaved={() => setRevision((current) => current + 1)}
         />
       )}

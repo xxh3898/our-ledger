@@ -514,6 +514,12 @@ p {
   color: var(--income);
 }
 
+.transaction-sign--refund {
+  border: 1px solid rgb(45 128 95 / 24%);
+  background: rgb(45 128 95 / 12%);
+  color: var(--income);
+}
+
 .transaction-sign--expense {
   background: rgb(200 67 84 / 11%);
   color: var(--expense);
@@ -548,11 +554,17 @@ p {
   white-space: nowrap;
 }
 
+.transaction-amount--refund {
+  color: var(--income);
+}
+
 .transaction-actions {
   display: flex;
   grid-column: 2 / -1;
   justify-content: flex-end;
   gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .transaction-actions button,
@@ -560,6 +572,40 @@ p {
   min-height: 2.4rem;
   padding: 0.38rem 0.58rem;
   font-size: 0.68rem;
+}
+
+.refund-state {
+  color: var(--neutral-700);
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.refund-state--error {
+  color: var(--danger);
+}
+
+.refund-delete-confirm {
+  display: flex;
+  grid-column: 2 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border-radius: 0.8rem;
+  background: rgb(189 51 68 / 8%);
+}
+
+.refund-delete-confirm p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.72rem;
+}
+
+.refund-delete-confirm button {
+  min-height: 2.35rem;
+  font-size: 0.7rem;
 }
 
 .bottom-navigation {
@@ -663,6 +709,51 @@ p {
 .bottom-sheet {
   min-height: 86dvh;
   padding: 0.55rem 1.1rem calc(1.4rem + env(safe-area-inset-bottom));
+}
+
+.refund-sheet {
+  min-height: auto;
+}
+
+.refund-context {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--pink-300);
+  border-radius: 1rem;
+  background: var(--neutral-0);
+}
+
+.refund-context > span {
+  color: var(--neutral-700);
+  font-size: 0.82rem;
+}
+
+.refund-context dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0.7rem 0 0;
+}
+
+.refund-context dl > div {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.65rem;
+  border-radius: 0.75rem;
+  background: var(--neutral-100);
+}
+
+.refund-context dt {
+  color: var(--neutral-700);
+  font-size: 0.68rem;
+}
+
+.refund-context dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 850;
 }
 
 .sheet-handle {

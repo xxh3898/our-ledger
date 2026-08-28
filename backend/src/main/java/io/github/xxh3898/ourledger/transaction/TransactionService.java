@@ -5,6 +5,7 @@ import io.github.xxh3898.ourledger.account.AccountNature;
 import io.github.xxh3898.ourledger.account.AccountService;
 import io.github.xxh3898.ourledger.account.AccountType;
 import io.github.xxh3898.ourledger.api.ApiErrorCode;
+import io.github.xxh3898.ourledger.api.ApiErrorResponse;
 import io.github.xxh3898.ourledger.api.ApiException;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.category.Category;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -99,6 +101,66 @@ public class TransactionService {
         return toResponse(requireTransaction(currentHousehold.householdId(), transactionId));
     }
 
+    @Transactional(readOnly = true)
+    public RefundSummaryResponse findRefunds(
+            CurrentHousehold currentHousehold,
+            Long originalTransactionId
+    ) {
+        LedgerTransaction original = requireRefundOriginal(requireTransaction(
+                currentHousehold.householdId(), originalTransactionId));
+        return toRefundSummary(original, activeRefunds(original));
+    }
+
+    @Transactional
+    public TransactionResponse createRefund(
+            CurrentHousehold currentHousehold,
+            Long originalTransactionId,
+            RefundCreateRequest request
+    ) {
+        validateRefundRequest(request);
+        LedgerTransaction original = requireRefundOriginal(requireTransactionForUpdate(
+                currentHousehold.householdId(), originalTransactionId));
+        List<LedgerTransaction> refunds = activeRefunds(original);
+        long remainingRefundableAmount = Math.subtractExact(
+                original.getAmount(), refundedAmount(refunds));
+        if (request.amount() > remainingRefundableAmount) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.TRANSACTION_REFUND_EXCEEDS_ORIGINAL,
+                    List.of(new ApiErrorResponse.FieldError(
+                            "amount",
+                            "exceedsRemainingRefundableAmount",
+                            "남은 환불 가능 금액 이하로 입력해야 합니다."
+                    ))
+            );
+        }
+
+        TransactionAccountEntry originalEntry = requireValidEntries(original).getFirst();
+        Account originalAccount = accountService.requireAccount(
+                original.getHouseholdId(), originalEntry.getAccountId());
+        long refundDelta = originalEntry.getBalanceDelta() > 0
+                ? Math.negateExact(request.amount())
+                : request.amount();
+        HouseholdMember actor = householdMemberResolver.requireCurrent(currentHousehold);
+        LedgerTransaction refund = transactionRepository.saveAndFlush(LedgerTransaction.create(
+                original.getHouseholdId(),
+                TransactionType.EXPENSE,
+                request.amount(),
+                original.getScope(),
+                original.getOwnerMemberId(),
+                original.getPayerMemberId(),
+                original.getCategoryId(),
+                request.occurredAt(),
+                request.memo(),
+                AdjustmentType.REFUND,
+                original.getId(),
+                actor.getId()
+        ));
+        saveEntries(refund, List.of(new ExpectedEntry(
+                originalAccount, EntryRole.PRIMARY, refundDelta)));
+        return toResponse(refund);
+    }
+
     @Transactional
     public TransactionResponse create(
             CurrentHousehold currentHousehold,
@@ -146,10 +208,38 @@ public class TransactionService {
             TransactionUpdateRequest request
     ) {
         new RequestValidator().required(request.version(), "version").throwIfInvalid();
-        LedgerTransaction transaction = requireTransaction(
+        LedgerTransaction transaction = requireTransactionForUpdate(
                 currentHousehold.householdId(), transactionId);
         rejectStaleVersion(transaction, request.version());
-        requireValidEntries(transaction);
+        List<TransactionAccountEntry> currentEntries = requireValidEntries(transaction);
+        if (transaction.getAdjustmentType() == AdjustmentType.REFUND) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.TRANSACTION_REFUND_UPDATE_NOT_ALLOWED
+            );
+        }
+        if (hasActiveRefunds(transaction)) {
+            validateProtectedOriginalUpdate(request);
+            if (!hasSameFinancialMeaning(transaction, currentEntries, request)) {
+                throw originalHasActiveRefunds();
+            }
+            HouseholdMember actor = householdMemberResolver.requireCurrent(currentHousehold);
+            transaction.update(
+                    transaction.getType(),
+                    transaction.getAmount(),
+                    transaction.getScope(),
+                    transaction.getOwnerMemberId(),
+                    transaction.getPayerMemberId(),
+                    transaction.getCategoryId(),
+                    request.occurredAt(),
+                    request.memo(),
+                    transaction.getAdjustmentType(),
+                    transaction.getReversesTransactionId(),
+                    actor.getId()
+            );
+            transactionRepository.flush();
+            return toResponse(transaction);
+        }
         ValidatedPosting posting = validatePosting(
                 currentHousehold,
                 request.type(),
@@ -194,13 +284,150 @@ public class TransactionService {
             Long transactionId,
             Long version
     ) {
-        LedgerTransaction transaction = requireTransaction(
+        LedgerTransaction transaction = requireTransactionForUpdate(
                 currentHousehold.householdId(), transactionId);
         rejectStaleVersion(transaction, version);
         requireValidEntries(transaction);
+        if (transaction.getAdjustmentType() == AdjustmentType.REFUND) {
+            transactionRepository.findByIdAndHouseholdIdForUpdate(
+                    transaction.getReversesTransactionId(),
+                    transaction.getHouseholdId()
+            );
+        } else if (hasActiveRefunds(transaction)) {
+            throw originalHasActiveRefunds();
+        }
         HouseholdMember actor = householdMemberResolver.requireCurrent(currentHousehold);
         transaction.delete(actor.getId());
         transactionRepository.flush();
+    }
+
+    private void validateRefundRequest(RefundCreateRequest request) {
+        RequestValidator validator = new RequestValidator()
+                .required(request.amount(), "amount")
+                .required(request.occurredAt(), "occurredAt");
+        if (request.amount() != null) {
+            validator.check(request.amount() > 0,
+                    "amount", "positive", "1 이상이어야 합니다.");
+        }
+        validateMemo(validator, request.memo());
+        validator.throwIfInvalid();
+    }
+
+    private void validateProtectedOriginalUpdate(TransactionUpdateRequest request) {
+        RequestValidator validator = new RequestValidator()
+                .required(request.type(), "type")
+                .required(request.amount(), "amount")
+                .required(request.occurredAt(), "occurredAt")
+                .required(request.adjustmentType(), "adjustmentType");
+        if (request.amount() != null) {
+            validator.check(request.amount() > 0,
+                    "amount", "positive", "1 이상이어야 합니다.");
+        }
+        validateMemo(validator, request.memo());
+        validator.throwIfInvalid();
+    }
+
+    private void validateMemo(RequestValidator validator, String memo) {
+        if (memo != null) {
+            validator.check(!memo.isBlank() && memo.strip().length() <= 500,
+                    "memo", "size", "빈 문자열이 아닌 500자 이하여야 합니다.");
+        }
+    }
+
+    private boolean hasSameFinancialMeaning(
+            LedgerTransaction transaction,
+            List<TransactionAccountEntry> currentEntries,
+            TransactionUpdateRequest request
+    ) {
+        TransactionAccountEntry primary = entry(currentEntries, EntryRole.PRIMARY);
+        return request.type() == transaction.getType()
+                && request.amount() != null
+                && request.amount() == transaction.getAmount()
+                && request.scope() == transaction.getScope()
+                && Objects.equals(request.ownerMemberId(), transaction.getOwnerMemberId())
+                && Objects.equals(request.payerMemberId(), transaction.getPayerMemberId())
+                && Objects.equals(request.categoryId(), transaction.getCategoryId())
+                && primary != null
+                && Objects.equals(request.accountId(), primary.getAccountId())
+                && request.sourceAccountId() == null
+                && request.destinationAccountId() == null
+                && request.adjustmentType() == transaction.getAdjustmentType()
+                && Objects.equals(
+                        request.reversesTransactionId(),
+                        transaction.getReversesTransactionId()
+                );
+    }
+
+    private boolean hasActiveRefunds(LedgerTransaction transaction) {
+        return transactionRepository
+                .existsByHouseholdIdAndReversesTransactionIdAndAdjustmentTypeAndDeletedAtIsNull(
+                        transaction.getHouseholdId(),
+                        transaction.getId(),
+                        AdjustmentType.REFUND
+                );
+    }
+
+    private List<LedgerTransaction> activeRefunds(LedgerTransaction original) {
+        return transactionRepository
+                .findAllByHouseholdIdAndReversesTransactionIdAndAdjustmentTypeAndDeletedAtIsNullOrderByOccurredAtDescIdDesc(
+                        original.getHouseholdId(),
+                        original.getId(),
+                        AdjustmentType.REFUND
+                );
+    }
+
+    private long refundedAmount(List<LedgerTransaction> refunds) {
+        long total = 0;
+        for (LedgerTransaction refund : refunds) {
+            total = Math.addExact(total, refund.getAmount());
+        }
+        return total;
+    }
+
+    private LedgerTransaction requireRefundOriginal(LedgerTransaction transaction) {
+        if (transaction.getType() != TransactionType.EXPENSE
+                || transaction.getAdjustmentType() != AdjustmentType.NORMAL
+                || transaction.getReversesTransactionId() != null) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.TRANSACTION_REFUND_ORIGINAL_REQUIRED
+            );
+        }
+        requireValidEntries(transaction);
+        return transaction;
+    }
+
+    private RefundSummaryResponse toRefundSummary(
+            LedgerTransaction original,
+            List<LedgerTransaction> refunds
+    ) {
+        long refundedAmount = refundedAmount(refunds);
+        List<RefundSummaryResponse.Refund> items = refunds.stream()
+                .map(refund -> {
+                    requireValidEntries(refund);
+                    return new RefundSummaryResponse.Refund(
+                            refund.getId(),
+                            refund.getAmount(),
+                            refund.getOccurredAt(),
+                            refund.getMemo(),
+                            refund.getVersion()
+                    );
+                })
+                .toList();
+        return new RefundSummaryResponse(
+                original.getId(),
+                original.getAmount(),
+                refundedAmount,
+                Math.subtractExact(original.getAmount(), refundedAmount),
+                items
+        );
+    }
+
+    private ApiException originalHasActiveRefunds() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS
+        );
     }
 
     private void validateFilter(TransactionFilter filter) {
@@ -235,10 +462,7 @@ public class TransactionService {
         if (amount != null) {
             validator.check(amount > 0, "amount", "positive", "1 이상이어야 합니다.");
         }
-        if (memo != null) {
-            validator.check(!memo.isBlank() && memo.strip().length() <= 500,
-                    "memo", "size", "빈 문자열이 아닌 500자 이하여야 합니다.");
-        }
+        validateMemo(validator, memo);
         validator.throwIfInvalid();
 
         if (adjustmentType != AdjustmentType.NORMAL || reversesTransactionId != null) {
@@ -478,6 +702,15 @@ public class TransactionService {
                 ));
     }
 
+    private LedgerTransaction requireTransactionForUpdate(Long householdId, Long transactionId) {
+        return transactionRepository.findActiveByIdAndHouseholdIdForUpdate(
+                        transactionId, householdId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ApiErrorCode.RESOURCE_NOT_FOUND
+                ));
+    }
+
     private List<TransactionAccountEntry> requireValidEntries(LedgerTransaction transaction) {
         List<TransactionAccountEntry> entries = entryRepository
                 .findAllByTransactionIdAndHouseholdId(
@@ -498,7 +731,17 @@ public class TransactionService {
             LedgerTransaction transaction,
             List<TransactionAccountEntry> entries
     ) {
+        if ((transaction.getAdjustmentType() == AdjustmentType.NORMAL
+                && transaction.getReversesTransactionId() != null)
+                || (transaction.getAdjustmentType() == AdjustmentType.REFUND
+                && (transaction.getType() != TransactionType.EXPENSE
+                || transaction.getReversesTransactionId() == null))) {
+            return false;
+        }
         if (transaction.getType() == TransactionType.TRANSFER) {
+            if (transaction.getAdjustmentType() != AdjustmentType.NORMAL) {
+                return false;
+            }
             if (entries.size() != 2 || roles(entries).size() != 2) {
                 return false;
             }
@@ -542,6 +785,9 @@ public class TransactionService {
             expectedDelta = Math.negateExact(transaction.getAmount());
         } else {
             return false;
+        }
+        if (transaction.getAdjustmentType() == AdjustmentType.REFUND) {
+            expectedDelta = Math.negateExact(expectedDelta);
         }
         return primary.getBalanceDelta() == expectedDelta;
     }

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-28
 related:
   - ADR-002
@@ -46,6 +46,8 @@ related:
 - 원 지출의 계좌 효과를 반대로 적용
 - ASSET 환불: `+amount`
 - LIABILITY 환불: `-amount`
+- Account, Scope, Owner, Payer, Category는 valid 원 NORMAL EXPENSE에서 파생
+- 원 거래 Account/Category가 이후 보관돼도 기존 지출 reversal은 허용
 
 ### TRANSFER
 
@@ -72,6 +74,15 @@ Slice 3는 기존 Entry set을 제거한 뒤 계산한 expected Entry set을 다
 - CREDIT_CARD/LIABILITY EXPENSE NORMAL: PRIMARY 1개, `balance_delta=+amount`
 - ASSET→ASSET TRANSFER: SOURCE `-amount`, DESTINATION `+amount`
 - ASSET→LIABILITY TRANSFER: SOURCE `-amount`, DESTINATION `-amount`
-- LIABILITY source와 REFUND는 후속 Slice까지 생성하지 않는다.
+- LIABILITY source는 후속 Slice까지 생성하지 않는다. REFUND는 Pre-Statistics Correctness Gate의 전용 original 하위 resource에서만 생성한다.
 - Transaction과 Entry insert/update는 하나의 Spring transaction이다. 참조 검증이 실패하면 Transaction과 모든 Entry가 남지 않는다.
 - 논리삭제는 Transaction의 `deleted_at/deleted_by`를 기록하고 Entry는 검산 근거로 보존한다. 잔액 query는 삭제된 Transaction의 Entry를 제외한다.
+
+## Refund 동시성 및 lineage
+
+- original Transaction row에 `PESSIMISTIC_WRITE` lock을 획득한 뒤 같은 original의 active REFUND amount 합을 읽는다.
+- `0 < refund.amount <= original.amount - activeRefundTotal`일 때만 저장한다.
+- Refund Transaction과 반대 부호 PRIMARY Entry는 하나의 Spring transaction에서 원자 저장한다.
+- Refund 삭제도 original lock을 획득해 create/delete race를 같은 순서로 직렬화한다.
+- active Refund가 있는 original의 금융 필드 변경과 logical delete는 차단한다.
+- 누적 합계 cache column이나 별도 materialized aggregate를 두지 않는다.
