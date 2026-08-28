@@ -1,3 +1,4 @@
+import type { Ref } from 'react'
 import type { MarriageGoalView } from './ledgerApi.ts'
 
 export type GoalViewState =
@@ -14,11 +15,13 @@ export function MarriageGoalCard({
   onRetry,
   onOpen,
   onCreate,
+  createSuccessFocusRef,
 }: {
   state: GoalViewState
   onRetry: () => void
   onOpen: (opener: HTMLElement) => void
   onCreate: (opener: HTMLElement) => void
+  createSuccessFocusRef: Ref<HTMLButtonElement>
 }) {
   return (
     <section
@@ -56,6 +59,7 @@ export function MarriageGoalCard({
         const visualRate = Math.min(Math.max(goal.achievementRate, 0), 100)
         return (
           <button
+            ref={createSuccessFocusRef}
             className="goal-card-button"
             type="button"
             onClick={(event) => onOpen(event.currentTarget)}

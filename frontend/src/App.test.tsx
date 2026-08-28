@@ -1153,15 +1153,51 @@ describe('App', () => {
     })
 
     releaseMutation()
-    expect(await screen.findByRole('button', { name: /우리 보금자리/ })).toBeInTheDocument()
+    const createdGoalCard = await screen.findByRole('button', { name: /우리 보금자리/ })
+    await waitFor(() => expect(createdGoalCard).toHaveFocus())
 
-    const editOpener = screen.getByRole('button', { name: /우리 보금자리/ })
-    fireEvent.click(editOpener)
+    fireEvent.click(createdGoalCard)
     await screen.findByRole('heading', { name: '결혼자금' })
     const editButton = screen.getByRole('button', { name: '수정' })
     fireEvent.click(editButton)
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(editButton).toHaveFocus())
+  })
+
+  it('moves focus to the Goal detail edit action after creating from the detail empty state', async () => {
+    useGoalUrl()
+    installLedgerRouter({ goal: null })
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: '결혼자금 목표 만들기' })
+    opener.focus()
+    fireEvent.click(opener)
+    const name = screen.getByRole('textbox', { name: '목표 이름' })
+    expect(name).toHaveFocus()
+    fireEvent.change(name, { target: { value: '상세에서 만든 목표' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+      target: { value: '80000000' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
+
+    const editButton = await screen.findByRole('button', { name: '수정' })
+    await waitFor(() => expect(editButton).toHaveFocus())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('restores the Calendar Goal create opener when the Sheet is cancelled', async () => {
+    useCalendarUrl()
+    installLedgerRouter({ goal: null })
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: '결혼자금 목표 만들기' })
+    opener.focus()
+    fireEvent.click(opener)
+    expect(screen.getByRole('textbox', { name: '목표 이름' })).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 
   it('keeps Goal create and stale edit inputs after stable server errors', async () => {
@@ -1245,6 +1281,29 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '선택한 Account 연결' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('다른 Goal에 먼저 연결됐어요')
     expect(failedChoice).toBeChecked()
+  })
+
+  it('restores the Account link opener when the Sheet is cancelled', async () => {
+    useGoalUrl()
+    installLedgerRouter({
+      goal: marriageGoal({
+        currentAmount: 0,
+        achievementRate: 0,
+        remainingAmount: 100_000_000,
+        linkedAccounts: [],
+        recentSavingsActivities: [],
+      }),
+    })
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: '계좌 연결' })
+    opener.focus()
+    fireEvent.click(opener)
+    expect(screen.getByRole('radio', { name: /비상금 통장/ })).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 
   it('clears stale Goal numbers while loading and restores Goal direct history state', async () => {

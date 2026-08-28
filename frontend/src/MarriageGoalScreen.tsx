@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type Ref, useState } from 'react'
 import type { GoalViewState } from './MarriageGoalCard.tsx'
 import type { MarriageGoalView } from './ledgerApi.ts'
 
@@ -71,6 +71,7 @@ export function MarriageGoalScreen({
   onEdit,
   onLink,
   onUnlink,
+  createSuccessFocusRef,
 }: {
   state: GoalViewState
   timezone: string
@@ -80,6 +81,7 @@ export function MarriageGoalScreen({
   onEdit: (opener: HTMLElement) => void
   onLink: (opener: HTMLElement) => void
   onUnlink: (accountId: number) => Promise<void>
+  createSuccessFocusRef: Ref<HTMLButtonElement>
 }) {
   const [confirmingUnlink, setConfirmingUnlink] = useState<number | null>(null)
   const [unlinking, setUnlinking] = useState(false)
@@ -136,7 +138,13 @@ export function MarriageGoalScreen({
                   <p className="section-kicker">Actual Ledger</p>
                   <h3>{goal.name}</h3>
                 </div>
-                <button type="button" onClick={(event) => onEdit(event.currentTarget)}>수정</button>
+                <button
+                  ref={createSuccessFocusRef}
+                  type="button"
+                  onClick={(event) => onEdit(event.currentTarget)}
+                >
+                  수정
+                </button>
               </div>
               <strong>{formatWon(goal.currentAmount)}</strong>
               <span>/ {formatWon(goal.targetAmount)}</span>

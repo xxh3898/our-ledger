@@ -687,6 +687,10 @@ function CalendarWorkspace({
   const refundOriginalIdRef = useRef<number | null>(null)
   const settingsButtonRef = useRef<HTMLElement | null>(null)
   const goalOpenerRef = useRef<HTMLElement | null>(null)
+  const calendarGoalFocusRef = useRef<HTMLButtonElement | null>(null)
+  const goalDetailFocusRef = useRef<HTMLButtonElement | null>(null)
+  const goalCreateContextRef = useRef<'calendar' | 'goal' | null>(null)
+  const goalCreateSucceededRef = useRef(false)
 
   const filter = useMemo(() => calendarFilter(navigation), [navigation])
   const filterKey = `${filter.scope}:${filter.ownerMemberId ?? ''}`
@@ -727,8 +731,22 @@ function CalendarWorkspace({
   }, [finishClosingRefund])
 
   const finishClosingGoalSheet = useCallback(() => {
+    const opener = goalOpenerRef.current
+    const createContext = goalCreateContextRef.current
+    const createSucceeded = goalCreateSucceededRef.current
     setGoalSheet(null)
-    window.setTimeout(() => goalOpenerRef.current?.focus(), 0)
+    window.setTimeout(() => {
+      if (opener?.isConnected) {
+        opener.focus()
+      } else if (createSucceeded) {
+        const fallback = createContext === 'calendar'
+          ? calendarGoalFocusRef.current
+          : goalDetailFocusRef.current
+        fallback?.focus()
+      }
+      goalCreateContextRef.current = null
+      goalCreateSucceededRef.current = false
+    }, 0)
   }, [])
 
   const requestCloseGoalSheet = useCallback(() => {
@@ -903,6 +921,11 @@ function CalendarWorkspace({
 
   function openGoalSheet(mode: 'create' | 'edit' | 'link', opener: HTMLElement) {
     goalOpenerRef.current = opener
+    goalCreateContextRef.current = mode === 'create'
+      && (activeScreen === 'calendar' || activeScreen === 'goal')
+      ? activeScreen
+      : null
+    goalCreateSucceededRef.current = false
     window.history.pushState(
       { ...window.history.state, ourLedgerSheet: 'goal' },
       '',
@@ -956,6 +979,7 @@ function CalendarWorkspace({
   }
 
   function acceptGoalView(view: MarriageGoalView) {
+    if (goalSheet === 'create') goalCreateSucceededRef.current = true
     setGoalState({ status: 'ready', data: view })
   }
 
@@ -990,6 +1014,7 @@ function CalendarWorkspace({
               onRetry={() => setGoalRevision((current) => current + 1)}
               onOpen={() => navigate('goal')}
               onCreate={(opener) => openGoalSheet('create', opener)}
+              createSuccessFocusRef={calendarGoalFocusRef}
             />
             <ScopeSelector
               user={user}
@@ -1026,6 +1051,7 @@ function CalendarWorkspace({
             onEdit={(opener) => openGoalSheet('edit', opener)}
             onLink={(opener) => openGoalSheet('link', opener)}
             onUnlink={unlinkGoalAccount}
+            createSuccessFocusRef={goalDetailFocusRef}
           />
         ) : activeScreen === 'budget' ? (
           <BudgetScreen
