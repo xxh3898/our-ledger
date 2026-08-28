@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.2
+version: 0.3
 last_updated: 2026-08-28
 related:
   - 01-product/user-flows.md
@@ -14,7 +14,7 @@ related:
 
 ## 상태와 원칙
 
-이 문서는 Slice 4가 구현할 Couple-first Home/Calendar의 활성 디자인 계약이다. 현재 Slice 3 기능 panel에 이 화면이 구현됐다는 뜻은 아니다.
+이 문서는 Slice 4에서 구현한 Couple-first Home/Calendar의 활성 디자인 계약이다. 월 read model, URL 상태, Scope, 선택일 목록, Quick Entry 진입, 설정 진입과 비활성 하단 tab까지 구현됐다. production 고양이 illustration과 Goal 실제 값은 각각 별도 asset 작업과 Slice 8 범위다.
 
 - 한 viewport에 모든 내용을 압축하지 않고 하나의 자연스러운 세로 page scroll을 사용한다.
 - 본문 안에 별도의 vertical scroll container를 만들지 않는다.
@@ -69,6 +69,8 @@ related:
 - Goal 값은 연결된 실제 Account와 Transaction에서 파생하며 Home에서 별도 기여금 입력을 제공하지 않는다.
 - Goal이 없거나 연결 Account가 없을 때는 임의 금액을 만들지 않고 설정 가능한 empty state를 제공한다.
 
+Slice 4에서는 Goal backend와 계산을 선행하지 않는다. 따라서 Home에는 실제 금액·달성률·action을 만들지 않는 shell/empty 안내만 두고, 위 실제 값과 상세 이동은 Slice 8에서 활성화한다.
+
 ## Scope filter
 
 - `전체`, 각 실제 Member 이름, `공동`을 명시한다.
@@ -119,3 +121,13 @@ related:
 ## 접근성
 
 달력은 시각적 grid뿐 아니라 날짜 button의 접근 가능한 이름, 현재 날짜, 선택 상태를 제공한다. 고양이·Paw·색상은 실제 Member 이름, 거래 유형, 무지출 상태 text를 대체하지 않는다. keyboard focus 순서는 page의 시각 순서와 일치해야 한다.
+
+## Slice 4 구현 상태
+
+- Couple header는 API의 실제 Member 이름과 현재 사용자 `나` 표시, CSS avatar placeholder를 사용한다.
+- 월 요약·날짜별 상태·선택일 목록은 같은 ALL/PERSONAL/SHARED 조건으로 각각 독립 로딩하며 이전 조건 값을 남기지 않는다.
+- 무지출 Paw는 Household timezone 기준 미래가 아닌 날짜에서 순소비가 0일 때 표시한다. 수입/이체만 있는 날도 포함한다.
+- `month/view/date/memberId` URL을 정규화하고 `popstate`와 동기화한다. 월 이동 시 선택 일자를 새 월 마지막 날까지 clamp한다.
+- 중앙 Paw FAB는 선택 날짜를 Quick Entry에 전달하지만 Calendar scope를 입력 기본값으로 복사하지 않는다.
+- 예산·통계·자산 tab은 `준비 중`과 disabled 상태로만 표시하며 가짜 화면으로 이동하지 않는다.
+- 계좌·Category 관리는 상단 설정 Sheet에서 계속 접근할 수 있다.

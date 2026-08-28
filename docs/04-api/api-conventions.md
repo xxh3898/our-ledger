@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.6
+version: 0.7
 last_updated: 2026-08-28
 related:
   - 04-api/error-contract.md
@@ -29,6 +29,7 @@ related:
 /api/v1/category-groups
 /api/v1/categories
 /api/v1/transactions
+/api/v1/calendar/month
 /api/v1/budgets
 /api/v1/recurring-transactions
 /api/v1/goals
@@ -136,6 +137,39 @@ response는 nullable owner/payer/Category, `version`, canonical `entries[]`를 �
 | `accountId` | PRIMARY/SOURCE/DESTINATION 중 일치하는 Entry Account ID |
 
 `from > to`는 `400 INVALID_REQUEST`다. 논리삭제 Transaction은 목록과 detail에서 제외한다. 실제 request/response는 `LedgerApiDocsTest`가 생성하는 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*`, `ledger-card-expense-*`, `ledger-transfer-*` snippet으로 검증한다.
+
+### Calendar month read model
+
+```text
+GET /api/v1/calendar/month?month=2026-08
+GET /api/v1/calendar/month?month=2026-08&scope=PERSONAL&ownerMemberId=100
+GET /api/v1/calendar/month?month=2026-08&scope=SHARED
+```
+
+`month`는 필수 `YYYY-MM`이다. scope와 owner가 모두 없으면 ALL, `PERSONAL`은 현재 Household의 `ownerMemberId`가 필수, `SHARED`는 owner가 없어야 한다. scope 없는 owner 또는 SHARED owner는 `400 INVALID_REQUEST`이고 다른 Household Member는 존재를 숨기는 `404 RESOURCE_NOT_FOUND`다. request에 `householdId`를 받지 않는다.
+
+```json
+{
+  "month": "2026-08",
+  "timezone": "Asia/Seoul",
+  "summary": {
+    "netSpendingAmount": 12000,
+    "previousMonthNetSpendingAmount": 5000,
+    "differenceAmount": 7000
+  },
+  "days": [
+    {
+      "date": "2026-08-01",
+      "transactionCount": 1,
+      "netSpendingAmount": 12000
+    }
+  ]
+}
+```
+
+현재월과 이전월은 같은 Household timezone과 scope로 계산한다. 순소비는 `NORMAL EXPENSE - REFUND EXPENSE`이며 INCOME, TRANSFER, 논리삭제 거래는 0이다. TRANSFER는 ALL의 `transactionCount`에는 포함하지만 PERSONAL/SHARED에는 포함하지 않는다. `days`는 요청 월 안에서 거래가 존재하는 날짜만 반환하고 Calendar가 나머지 날짜를 0건·0원으로 채운다. 값은 Transaction에서 매번 파생하며 별도 집계 table이나 cache를 사용하지 않는다.
+
+선택일 목록은 기존 `GET /api/v1/transactions?from={date}&to={date}`에 같은 scope/owner를 적용한다. 실제 월 request/response는 `LedgerApiDocsTest`의 `ledger-calendar-month` snippet으로 검증한다.
 
 ## 인증 상태와 CSRF
 

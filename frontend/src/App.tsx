@@ -1,25 +1,29 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { QuickEntrySheet } from './QuickEntrySheet.tsx'
+import { SettingsSheet } from './SettingsSheet.tsx'
 import {
-  type Account,
-  type Category,
-  type CategoryGroup,
+  type CalendarNavigationState,
+  calendarDates,
+  calendarFilter,
+  moveCalendarMonth,
+  normalizeCalendarState,
+  serializeCalendarState,
+} from './calendarState.ts'
+import { todayInTimeZone } from './dateTime.ts'
+import {
+  type CalendarMonth,
   type CurrentHousehold,
   type CurrentUser,
   type LedgerTransaction,
   LedgerApiError,
-  archiveAccount,
-  archiveCategory,
-  archiveCategoryGroup,
-  createAccount,
-  createCategory,
-  createCategoryGroup,
-  createTransaction,
   deleteTransaction,
+  loadCalendarMonth,
   loadCurrentUser,
-  loadLedgerData,
-  updateTransaction,
+  loadDayTransactions,
+  loadReferenceData,
 } from './ledgerApi.ts'
+import { entryByRole } from './transactionUtils.ts'
 
 type ViewState =
   | { status: 'loading' }
@@ -28,60 +32,12 @@ type ViewState =
   | { status: 'access-denied'; code?: string }
   | { status: 'error' }
 
-type LedgerData = Awaited<ReturnType<typeof loadLedgerData>>
+type AsyncState<T> =
+  | { status: 'loading' }
+  | { status: 'ready'; data: T }
+  | { status: 'error'; message: string }
 
-function zonedParts(value: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(value)
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((item) => item.type === type)?.value)
-  return {
-    year: part('year'),
-    month: part('month'),
-    day: part('day'),
-    hour: part('hour'),
-    minute: part('minute'),
-    second: part('second'),
-  }
-}
-
-function dateInTimeZone(value: Date, timeZone: string) {
-  const { year, month, day } = zonedParts(value, timeZone)
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function noonInTimeZone(date: string, timeZone: string) {
-  const [year, month, day] = date.split('-').map(Number)
-  const localNoon = Date.UTC(year, month - 1, day, 12)
-  let instant = localNoon
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parts = zonedParts(new Date(instant), timeZone)
-    const representedAsUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
-    )
-    instant = localNoon - (representedAsUtc - instant)
-  }
-
-  return new Date(instant).toISOString()
-}
-
-function today(timeZone: string) {
-  return dateInTimeZone(new Date(), timeZone)
-}
+type ReferenceData = Awaited<ReturnType<typeof loadReferenceData>>
 
 function errorMessage(error: unknown) {
   if (error instanceof LedgerApiError) return error.message
@@ -89,47 +45,27 @@ function errorMessage(error: unknown) {
   return '요청을 처리하지 못했습니다.'
 }
 
-function IdentityCard({ user }: { user: CurrentUser }) {
-  return (
-    <article className="identity-card" aria-label="현재 사용자와 Household">
-      <div className="avatar" aria-hidden="true">
-        {user.displayName.slice(0, 1)}
-      </div>
-      <div className="identity-copy">
-        <p>현재 사용자</p>
-        <h2>{user.displayName}</h2>
-        <span>{user.email}</span>
-      </div>
-      <dl>
-        <div>
-          <dt>Household</dt>
-          <dd>{user.householdName}</dd>
-        </div>
-        <div>
-          <dt>Role</dt>
-          <dd>{user.role}</dd>
-        </div>
-      </dl>
-    </article>
-  )
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function AccessState({ state }: { state: ViewState }) {
   if (state.status === 'loading') {
     return (
-      <div className="identity-state" role="status">
-        <span className="status-dot status-dot--loading" aria-hidden="true" />
-        현재 사용자와 Household를 확인하고 있습니다.
-      </div>
+      <main className="access-state" role="status">
+        <span className="loading-paw" aria-hidden="true">🐾</span>
+        <strong>우리의 장부를 열고 있어요.</strong>
+        <span>현재 사용자와 Household를 확인합니다.</span>
+      </main>
     )
   }
 
   if (state.status === 'authentication-required') {
     return (
-      <div className="identity-state identity-state--error" role="alert">
+      <main className="access-state access-state--error" role="alert">
         <strong>인증이 필요합니다.</strong>
         <span>Cloudflare Access 인증 후 다시 열어 주세요.</span>
-      </div>
+      </main>
     )
   }
 
@@ -137,7 +73,7 @@ function AccessState({ state }: { state: ViewState }) {
     const isUnregistered = state.code === 'USER_NOT_REGISTERED'
     const isDisabled = state.code === 'USER_DISABLED'
     return (
-      <div className="identity-state identity-state--error" role="alert">
+      <main className="access-state access-state--error" role="alert">
         <strong>
           {isUnregistered
             ? '등록된 사용자가 아닙니다.'
@@ -146,802 +82,380 @@ function AccessState({ state }: { state: ViewState }) {
               : 'Household 접근 권한이 없습니다.'}
         </strong>
         <span>내부 User와 Household membership을 확인해 주세요.</span>
-      </div>
+      </main>
     )
   }
 
-  if (state.status === 'error') {
-    return (
-      <div className="identity-state identity-state--error" role="alert">
-        <strong>현재 정보를 불러오지 못했습니다.</strong>
-        <span>잠시 뒤 다시 시도해 주세요.</span>
-      </div>
-    )
-  }
-
-  return <IdentityCard user={state.user} />
+  return (
+    <main className="access-state access-state--error" role="alert">
+      <strong>현재 정보를 불러오지 못했습니다.</strong>
+      <span>잠시 뒤 다시 시도해 주세요.</span>
+    </main>
+  )
 }
 
-function AccountSetup({
-  currentUserId,
+function formatWon(amount: number) {
+  return `${amount.toLocaleString('ko-KR')}원`
+}
+
+function differenceCopy(summary: CalendarMonth['summary']) {
+  if (summary.differenceAmount === 0) return '지난달과 같아요.'
+  const amount = formatWon(Math.abs(summary.differenceAmount))
+  return summary.differenceAmount > 0
+    ? `지난달보다 ${amount} 더 썼어요.`
+    : `지난달보다 ${amount} 덜 썼어요.`
+}
+
+function viewLabel(navigation: CalendarNavigationState, household: CurrentHousehold) {
+  if (navigation.view === 'shared') return '공동'
+  if (navigation.view === 'member') {
+    return household.members.find((member) => member.memberId === navigation.memberId)
+      ?.displayName ?? '개인'
+  }
+  return '우리 전체'
+}
+
+function CoupleHeader({
+  user,
   household,
-  accounts,
-  onChanged,
+  onOpenSettings,
 }: {
-  currentUserId: number
+  user: CurrentUser
   household: CurrentHousehold
-  accounts: Account[]
-  onChanged: () => Promise<void>
+  onOpenSettings: () => void
 }) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<Account['type']>('CHECKING')
-  const [nature, setNature] = useState<Account['nature']>('ASSET')
-  const [ownership, setOwnership] = useState<Account['ownership']>('PERSONAL')
-  const [ownerMemberId, setOwnerMemberId] = useState(
-    household.members.find((member) => member.userId === currentUserId)?.memberId.toString() ?? '',
-  )
-  const [openingBalance, setOpeningBalance] = useState('0')
-  const [openingBalanceAsOf, setOpeningBalanceAsOf] = useState(
-    today(household.timezone),
-  )
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    setPending(true)
-    setError(null)
-    try {
-      await createAccount({
-        name,
-        institution: null,
-        type,
-        nature,
-        ownership,
-        ownerMemberId: ownership === 'PERSONAL' ? Number(ownerMemberId) : null,
-        openingBalance: Number(openingBalance),
-        openingBalanceAsOf,
-        currency: 'KRW',
-        lastFour: null,
-        savingsEnabled: type === 'SAVINGS',
-        sortOrder: accounts.length,
-      })
-      setName('')
-      setOpeningBalance('0')
-      await onChanged()
-    } catch (submitError) {
-      setError(errorMessage(submitError))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  async function archive(account: Account) {
-    setPending(true)
-    setError(null)
-    try {
-      await archiveAccount(account)
-      await onChanged()
-    } catch (archiveError) {
-      setError(errorMessage(archiveError))
-    } finally {
-      setPending(false)
-    }
-  }
-
   return (
-    <section className="panel" aria-labelledby="accounts-title">
-      <div className="panel-heading">
-        <div>
-          <p className="section-kicker">Account</p>
-          <h2 id="accounts-title">계좌 설정</h2>
-        </div>
-        <span className="count-badge">{accounts.length}</span>
+    <header className="couple-header">
+      <div>
+        <p className="brand-kicker">둘이 쓰는 하나의 생활 기록</p>
+        <h1>우리의 장부</h1>
+        <p className="household-meta">
+          {household.name} · {user.email} · {user.role}
+        </p>
       </div>
-      <form className="compact-form" onSubmit={submit}>
-        <label>
-          계좌 이름
-          <input required value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label>
-          유형
-          <select
-            value={type}
-            onChange={(event) => {
-              const nextType = event.target.value as Account['type']
-              setType(nextType)
-              setNature(nextType === 'CREDIT_CARD' ? 'LIABILITY' : 'ASSET')
-            }}
-          >
-            <option value="CHECKING">입출금</option>
-            <option value="SAVINGS">저축</option>
-            <option value="CASH">현금</option>
-            <option value="CREDIT_CARD">신용카드</option>
-            <option value="OTHER">기타</option>
-          </select>
-        </label>
-        <label>
-          소유
-          <select
-            value={ownership}
-            onChange={(event) => setOwnership(event.target.value as Account['ownership'])}
-          >
-            <option value="PERSONAL">개인</option>
-            <option value="SHARED">공동</option>
-          </select>
-        </label>
-        {ownership === 'PERSONAL' && (
-          <label>
-            소유자
-            <select
-              required
-              value={ownerMemberId}
-              onChange={(event) => setOwnerMemberId(event.target.value)}
-            >
-              {household.members.map((member) => (
-                <option key={member.memberId} value={member.memberId}>
-                  {member.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label>
-          기초 잔액
-          <input
-            inputMode="numeric"
-            type="number"
-            value={openingBalance}
-            onChange={(event) => setOpeningBalance(event.target.value)}
-          />
-        </label>
-        <label>
-          잔액 기준일
-          <input
-            required
-            type="date"
-            value={openingBalanceAsOf}
-            onChange={(event) => setOpeningBalanceAsOf(event.target.value)}
-          />
-        </label>
-        {type === 'CREDIT_CARD' && (
-          <p className="field-hint">신용카드는 LIABILITY로 기록하며 저축 Account로 사용할 수 없습니다.</p>
-        )}
-        <input type="hidden" value={nature} readOnly />
-        <button className="primary-button" type="submit" disabled={pending}>
-          {pending ? '저장 중…' : '계좌 추가'}
-        </button>
-      </form>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <ul className="reference-list">
-        {accounts.map((account) => (
-          <li key={account.id}>
-            <div>
-              <strong>{account.name}</strong>
-              <span>{account.ownership === 'SHARED' ? '공동' : account.owner?.displayName}</span>
-            </div>
-            <div className="reference-actions">
-              <b>{account.currentBalance.toLocaleString('ko-KR')}원</b>
-              <button type="button" disabled={pending} onClick={() => void archive(account)}>
-                보관
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-function CategorySetup({
-  groups,
-  categories,
-  onChanged,
-}: {
-  groups: CategoryGroup[]
-  categories: Category[]
-  onChanged: () => Promise<void>
-}) {
-  const [groupName, setGroupName] = useState('')
-  const [groupType, setGroupType] = useState<CategoryGroup['type']>('EXPENSE')
-  const [categoryName, setCategoryName] = useState('')
-  const [categoryType, setCategoryType] = useState<Category['type']>('EXPENSE')
-  const [groupId, setGroupId] = useState('')
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const matchingGroups = groups.filter((group) => group.type === categoryType)
-
-  async function submitGroup(event: FormEvent) {
-    event.preventDefault()
-    setPending(true)
-    setError(null)
-    try {
-      await createCategoryGroup({ name: groupName, type: groupType, sortOrder: groups.length })
-      setGroupName('')
-      await onChanged()
-    } catch (submitError) {
-      setError(errorMessage(submitError))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  async function submitCategory(event: FormEvent) {
-    event.preventDefault()
-    setPending(true)
-    setError(null)
-    try {
-      await createCategory({
-        groupId: groupId ? Number(groupId) : null,
-        name: categoryName,
-        type: categoryType,
-        iconKey: null,
-        colorKey: null,
-        sortOrder: categories.filter((category) => category.type === categoryType).length,
-      })
-      setCategoryName('')
-      await onChanged()
-    } catch (submitError) {
-      setError(errorMessage(submitError))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  async function archiveReference(reference: CategoryGroup | Category) {
-    setPending(true)
-    setError(null)
-    try {
-      if ('group' in reference) {
-        await archiveCategory(reference)
-      } else {
-        await archiveCategoryGroup(reference)
-      }
-      await onChanged()
-    } catch (archiveError) {
-      setError(errorMessage(archiveError))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  return (
-    <section className="panel" aria-labelledby="categories-title">
-      <div className="panel-heading">
-        <div>
-          <p className="section-kicker">Category</p>
-          <h2 id="categories-title">분류 설정</h2>
-        </div>
-        <span className="count-badge">{categories.length}</span>
-      </div>
-      <form className="compact-form compact-form--row" onSubmit={submitGroup}>
-        <label>
-          Group 이름
-          <input required value={groupName} onChange={(event) => setGroupName(event.target.value)} />
-        </label>
-        <label>
-          Group 유형
-          <select
-            value={groupType}
-            onChange={(event) => setGroupType(event.target.value as CategoryGroup['type'])}
-          >
-            <option value="EXPENSE">지출</option>
-            <option value="INCOME">수입</option>
-          </select>
-        </label>
-        <button type="submit" disabled={pending}>Group 추가</button>
-      </form>
-      <form className="compact-form" onSubmit={submitCategory}>
-        <label>
-          Category 이름
-          <input
-            required
-            value={categoryName}
-            onChange={(event) => setCategoryName(event.target.value)}
-          />
-        </label>
-        <label>
-          Category 유형
-          <select
-            value={categoryType}
-            onChange={(event) => {
-              setCategoryType(event.target.value as Category['type'])
-              setGroupId('')
-            }}
-          >
-            <option value="EXPENSE">지출</option>
-            <option value="INCOME">수입</option>
-          </select>
-        </label>
-        <label>
-          Group
-          <select value={groupId} onChange={(event) => setGroupId(event.target.value)}>
-            <option value="">그룹 없음</option>
-            {matchingGroups.map((group) => (
-              <option key={group.id} value={group.id}>{group.name}</option>
-            ))}
-          </select>
-        </label>
-        <button className="primary-button" type="submit" disabled={pending}>
-          {pending ? '저장 중…' : 'Category 추가'}
-        </button>
-      </form>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <ul className="reference-list">
-        {groups.map((group) => (
-          <li key={`group-${group.id}`}>
-            <div><strong>{group.name}</strong><span>{group.type} Group</span></div>
-            <button type="button" disabled={pending} onClick={() => void archiveReference(group)}>
-              보관
-            </button>
-          </li>
-        ))}
-        {categories.map((category) => (
-          <li key={`category-${category.id}`}>
-            <div>
-              <strong>{category.name}</strong>
-              <span>{category.group?.name ?? '그룹 없음'} · {category.type}</span>
-            </div>
-            <button type="button" disabled={pending} onClick={() => void archiveReference(category)}>
-              보관
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-type TransactionFormState = {
-  type: LedgerTransaction['type']
-  amount: string
-  scope: Exclude<LedgerTransaction['scope'], null>
-  ownerMemberId: string
-  payerMemberId: string
-  categoryId: string
-  accountId: string
-  sourceAccountId: string
-  destinationAccountId: string
-  occurredOn: string
-  memo: string
-}
-
-function isPrimaryAccountForType(type: LedgerTransaction['type'], account: Account) {
-  if (account.archived || type === 'TRANSFER') return false
-  if (type === 'INCOME') {
-    return account.nature === 'ASSET' && account.type !== 'CREDIT_CARD'
-  }
-  return (account.nature === 'ASSET' && account.type !== 'CREDIT_CARD')
-    || (account.type === 'CREDIT_CARD' && account.nature === 'LIABILITY')
-}
-
-function entryByRole(
-  transaction: LedgerTransaction,
-  role: LedgerTransaction['entries'][number]['role'],
-) {
-  return transaction.entries.find((entry) => entry.role === role)
-}
-
-function initialTransactionForm(
-  currentUserId: number,
-  household: CurrentHousehold,
-  accounts: Account[],
-  categories: Category[],
-): TransactionFormState {
-  const currentMemberId = household.members
-    .find((member) => member.userId === currentUserId)
-    ?.memberId.toString() ?? ''
-  const sourceAccountId = accounts
-    .find((account) => !account.archived && account.nature === 'ASSET')
-    ?.id.toString() ?? ''
-  return {
-    type: 'EXPENSE',
-    amount: '',
-    scope: 'PERSONAL',
-    ownerMemberId: currentMemberId,
-    payerMemberId: currentMemberId,
-    categoryId: categories.find((category) => category.type === 'EXPENSE')?.id.toString() ?? '',
-    accountId: accounts.find((account) => isPrimaryAccountForType('EXPENSE', account))
-      ?.id.toString() ?? '',
-    sourceAccountId,
-    destinationAccountId: accounts
-      .find((account) => !account.archived && account.id.toString() !== sourceAccountId)
-      ?.id.toString() ?? '',
-    occurredOn: today(household.timezone),
-    memo: '',
-  }
-}
-
-function transactionToForm(
-  transaction: LedgerTransaction,
-  timeZone: string,
-): TransactionFormState {
-  return {
-    type: transaction.type,
-    amount: transaction.amount.toString(),
-    scope: transaction.scope ?? 'PERSONAL',
-    ownerMemberId: transaction.owner?.memberId.toString() ?? '',
-    payerMemberId: transaction.payer?.memberId.toString() ?? '',
-    categoryId: transaction.category?.id.toString() ?? '',
-    accountId: entryByRole(transaction, 'PRIMARY')?.account.id.toString() ?? '',
-    sourceAccountId: entryByRole(transaction, 'SOURCE')?.account.id.toString() ?? '',
-    destinationAccountId: entryByRole(transaction, 'DESTINATION')?.account.id.toString() ?? '',
-    occurredOn: dateInTimeZone(new Date(transaction.occurredAt), timeZone),
-    memo: transaction.memo ?? '',
-  }
-}
-
-function QuickEntry({
-  currentUserId,
-  household,
-  accounts,
-  categories,
-  editing,
-  onCancelEdit,
-  onChanged,
-}: {
-  currentUserId: number
-  household: CurrentHousehold
-  accounts: Account[]
-  categories: Category[]
-  editing: LedgerTransaction | null
-  onCancelEdit: () => void
-  onChanged: () => Promise<void>
-}) {
-  const [form, setForm] = useState(() =>
-    initialTransactionForm(currentUserId, household, accounts, categories))
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (editing) {
-      setForm(transactionToForm(editing, household.timezone))
-      setError(null)
-    }
-  }, [editing, household.timezone])
-
-  const matchingCategories = categories.filter((category) => category.type === form.type)
-  const primaryAccounts = accounts.filter((account) => isPrimaryAccountForType(form.type, account))
-  const sourceAccounts = accounts.filter(
-    (account) => !account.archived
-      && account.nature === 'ASSET'
-      && account.type !== 'CREDIT_CARD',
-  )
-  const destinationAccounts = accounts.filter(
-    (account) => !account.archived && account.id.toString() !== form.sourceAccountId,
-  )
-
-  function change<K extends keyof TransactionFormState>(key: K, value: TransactionFormState[K]) {
-    setForm((current) => ({ ...current, [key]: value }))
-  }
-
-  function selectType(type: LedgerTransaction['type']) {
-    const nextSource = sourceAccounts[0]?.id.toString() ?? ''
-    const currentMemberId = household.members
-      .find((member) => member.userId === currentUserId)
-      ?.memberId.toString() ?? ''
-    setForm((current) => ({
-      ...current,
-      type,
-      categoryId: type === 'TRANSFER'
-        ? ''
-        : categories.find((category) => category.type === type)?.id.toString() ?? '',
-      accountId: type === 'TRANSFER'
-        ? ''
-        : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
-      sourceAccountId: type === 'TRANSFER' ? nextSource : '',
-      destinationAccountId: type === 'TRANSFER'
-        ? accounts.find((account) => !account.archived && account.id.toString() !== nextSource)
-          ?.id.toString() ?? ''
-        : '',
-      ownerMemberId: type === 'TRANSFER'
-        ? current.ownerMemberId
-        : current.ownerMemberId || currentMemberId,
-      payerMemberId: type === 'EXPENSE'
-        ? current.payerMemberId || currentMemberId
-        : '',
-    }))
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    setPending(true)
-    setError(null)
-    try {
-      if (!form.amount) {
-        throw new Error('금액을 확인해 주세요.')
-      }
-      if (form.type === 'TRANSFER') {
-        if (!form.sourceAccountId || !form.destinationAccountId) {
-          throw new Error('출금 Account와 입금 Account를 확인해 주세요.')
-        }
-        if (form.sourceAccountId === form.destinationAccountId) {
-          throw new Error('출금 Account와 입금 Account는 달라야 합니다.')
-        }
-      } else if (!form.categoryId || !form.accountId) {
-        throw new Error('Category와 Account를 확인해 주세요.')
-      }
-      const input = {
-        type: form.type,
-        amount: Number(form.amount),
-        scope: form.type === 'TRANSFER' ? null : form.scope,
-        ownerMemberId:
-          form.type !== 'TRANSFER' && form.scope === 'PERSONAL'
-            ? Number(form.ownerMemberId)
-            : null,
-        payerMemberId:
-          form.type === 'EXPENSE' && form.payerMemberId ? Number(form.payerMemberId) : null,
-        categoryId: form.type === 'TRANSFER' ? null : Number(form.categoryId),
-        accountId: form.type === 'TRANSFER' ? null : Number(form.accountId),
-        sourceAccountId: form.type === 'TRANSFER' ? Number(form.sourceAccountId) : null,
-        destinationAccountId:
-          form.type === 'TRANSFER' ? Number(form.destinationAccountId) : null,
-        occurredAt: noonInTimeZone(form.occurredOn, household.timezone),
-        memo: form.memo.trim() || null,
-        adjustmentType: 'NORMAL' as const,
-        reversesTransactionId: null,
-      }
-      if (editing) {
-        await updateTransaction(editing.id, editing.version, input)
-      } else {
-        await createTransaction(input)
-      }
-      setForm(initialTransactionForm(currentUserId, household, accounts, categories))
-      onCancelEdit()
-      await onChanged()
-    } catch (submitError) {
-      setError(errorMessage(submitError))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  return (
-    <section className="panel quick-entry" aria-labelledby="quick-entry-title">
-      <div className="panel-heading">
-        <div>
-          <p className="section-kicker">Quick entry</p>
-          <h2 id="quick-entry-title">{editing ? '거래 수정' : '빠른 입력'}</h2>
-        </div>
-        {editing && <span className="count-badge">#{editing.id}</span>}
-      </div>
-      <form className="entry-form" onSubmit={submit}>
-        <div className="segmented-control" aria-label="거래 유형">
-          {(['EXPENSE', 'INCOME', 'TRANSFER'] as const).map((type) => (
-            <button
-              key={type}
-              type="button"
-              className={form.type === type ? 'is-active' : ''}
-              onClick={() => selectType(type)}
-            >
-              {type === 'EXPENSE' ? '지출' : type === 'INCOME' ? '수입' : '이체'}
-            </button>
+      <div className="couple-actions">
+        <ul className="member-avatars" aria-label="Household 구성원">
+          {household.members.map((member) => (
+            <li key={member.memberId}>
+              <span className="avatar-placeholder" aria-hidden="true">
+                {member.displayName.slice(0, 1)}
+              </span>
+              <span>
+                {member.displayName}
+                {member.userId === user.userId && <small>나</small>}
+              </span>
+            </li>
           ))}
+        </ul>
+        <button className="settings-button" type="button" onClick={onOpenSettings}>
+          설정
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function SpendingHero({
+  navigation,
+  household,
+  state,
+  onRetry,
+}: {
+  navigation: CalendarNavigationState
+  household: CurrentHousehold
+  state: AsyncState<CalendarMonth>
+  onRetry: () => void
+}) {
+  const monthNumber = Number(navigation.month.slice(5))
+  return (
+    <section
+      className="spending-hero"
+      aria-labelledby="spending-title"
+      aria-busy={state.status === 'loading'}
+    >
+      <p className="section-kicker">{viewLabel(navigation, household)} · {monthNumber}월</p>
+      <h2 id="spending-title">이번 달 우리가 쓴 돈</h2>
+      {state.status === 'loading' && (
+        <div className="summary-skeleton" role="status">월 소비를 계산하고 있어요.</div>
+      )}
+      {state.status === 'error' && (
+        <div className="inline-error" role="alert">
+          <span>{state.message}</span>
+          <button type="button" onClick={onRetry}>다시 불러오기</button>
         </div>
-        <label className="amount-field">
-          금액
-          <span><input
-            required
-            min="1"
-            inputMode="numeric"
-            type="number"
-            value={form.amount}
-            onChange={(event) => change('amount', event.target.value)}
-          /> 원</span>
-        </label>
-        {form.type !== 'TRANSFER' && (
-          <label>
-            범위
-            <select
-              value={form.scope}
-              onChange={(event) => change(
-                'scope',
-                event.target.value as TransactionFormState['scope'],
-              )}
-            >
-              <option value="PERSONAL">개인</option>
-              <option value="SHARED">공동</option>
-            </select>
-          </label>
-        )}
-        {form.type !== 'TRANSFER' && form.scope === 'PERSONAL' && (
-          <label>
-            Owner
-            <select
-              required
-              value={form.ownerMemberId}
-              onChange={(event) => change('ownerMemberId', event.target.value)}
-            >
-              {household.members.map((member) => (
-                <option key={member.memberId} value={member.memberId}>{member.displayName}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {form.type === 'EXPENSE' && (
-          <label>
-            Payer (선택)
-            <select
-              value={form.payerMemberId}
-              onChange={(event) => change('payerMemberId', event.target.value)}
-            >
-              <option value="">지정 안 함</option>
-              {household.members.map((member) => (
-                <option key={member.memberId} value={member.memberId}>{member.displayName}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {form.type !== 'TRANSFER' && (
-          <label>
-            Category
-            <select
-              required
-              value={form.categoryId}
-              onChange={(event) => change('categoryId', event.target.value)}
-            >
-              <option value="">선택</option>
-              {matchingCategories.map((category) => (
-                <option key={category.id} value={category.id}>{category.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {form.type !== 'TRANSFER' && (
-          <label>
-            Account
-            <select
-              required
-              value={form.accountId}
-              onChange={(event) => change('accountId', event.target.value)}
-            >
-              <option value="">선택</option>
-              {primaryAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {form.type === 'TRANSFER' && (
-          <label>
-            출금 Account
-            <select
-              required
-              value={form.sourceAccountId}
-              onChange={(event) => {
-                const sourceAccountId = event.target.value
-                setForm((current) => ({
-                  ...current,
-                  sourceAccountId,
-                  destinationAccountId: current.destinationAccountId === sourceAccountId
-                    ? accounts.find((account) =>
-                      !account.archived && account.id.toString() !== sourceAccountId,
-                    )?.id.toString() ?? ''
-                    : current.destinationAccountId,
-                }))
-              }}
-            >
-              <option value="">선택</option>
-              {sourceAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {form.type === 'TRANSFER' && (
-          <label>
-            입금 Account
-            <select
-              required
-              value={form.destinationAccountId}
-              onChange={(event) => change('destinationAccountId', event.target.value)}
-            >
-              <option value="">선택</option>
-              {destinationAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label>
-          날짜
-          <input
-            required
-            type="date"
-            value={form.occurredOn}
-            onChange={(event) => change('occurredOn', event.target.value)}
-          />
-        </label>
-        <label className="memo-field">
-          메모 (선택)
-          <input value={form.memo} onChange={(event) => change('memo', event.target.value)} />
-        </label>
-        <div className="form-actions">
-          {editing && <button type="button" onClick={onCancelEdit}>취소</button>}
-          <button className="primary-button" type="submit" disabled={pending}>
-            {pending ? '저장 중…' : editing ? '수정 저장' : '거래 저장'}
-          </button>
-        </div>
-      </form>
-      {error && <p className="form-error" role="alert">{error}</p>}
+      )}
+      {state.status === 'ready' && (
+        <>
+          <strong className="hero-amount">
+            {formatWon(state.data.summary.netSpendingAmount)}
+          </strong>
+          <p className="difference-copy">{differenceCopy(state.data.summary)}</p>
+        </>
+      )}
     </section>
   )
 }
 
-function TransactionList({
-  transactions,
-  timeZone,
-  onEdit,
-  onChanged,
+function MarriageGoalShell() {
+  return (
+    <section className="goal-shell" aria-labelledby="goal-title">
+      <div className="goal-paw" aria-hidden="true">♡</div>
+      <div>
+        <p className="section-kicker">Marriage Goal</p>
+        <h2 id="goal-title">둘의 다음 목표를 담을 자리</h2>
+        <p>목표 금액과 진행률은 Goal Slice에서 연결됩니다.</p>
+      </div>
+    </section>
+  )
+}
+
+function ScopeSelector({
+  user,
+  household,
+  navigation,
+  onChange,
 }: {
-  transactions: LedgerTransaction[]
-  timeZone: string
-  onEdit: (transaction: LedgerTransaction) => void
-  onChanged: () => Promise<void>
+  user: CurrentUser
+  household: CurrentHousehold
+  navigation: CalendarNavigationState
+  onChange: (state: CalendarNavigationState) => void
+}) {
+  return (
+    <nav className="scope-selector" aria-label="Calendar 보기 범위">
+      <button
+        type="button"
+        aria-pressed={navigation.view === 'all'}
+        onClick={() => onChange({ ...navigation, view: 'all', memberId: null })}
+      >
+        전체
+      </button>
+      {household.members.map((member) => (
+        <button
+          key={member.memberId}
+          type="button"
+          aria-pressed={navigation.view === 'member' && navigation.memberId === member.memberId}
+          onClick={() => onChange({
+            ...navigation,
+            view: 'member',
+            memberId: member.memberId,
+          })}
+        >
+          {member.displayName}{member.userId === user.userId ? ' · 나' : ''}
+        </button>
+      ))}
+      <button
+        type="button"
+        aria-pressed={navigation.view === 'shared'}
+        onClick={() => onChange({ ...navigation, view: 'shared', memberId: null })}
+      >
+        공동
+      </button>
+    </nav>
+  )
+}
+
+function MonthNavigation({
+  month,
+  onMove,
+}: {
+  month: string
+  onMove: (offset: number) => void
+}) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  return (
+    <div className="month-navigation">
+      <button type="button" aria-label="이전 달" onClick={() => onMove(-1)}>‹</button>
+      <h2>{year}년 {monthNumber}월</h2>
+      <button type="button" aria-label="다음 달" onClick={() => onMove(1)}>›</button>
+    </div>
+  )
+}
+
+function CalendarGrid({
+  household,
+  navigation,
+  state,
+  onSelect,
+}: {
+  household: CurrentHousehold
+  navigation: CalendarNavigationState
+  state: AsyncState<CalendarMonth>
+  onSelect: (date: string) => void
+}) {
+  const today = todayInTimeZone(household.timezone)
+  const dayMap = new Map(
+    state.status === 'ready' ? state.data.days.map((day) => [day.date, day]) : [],
+  )
+  const dates = calendarDates(navigation.month)
+
+  return (
+    <section className="calendar-card" aria-label={`${navigation.month} Calendar`}>
+      <div className="weekday-row" aria-hidden="true">
+        {['일', '월', '화', '수', '목', '금', '토'].map((weekday) => (
+          <span key={weekday}>{weekday}</span>
+        ))}
+      </div>
+      <div className="calendar-grid" aria-busy={state.status === 'loading'}>
+        {dates.map((date, index) => {
+          if (!date) return <span className="calendar-empty" key={`empty-${index}`} />
+          const day = dayMap.get(date)
+          const isFuture = date > today
+          const noSpend = state.status === 'ready'
+            && !isFuture
+            && (day?.netSpendingAmount ?? 0) === 0
+          const selected = navigation.date === date
+          const dayStatus = state.status === 'loading'
+            ? '날짜 정보 불러오는 중'
+            : state.status === 'error'
+              ? '날짜 정보 확인 실패'
+              : day
+                ? `거래 ${day.transactionCount}건`
+                : '거래 없음'
+          const label = [
+            `${Number(date.slice(-2))}일`,
+            date === today ? '오늘' : null,
+            dayStatus,
+            noSpend ? '무지출' : null,
+          ].filter(Boolean).join(', ')
+          return (
+            <button
+              key={date}
+              type="button"
+              className={[
+                'calendar-day',
+                selected ? 'is-selected' : '',
+                date === today ? 'is-today' : '',
+                isFuture ? 'is-future' : '',
+              ].filter(Boolean).join(' ')}
+              aria-label={label}
+              aria-pressed={selected}
+              aria-current={date === today ? 'date' : undefined}
+              onClick={() => onSelect(date)}
+            >
+              <time dateTime={date}>{Number(date.slice(-2))}</time>
+              <span className="day-markers">
+                {day && day.transactionCount > 0 && (
+                  <span className="transaction-count">{day.transactionCount}</span>
+                )}
+                {noSpend && <span className="no-spend-paw" aria-label="무지출">🐾</span>}
+              </span>
+              {day && day.netSpendingAmount !== 0 && (
+                <small>{day.netSpendingAmount.toLocaleString('ko-KR')}</small>
+              )}
+            </button>
+          )
+        })}
+      </div>
+      {state.status === 'loading' && (
+        <p className="calendar-status" role="status">새 범위의 달력을 불러오고 있어요.</p>
+      )}
+      {state.status === 'error' && (
+        <p className="calendar-status calendar-status--error" role="alert">
+          날짜별 소비를 표시하지 못했습니다.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function transactionTitle(transaction: LedgerTransaction) {
+  if (transaction.type === 'TRANSFER') return '계좌 이체'
+  if (transaction.adjustmentType === 'REFUND') {
+    return `${transaction.category?.name ?? '지출'} 환불`
+  }
+  return transaction.category?.name ?? (transaction.type === 'INCOME' ? '수입' : '지출')
+}
+
+function transactionAmount(transaction: LedgerTransaction) {
+  if (transaction.type === 'TRANSFER') return `↔ ${formatWon(transaction.amount)}`
+  if (transaction.type === 'INCOME' || transaction.adjustmentType === 'REFUND') {
+    return `+${formatWon(transaction.amount)}`
+  }
+  return `−${formatWon(transaction.amount)}`
+}
+
+function accountPath(transaction: LedgerTransaction) {
+  if (transaction.type === 'TRANSFER') {
+    return `${entryByRole(transaction, 'SOURCE')?.account.name ?? '출금 Account'} → ${entryByRole(transaction, 'DESTINATION')?.account.name ?? '입금 Account'}`
+  }
+  return entryByRole(transaction, 'PRIMARY')?.account.name ?? 'Account'
+}
+
+function SelectedDayTransactions({
+  date,
+  state,
+  onEdit,
+  onDeleted,
+}: {
+  date: string
+  state: AsyncState<LedgerTransaction[]>
+  onEdit: (transaction: LedgerTransaction, opener: HTMLElement) => void
+  onDeleted: () => void
 }) {
   const [deleting, setDeleting] = useState<number | null>(null)
-  const [expanded, setExpanded] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   async function remove(transaction: LedgerTransaction) {
     setDeleting(transaction.id)
-    setError(null)
+    setDeleteError(null)
     try {
       await deleteTransaction(transaction.id, transaction.version)
-      await onChanged()
-    } catch (deleteError) {
-      setError(errorMessage(deleteError))
+      onDeleted()
+    } catch (error) {
+      setDeleteError(errorMessage(error))
     } finally {
       setDeleting(null)
     }
   }
 
   return (
-    <section className="panel transaction-panel" aria-labelledby="transactions-title">
-      <div className="panel-heading">
+    <section className="selected-day" aria-labelledby="selected-day-title">
+      <div className="section-heading">
         <div>
-          <p className="section-kicker">Recent</p>
-          <h2 id="transactions-title">최근 거래</h2>
+          <p className="section-kicker">Selected Day</p>
+          <h2 id="selected-day-title">
+            {Number(date.slice(5, 7))}월 {Number(date.slice(8))}일의 기록
+          </h2>
         </div>
-        <span className="count-badge">{transactions.length}</span>
+        {state.status === 'ready' && <span className="count-badge">{state.data.length}</span>}
       </div>
-      {transactions.length === 0 ? (
-        <p className="empty-state">아직 거래가 없습니다. 첫 기록을 남겨 보세요.</p>
-      ) : (
+      {state.status === 'loading' && (
+        <p className="list-state" role="status">선택한 날짜의 거래를 불러오고 있어요.</p>
+      )}
+      {state.status === 'error' && (
+        <p className="list-state list-state--error" role="alert">{state.message}</p>
+      )}
+      {state.status === 'ready' && state.data.length === 0 && (
+        <p className="list-state">이 날짜에는 아직 거래가 없어요.</p>
+      )}
+      {state.status === 'ready' && state.data.length > 0 && (
         <ul className="transaction-list">
-          {transactions.map((transaction) => (
+          {state.data.map((transaction) => (
             <li key={transaction.id}>
-              <div className={`transaction-sign transaction-sign--${transaction.type.toLowerCase()}`}>
-                {transaction.type === 'TRANSFER' ? '↔' : transaction.type === 'INCOME' ? '+' : '−'}
-              </div>
+              <span className={`transaction-sign transaction-sign--${transaction.type.toLowerCase()}`}>
+                {transaction.type === 'TRANSFER'
+                  ? '↔'
+                  : transaction.type === 'INCOME' || transaction.adjustmentType === 'REFUND'
+                    ? '+'
+                    : '−'}
+              </span>
               <div className="transaction-copy">
-                <strong>{transaction.type === 'TRANSFER' ? '이체' : transaction.category?.name}</strong>
+                <strong>{transactionTitle(transaction)}</strong>
                 <span>
-                  {new Intl.DateTimeFormat('ko-KR', {
-                    dateStyle: 'medium',
-                    timeZone,
-                  }).format(new Date(transaction.occurredAt))}
-                  {' · '}
-                  {transaction.type === 'TRANSFER'
-                    ? `${entryByRole(transaction, 'SOURCE')?.account.name ?? '출금 Account'} → ${entryByRole(transaction, 'DESTINATION')?.account.name ?? '입금 Account'}`
-                    : `${transaction.scope === 'SHARED' ? '공동' : transaction.owner?.displayName} · ${entryByRole(transaction, 'PRIMARY')?.account.name ?? 'Account'}`}
+                  {accountPath(transaction)} · {transaction.scope === 'SHARED'
+                    ? '공동'
+                    : transaction.owner?.displayName ?? '이체'}
                 </span>
                 {transaction.memo && <small>{transaction.memo}</small>}
               </div>
-              <b className="transaction-amount">
-                {transaction.type === 'TRANSFER' ? '↔ ' : transaction.type === 'INCOME' ? '+' : '−'}
-                {transaction.amount.toLocaleString('ko-KR')}원
-              </b>
+              <b className="transaction-amount">{transactionAmount(transaction)}</b>
               <div className="transaction-actions">
                 <button
                   type="button"
-                  aria-expanded={expanded === transaction.id}
-                  onClick={() => setExpanded((current) => current === transaction.id ? null : transaction.id)}
+                  onClick={(event) => onEdit(transaction, event.currentTarget)}
                 >
-                  상세
+                  수정
                 </button>
-                <button type="button" onClick={() => onEdit(transaction)}>수정</button>
                 <button
                   type="button"
                   disabled={deleting === transaction.id}
@@ -950,124 +464,254 @@ function TransactionList({
                   {deleting === transaction.id ? '삭제 중…' : '삭제'}
                 </button>
               </div>
-              {expanded === transaction.id && (
-                <dl className="transaction-details">
-                  <div><dt>Payer</dt><dd>{transaction.payer?.displayName ?? '지정 안 함'}</dd></div>
-                  <div>
-                    <dt>Entries</dt>
-                    <dd>
-                      {transaction.entries.map((entry) => (
-                        <span key={entry.id}>
-                          {entry.role} {entry.account.name} {entry.balanceDelta.toLocaleString('ko-KR')}
-                        </span>
-                      ))}
-                    </dd>
-                  </div>
-                  <div><dt>Version</dt><dd>{transaction.version}</dd></div>
-                </dl>
-              )}
             </li>
           ))}
         </ul>
       )}
-      {error && <p className="form-error" role="alert">{error}</p>}
+      {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
     </section>
   )
 }
 
-function BalanceSummary({ accounts }: { accounts: Account[] }) {
-  const total = useMemo(
-    () => accounts
-      .filter((account) => account.nature === 'ASSET')
-      .reduce((sum, account) => sum + account.currentBalance, 0),
-    [accounts],
-  )
+function BottomNavigation() {
   return (
-    <aside className="balance-summary" aria-label="ASSET Account 현재 잔액">
-      <span>현재 ASSET 잔액</span>
-      <strong>{total.toLocaleString('ko-KR')}원</strong>
-      <small>opening balance + 미삭제 Entry</small>
-    </aside>
+    <nav className="bottom-navigation" aria-label="주요 메뉴">
+      <button type="button" className="is-active" aria-current="page">
+        <span aria-hidden="true">▦</span>Calendar
+      </button>
+      <button type="button" disabled><span aria-hidden="true">◔</span>예산<span>준비 중</span></button>
+      <button type="button" disabled><span aria-hidden="true">⌁</span>통계<span>준비 중</span></button>
+      <button type="button" disabled><span aria-hidden="true">◇</span>자산<span>준비 중</span></button>
+    </nav>
   )
 }
 
-function LedgerDashboard({ user }: { user: CurrentUser }) {
-  const [state, setState] = useState<
-    | { status: 'loading' }
-    | { status: 'ready'; data: LedgerData }
-    | { status: 'error'; message: string }
-  >({ status: 'loading' })
-  const [editing, setEditing] = useState<LedgerTransaction | null>(null)
+function CalendarWorkspace({
+  user,
+  initialReferences,
+}: {
+  user: CurrentUser
+  initialReferences: ReferenceData
+}) {
+  const [references, setReferences] = useState(initialReferences)
+  const [navigation, setNavigation] = useState(() =>
+    normalizeCalendarState(window.location.search, initialReferences.household))
+  const [monthState, setMonthState] = useState<AsyncState<CalendarMonth>>({ status: 'loading' })
+  const [dayState, setDayState] = useState<AsyncState<LedgerTransaction[]>>({ status: 'loading' })
+  const [revision, setRevision] = useState(0)
+  const [entryMode, setEntryMode] = useState<{
+    selectedDate: string
+    editing: LedgerTransaction | null
+  } | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const openerRef = useRef<HTMLElement | null>(null)
+  const settingsButtonRef = useRef<HTMLElement | null>(null)
 
-  async function refresh() {
-    try {
-      const data = await loadLedgerData()
-      setState({ status: 'ready', data })
-      setEditing((current) =>
-        current ? data.transactions.find((item) => item.id === current.id) ?? null : null,
-      )
-    } catch (error) {
-      setState({ status: 'error', message: errorMessage(error) })
+  const filter = useMemo(() => calendarFilter(navigation), [navigation])
+  const filterKey = `${filter.scope}:${filter.ownerMemberId ?? ''}`
+
+  const finishClosingEntry = useCallback(() => {
+    setEntryMode(null)
+    window.setTimeout(() => openerRef.current?.focus(), 0)
+  }, [])
+
+  const requestCloseEntry = useCallback(() => {
+    const ownsHistoryEntry = window.history.state?.ourLedgerSheet === 'quick-entry'
+    finishClosingEntry()
+    if (ownsHistoryEntry) window.history.back()
+  }, [finishClosingEntry])
+
+  useEffect(() => {
+    const normalizedSearch = serializeCalendarState(navigation)
+    if (window.location.search !== normalizedSearch) {
+      window.history.replaceState(window.history.state, '', normalizedSearch)
     }
-  }
+  }, [navigation])
+
+  useEffect(() => {
+    const onPopState = () => {
+      setNavigation(normalizeCalendarState(window.location.search, references.household))
+      if (entryMode && window.history.state?.ourLedgerSheet !== 'quick-entry') {
+        finishClosingEntry()
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [entryMode, finishClosingEntry, references.household])
 
   useEffect(() => {
     const controller = new AbortController()
-    void loadLedgerData(controller.signal)
-      .then((data) => setState({ status: 'ready', data }))
+    setMonthState({ status: 'loading' })
+    void loadCalendarMonth(navigation.month, filter, controller.signal)
+      .then((data) => setMonthState({ status: 'ready', data }))
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setState({ status: 'error', message: errorMessage(error) })
+        if (!isAbortError(error)) {
+          setMonthState({ status: 'error', message: errorMessage(error) })
         }
       })
     return () => controller.abort()
+  }, [filterKey, navigation.month, revision])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setDayState({ status: 'loading' })
+    void loadDayTransactions(navigation.date, filter, controller.signal)
+      .then((data) => setDayState({ status: 'ready', data }))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setDayState({ status: 'error', message: errorMessage(error) })
+        }
+      })
+    return () => controller.abort()
+  }, [filterKey, navigation.date, revision])
+
+  function updateNavigation(next: CalendarNavigationState) {
+    window.history.pushState({}, '', serializeCalendarState(next))
+    setNavigation(next)
+  }
+
+  function openEntry(editing: LedgerTransaction | null, opener?: HTMLElement) {
+    openerRef.current = opener ?? (document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null)
+    window.history.pushState(
+      { ...window.history.state, ourLedgerSheet: 'quick-entry' },
+      '',
+      window.location.href,
+    )
+    setEntryMode({ selectedDate: navigation.date, editing })
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false)
+    window.setTimeout(() => settingsButtonRef.current?.focus(), 0)
+  }
+
+  async function refreshReferences() {
+    const data = await loadReferenceData()
+    setReferences(data)
+    setRevision((current) => current + 1)
+  }
+
+  return (
+    <>
+      <main className="app-shell">
+        <CoupleHeader
+          user={user}
+          household={references.household}
+          onOpenSettings={() => {
+            settingsButtonRef.current = document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null
+            setSettingsOpen(true)
+          }}
+        />
+        <SpendingHero
+          navigation={navigation}
+          household={references.household}
+          state={monthState}
+          onRetry={() => setRevision((current) => current + 1)}
+        />
+        <MarriageGoalShell />
+        <ScopeSelector
+          user={user}
+          household={references.household}
+          navigation={navigation}
+          onChange={updateNavigation}
+        />
+        <MonthNavigation
+          month={navigation.month}
+          onMove={(offset) => updateNavigation(moveCalendarMonth(navigation, offset))}
+        />
+        <CalendarGrid
+          household={references.household}
+          navigation={navigation}
+          state={monthState}
+          onSelect={(date) => updateNavigation({ ...navigation, date })}
+        />
+        <SelectedDayTransactions
+          date={navigation.date}
+          state={dayState}
+          onEdit={openEntry}
+          onDeleted={() => setRevision((current) => current + 1)}
+        />
+      </main>
+      <button
+        className="paw-fab"
+        type="button"
+        aria-label={`${navigation.date} 빠른 입력 열기`}
+        onClick={(event) => openEntry(null, event.currentTarget)}
+      >
+        <span aria-hidden="true">🐾</span>
+        <small>기록</small>
+      </button>
+      <BottomNavigation />
+      {entryMode && (
+        <QuickEntrySheet
+          currentUserId={user.userId}
+          household={references.household}
+          accounts={references.accounts}
+          categories={references.categories}
+          selectedDate={entryMode.selectedDate}
+          editing={entryMode.editing}
+          onRequestClose={requestCloseEntry}
+          onSaved={() => setRevision((current) => current + 1)}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsSheet
+          currentUserId={user.userId}
+          household={references.household}
+          accounts={references.accounts}
+          groups={references.groups}
+          categories={references.categories}
+          onChanged={refreshReferences}
+          onRequestClose={closeSettings}
+        />
+      )}
+    </>
+  )
+}
+
+function CalendarLoader({ user }: { user: CurrentUser }) {
+  const [state, setState] = useState<AsyncState<ReferenceData>>({ status: 'loading' })
+
+  const load = useCallback(() => {
+    const controller = new AbortController()
+    setState({ status: 'loading' })
+    void loadReferenceData(controller.signal)
+      .then((data) => setState({ status: 'ready', data }))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setState({ status: 'error', message: errorMessage(error) })
+        }
+      })
+    return controller
   }, [])
 
+  useEffect(() => {
+    const controller = load()
+    return () => controller.abort()
+  }, [load])
+
   if (state.status === 'loading') {
-    return <div className="ledger-state" role="status">가계부 데이터를 불러오고 있습니다.</div>
+    return (
+      <main className="access-state" role="status">
+        <span className="loading-paw" aria-hidden="true">🐾</span>
+        <strong>Calendar를 준비하고 있어요.</strong>
+      </main>
+    )
   }
   if (state.status === 'error') {
     return (
-      <div className="ledger-state ledger-state--error" role="alert">
+      <main className="access-state access-state--error" role="alert">
         <strong>가계부를 불러오지 못했습니다.</strong>
         <span>{state.message}</span>
-        <button type="button" onClick={() => void refresh()}>다시 시도</button>
-      </div>
+        <button type="button" onClick={load}>다시 시도</button>
+      </main>
     )
   }
-
-  const { household, accounts, groups, categories, transactions } = state.data
-  return (
-    <div className="ledger-dashboard">
-      <BalanceSummary accounts={accounts} />
-      <div className="setup-grid">
-        <AccountSetup
-          currentUserId={user.userId}
-          household={household}
-          accounts={accounts}
-          onChanged={refresh}
-        />
-        <CategorySetup groups={groups} categories={categories} onChanged={refresh} />
-      </div>
-      <div className="ledger-grid">
-        <QuickEntry
-          currentUserId={user.userId}
-          household={household}
-          accounts={accounts}
-          categories={categories}
-          editing={editing}
-          onCancelEdit={() => setEditing(null)}
-          onChanged={refresh}
-        />
-        <TransactionList
-          transactions={transactions}
-          timeZone={household.timezone}
-          onEdit={setEditing}
-          onChanged={refresh}
-        />
-      </div>
-    </div>
-  )
+  return <CalendarWorkspace user={user} initialReferences={state.data} />
 }
 
 function App() {
@@ -1078,7 +722,7 @@ function App() {
     void loadCurrentUser(controller.signal)
       .then((user) => setState({ status: 'ready', user }))
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (isAbortError(error)) return
         if (error instanceof LedgerApiError && error.status === 401) {
           setState({ status: 'authentication-required' })
         } else if (error instanceof LedgerApiError && error.status === 403) {
@@ -1090,30 +734,8 @@ function App() {
     return () => controller.abort()
   }, [])
 
-  return (
-    <main className="app-shell">
-      <section className="hero" aria-labelledby="page-title">
-        <p className="eyebrow">둘이 함께 쌓는 하나의 기록</p>
-        <h1 id="page-title">우리의 장부</h1>
-        <p className="hero-copy">
-          검증된 Household 경계 안에서 수입과 지출, 이체와 카드 부채를 함께 기록합니다.
-        </p>
-      </section>
-
-      <section className="identity" aria-labelledby="identity-title">
-        <div>
-          <p className="section-kicker">Slice 3</p>
-          <h2 id="identity-title">안전한 가계부</h2>
-          <p className="section-copy">
-            현재 사용자와 Household를 확인한 뒤 이 Household의 장부만 엽니다.
-          </p>
-        </div>
-        <AccessState state={state} />
-      </section>
-
-      {state.status === 'ready' && <LedgerDashboard user={state.user} />}
-    </main>
-  )
+  if (state.status !== 'ready') return <AccessState state={state} />
+  return <CalendarLoader user={state.user} />
 }
 
 export default App
