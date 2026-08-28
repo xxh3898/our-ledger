@@ -16,15 +16,18 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final CategoryGroupService categoryGroupService;
+    private final CategoryReferenceLock categoryReferenceLock;
     private final RecurringReferenceGuard recurringReferenceGuard;
 
     public CategoryService(
             CategoryRepository categoryRepository,
             CategoryGroupService categoryGroupService,
+            CategoryReferenceLock categoryReferenceLock,
             RecurringReferenceGuard recurringReferenceGuard
     ) {
         this.categoryRepository = categoryRepository;
         this.categoryGroupService = categoryGroupService;
+        this.categoryReferenceLock = categoryReferenceLock;
         this.recurringReferenceGuard = recurringReferenceGuard;
     }
 
@@ -52,7 +55,7 @@ public class CategoryService {
             CategoryCreateRequest request
     ) {
         validateCreate(request);
-        CategoryGroup group = requireMatchingGroup(
+        CategoryGroup group = requireMatchingGroupForUpdate(
                 currentHousehold.householdId(), request.groupId(), request.type(), false);
         rejectDuplicate(
                 currentHousehold.householdId(), request.type(), request.name().strip(), null);
@@ -75,17 +78,18 @@ public class CategoryService {
             CategoryUpdateRequest request
     ) {
         validateUpdate(request);
-        Category category = requireCategory(currentHousehold.householdId(), categoryId);
-        if (request.archived() && !category.isArchived()) {
-            recurringReferenceGuard.rejectCategoryArchive(
-                    category.getHouseholdId(), category.getId());
-        }
-        CategoryGroup group = requireMatchingGroup(
+        Category category = categoryReferenceLock.lockCategory(
+                currentHousehold.householdId(), categoryId);
+        CategoryGroup group = requireMatchingGroupForUpdate(
                 currentHousehold.householdId(),
                 request.groupId(),
                 category.getType(),
                 request.archived()
         );
+        if (request.archived() && !category.isArchived()) {
+            recurringReferenceGuard.rejectCategoryArchive(
+                    category.getHouseholdId(), category.getId());
+        }
         if (!request.archived()) {
             rejectDuplicate(
                     currentHousehold.householdId(),
@@ -168,7 +172,7 @@ public class CategoryService {
         }
     }
 
-    private CategoryGroup requireMatchingGroup(
+    private CategoryGroup requireMatchingGroupForUpdate(
             Long householdId,
             Long groupId,
             CategoryType type,
@@ -177,7 +181,7 @@ public class CategoryService {
         if (groupId == null) {
             return null;
         }
-        CategoryGroup group = categoryGroupService.requireGroup(householdId, groupId);
+        CategoryGroup group = categoryReferenceLock.lockGroup(householdId, groupId);
         if (group.getType() != type) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,

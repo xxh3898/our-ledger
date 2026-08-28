@@ -15,13 +15,16 @@ import java.util.List;
 public class CategoryGroupService {
 
     private final CategoryGroupRepository categoryGroupRepository;
+    private final CategoryReferenceLock categoryReferenceLock;
     private final RecurringReferenceGuard recurringReferenceGuard;
 
     public CategoryGroupService(
             CategoryGroupRepository categoryGroupRepository,
+            CategoryReferenceLock categoryReferenceLock,
             RecurringReferenceGuard recurringReferenceGuard
     ) {
         this.categoryGroupRepository = categoryGroupRepository;
+        this.categoryReferenceLock = categoryReferenceLock;
         this.recurringReferenceGuard = recurringReferenceGuard;
     }
 
@@ -61,7 +64,8 @@ public class CategoryGroupService {
             CategoryGroupUpdateRequest request
     ) {
         validateUpdate(request.name(), request.sortOrder(), request.archived());
-        CategoryGroup group = requireGroup(currentHousehold.householdId(), groupId);
+        CategoryGroup group = categoryReferenceLock.lockGroup(
+                currentHousehold.householdId(), groupId);
         if (request.archived() && !group.isArchived()) {
             recurringReferenceGuard.rejectCategoryGroupArchive(
                     group.getHouseholdId(), group.getId());

@@ -1530,6 +1530,182 @@ describe('App', () => {
     await waitFor(() => expect(editButton).toHaveFocus())
   })
 
+  it('keeps the full EXPENSE template when the active recurring type is clicked again', async () => {
+    useCalendarUrl()
+    const insuranceCategory = {
+      ...expenseCategory,
+      id: 302,
+      name: '보험',
+      sortOrder: 1,
+    }
+    const cardAccount = {
+      ...checkingAccount,
+      id: 202,
+      name: '생활 카드',
+      type: 'CREDIT_CARD',
+      nature: 'LIABILITY',
+      sortOrder: 2,
+    }
+    const expenseRule = recurringRule({
+      name: '보험료',
+      type: 'EXPENSE',
+      amount: 120_000,
+      owner: { memberId: 101, displayName: 'Member' },
+      payer: { memberId: 101, displayName: 'Member' },
+      category: { id: insuranceCategory.id, name: insuranceCategory.name, archived: false },
+      accounts: [{ role: 'PRIMARY', account: cardAccount }],
+      memo: '보험 메모',
+    })
+    const { fetchMock } = installLedgerRouter({
+      accounts: [checkingAccount, savingsAccount, cardAccount],
+      categories: [expenseCategory, insuranceCategory, incomeCategory],
+      recurringTransactions: [expenseRule],
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const row = (await within(settings).findByText('보험료')).closest('li') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '수정' }))
+    const dialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '지출' }))
+
+    expect(within(dialog).getByLabelText('Category')).toHaveValue('302')
+    expect(within(dialog).getByLabelText('Account')).toHaveValue('202')
+    expect(within(dialog).getByLabelText('Owner')).toHaveValue('101')
+    expect(within(dialog).getByLabelText('Payer (선택)')).toHaveValue('101')
+    fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')).toBe(true))
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      version: 0,
+      name: '보험료',
+      type: 'EXPENSE',
+      amount: 120_000,
+      scope: 'PERSONAL',
+      ownerMemberId: 101,
+      payerMemberId: 101,
+      categoryId: 302,
+      accountId: 202,
+      sourceAccountId: null,
+      destinationAccountId: null,
+      memo: '보험 메모',
+    })
+  })
+
+  it('keeps the full INCOME template when the active recurring type is clicked again', async () => {
+    useCalendarUrl()
+    const bonusCategory = {
+      ...incomeCategory,
+      id: 303,
+      name: '보너스',
+      sortOrder: 1,
+    }
+    const incomeRule = recurringRule({
+      name: '성과급',
+      amount: 500_000,
+      owner: { memberId: 101, displayName: 'Member' },
+      category: { id: bonusCategory.id, name: bonusCategory.name, archived: false },
+      accounts: [{ role: 'PRIMARY', account: savingsAccount }],
+      memo: '성과급 메모',
+    })
+    const { fetchMock } = installLedgerRouter({
+      categories: [expenseCategory, incomeCategory, bonusCategory],
+      recurringTransactions: [incomeRule],
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const row = (await within(settings).findByText('성과급')).closest('li') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '수정' }))
+    const dialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '수입' }))
+
+    expect(within(dialog).getByLabelText('Category')).toHaveValue('303')
+    expect(within(dialog).getByLabelText('Account')).toHaveValue('201')
+    expect(within(dialog).getByLabelText('Owner')).toHaveValue('101')
+    fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')).toBe(true))
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      version: 0,
+      name: '성과급',
+      type: 'INCOME',
+      amount: 500_000,
+      scope: 'PERSONAL',
+      ownerMemberId: 101,
+      payerMemberId: null,
+      categoryId: 303,
+      accountId: 201,
+      sourceAccountId: null,
+      destinationAccountId: null,
+      memo: '성과급 메모',
+    })
+  })
+
+  it('keeps TRANSFER source and destination when the active recurring type is clicked again', async () => {
+    useCalendarUrl()
+    const destinationAccount = {
+      ...checkingAccount,
+      id: 202,
+      name: '목적 통장',
+      sortOrder: 2,
+    }
+    const transferRule = recurringRule({
+      name: '저축 이체',
+      type: 'TRANSFER',
+      amount: 300_000,
+      scope: null,
+      owner: null,
+      payer: null,
+      category: null,
+      accounts: [
+        { role: 'SOURCE', account: savingsAccount },
+        { role: 'DESTINATION', account: destinationAccount },
+      ],
+      memo: '이체 메모',
+    })
+    const { fetchMock } = installLedgerRouter({
+      accounts: [checkingAccount, savingsAccount, destinationAccount],
+      recurringTransactions: [transferRule],
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const row = (await within(settings).findByText('저축 이체')).closest('li') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '수정' }))
+    const dialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '이체' }))
+
+    expect(within(dialog).getByLabelText('출금 Account')).toHaveValue('201')
+    expect(within(dialog).getByLabelText('입금 Account')).toHaveValue('202')
+    fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')).toBe(true))
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      version: 0,
+      name: '저축 이체',
+      type: 'TRANSFER',
+      amount: 300_000,
+      scope: null,
+      ownerMemberId: null,
+      payerMemberId: null,
+      categoryId: null,
+      accountId: null,
+      sourceAccountId: 201,
+      destinationAccountId: 202,
+      memo: '이체 메모',
+    })
+  })
+
   it('keeps recurring form input on failure and prevents duplicate pending submits', async () => {
     useCalendarUrl()
     let releaseGate: (() => void) | undefined

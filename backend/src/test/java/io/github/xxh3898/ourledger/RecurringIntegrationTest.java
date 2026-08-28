@@ -18,9 +18,11 @@ import io.github.xxh3898.ourledger.calendar.CalendarService;
 import io.github.xxh3898.ourledger.category.Category;
 import io.github.xxh3898.ourledger.category.CategoryCreateRequest;
 import io.github.xxh3898.ourledger.category.CategoryGroupCreateRequest;
+import io.github.xxh3898.ourledger.category.CategoryGroupRepository;
 import io.github.xxh3898.ourledger.category.CategoryGroupResponse;
 import io.github.xxh3898.ourledger.category.CategoryGroupService;
 import io.github.xxh3898.ourledger.category.CategoryGroupUpdateRequest;
+import io.github.xxh3898.ourledger.category.CategoryReferenceLock;
 import io.github.xxh3898.ourledger.category.CategoryRepository;
 import io.github.xxh3898.ourledger.category.CategoryResponse;
 import io.github.xxh3898.ourledger.category.CategoryService;
@@ -63,6 +65,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,12 +73,18 @@ import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
@@ -94,6 +103,8 @@ class RecurringIntegrationTest {
     @Autowired private CategoryService categoryService;
     @Autowired private CategoryGroupService categoryGroupService;
     @Autowired private CategoryRepository categoryRepository;
+    @Autowired private CategoryGroupRepository categoryGroupRepository;
+    @MockitoSpyBean private CategoryReferenceLock categoryReferenceLock;
     @Autowired private RecurringTransactionService recurringService;
     @Autowired private RecurringGenerationService generationService;
     @Autowired private RecurringOccurrenceProcessor occurrenceProcessor;
@@ -136,6 +147,7 @@ class RecurringIntegrationTest {
 
     @AfterEach
     void clearDatabaseAfterTest() {
+        reset(categoryReferenceLock);
         clearDatabase();
     }
 
@@ -370,6 +382,204 @@ class RecurringIntegrationTest {
                         updateFrom(paused, paused.amount(), true),
                         NOON_AUGUST_28)
         );
+    }
+
+    @Test
+    void should_serializeCreateAndCategoryArchive_when_transactionsRace() throws Exception {
+        CategoryGroupResponse group = categoryGroupService.create(
+                currentHousehold,
+                new CategoryGroupCreateRequest("경합 Group", CategoryType.EXPENSE, 0));
+        CategoryResponse category = categoryService.create(
+                currentHousehold,
+                new CategoryCreateRequest(
+                        group.id(), "경합 Category", CategoryType.EXPENSE, null, null, 0));
+        AccountResponse account = createAccount(
+                "경합 Account", AccountType.CHECKING, AccountNature.ASSET, 0, false);
+        CountDownLatch createHasCategoryLock = new CountDownLatch(1);
+        CountDownLatch allowCreate = new CountDownLatch(1);
+        CountDownLatch archiveAttemptedCategoryLock = new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+            String threadName = Thread.currentThread().getName();
+            if (threadName.equals("category-archive")) {
+                archiveAttemptedCategoryLock.countDown();
+            }
+            return invocation.callRealMethod();
+        }).when(categoryReferenceLock).lockCategory(anyLong(), anyLong());
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            String threadName = Thread.currentThread().getName();
+            if (threadName.equals("recurring-category-create")) {
+                createHasCategoryLock.countDown();
+                awaitLatch(allowCreate, "recurring create release");
+            }
+            return result;
+        }).when(categoryReferenceLock).lockCategoryAndGroup(anyLong(), anyLong());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<RecurringTransactionResponse> create = executor.submit(() -> {
+                Thread.currentThread().setName("recurring-category-create");
+                return recurringService.createAt(
+                        currentHousehold,
+                        primaryRule(
+                                "Category 경합 규칙", TransactionType.EXPENSE, 10_000,
+                                category.id(), account.id()),
+                        NOON_AUGUST_28);
+            });
+            awaitLatch(createHasCategoryLock, "recurring Category lock");
+
+            Future<CategoryResponse> archive = executor.submit(() -> {
+                Thread.currentThread().setName("category-archive");
+                return categoryService.update(
+                        currentHousehold,
+                        category.id(),
+                        new io.github.xxh3898.ourledger.category.CategoryUpdateRequest(
+                                group.id(), category.name(), null, null, 0, true));
+            });
+            awaitLatch(archiveAttemptedCategoryLock, "Category archive lock attempt");
+            assertThatThrownBy(() -> archive.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            allowCreate.countDown();
+            RecurringTransactionResponse created = create.get(5, TimeUnit.SECONDS);
+            assertFutureApiError(archive, ApiErrorCode.RECURRING_REFERENCE_IN_USE);
+
+            assertThat(created.active()).isTrue();
+            assertThat(categoryRepository.findById(category.id()).orElseThrow().isArchived())
+                    .isFalse();
+            assertThat(recurringService.findAll(currentHousehold))
+                    .singleElement()
+                    .satisfies(rule -> {
+                        assertThat(rule.active()).isTrue();
+                        assertThat(rule.category().id()).isEqualTo(category.id());
+                        assertThat(rule.category().archived()).isFalse();
+                    });
+        } finally {
+            allowCreate.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void should_serializeCreateAndCategoryGroupArchive_when_transactionsRace() throws Exception {
+        CategoryGroupResponse group = categoryGroupService.create(
+                currentHousehold,
+                new CategoryGroupCreateRequest("Group 선점", CategoryType.EXPENSE, 0));
+        CategoryResponse category = categoryService.create(
+                currentHousehold,
+                new CategoryCreateRequest(
+                        group.id(), "Group 경합 Category", CategoryType.EXPENSE, null, null, 0));
+        AccountResponse account = createAccount(
+                "Group 경합 Account", AccountType.CHECKING, AccountNature.ASSET, 0, false);
+        CountDownLatch archiveHasGroupLock = new CountDownLatch(1);
+        CountDownLatch allowArchive = new CountDownLatch(1);
+        CountDownLatch createAttemptedGroupLock = new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+            String threadName = Thread.currentThread().getName();
+            Object result = invocation.callRealMethod();
+            if (threadName.equals("category-group-archive")) {
+                archiveHasGroupLock.countDown();
+                awaitLatch(allowArchive, "Category Group archive release");
+            }
+            return result;
+        }).when(categoryReferenceLock).lockGroup(anyLong(), anyLong());
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("recurring-group-create")) {
+                createAttemptedGroupLock.countDown();
+            }
+            return invocation.callRealMethod();
+        }).when(categoryReferenceLock).lockCategoryAndGroup(anyLong(), anyLong());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CategoryGroupResponse> archive = executor.submit(() -> {
+                Thread.currentThread().setName("category-group-archive");
+                return categoryGroupService.update(
+                        currentHousehold,
+                        group.id(),
+                        new CategoryGroupUpdateRequest(group.name(), group.sortOrder(), true));
+            });
+            awaitLatch(archiveHasGroupLock, "Category Group archive lock");
+
+            Future<RecurringTransactionResponse> create = executor.submit(() -> {
+                Thread.currentThread().setName("recurring-group-create");
+                return recurringService.createAt(
+                        currentHousehold,
+                        primaryRule(
+                                "Group 경합 규칙", TransactionType.EXPENSE, 10_000,
+                                category.id(), account.id()),
+                        NOON_AUGUST_28);
+            });
+            awaitLatch(createAttemptedGroupLock, "recurring Category Group lock attempt");
+            assertThatThrownBy(() -> create.get(250, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            allowArchive.countDown();
+            assertThat(archive.get(5, TimeUnit.SECONDS).archived()).isTrue();
+            assertFutureApiError(create, ApiErrorCode.ARCHIVED_CATEGORY_NOT_ALLOWED);
+
+            assertThat(categoryGroupRepository.findById(group.id()).orElseThrow().isArchived())
+                    .isTrue();
+            assertThat(recurringService.findAll(currentHousehold)).isEmpty();
+        } finally {
+            allowArchive.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void should_allowCategoryAndGroupArchive_when_onlyPausedAndEndedRulesReferenceThem() {
+        CategoryGroupResponse group = categoryGroupService.create(
+                currentHousehold,
+                new CategoryGroupCreateRequest("비활성 Group", CategoryType.EXPENSE, 0));
+        CategoryResponse category = categoryService.create(
+                currentHousehold,
+                new CategoryCreateRequest(
+                        group.id(), "비활성 Category", CategoryType.EXPENSE, null, null, 0));
+        AccountResponse account = createAccount(
+                "비활성 Account", AccountType.CHECKING, AccountNature.ASSET, 0, false);
+        RecurringTransactionResponse paused = recurringService.createAt(
+                currentHousehold,
+                recurringRequest(
+                        "중지 규칙", TransactionType.EXPENSE, 10_000, category.id(), account.id(),
+                        null, null, RecurrenceFrequency.DAILY, 1, AUGUST_28, null, false),
+                NOON_AUGUST_28);
+        RecurringTransactionResponse ending = recurringService.createAt(
+                currentHousehold,
+                primaryRule(
+                        "종료 규칙", TransactionType.EXPENSE, 20_000,
+                        category.id(), account.id()),
+                NOON_AUGUST_28);
+
+        assertThat(generationService.generateDue(NOON_AUGUST_28, 10)).isEqualTo(1);
+        RecurringTransactionResponse ended = recurringService.findAll(currentHousehold).stream()
+                .filter(rule -> rule.id().equals(ending.id()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(paused.status()).isEqualTo(RecurringStatus.PAUSED);
+        assertThat(ended.status()).isEqualTo(RecurringStatus.ENDED);
+
+        CategoryResponse archivedCategory = categoryService.update(
+                currentHousehold,
+                category.id(),
+                new io.github.xxh3898.ourledger.category.CategoryUpdateRequest(
+                        group.id(), category.name(), null, null, 0, true));
+        CategoryGroupResponse archivedGroup = categoryGroupService.update(
+                currentHousehold,
+                group.id(),
+                new CategoryGroupUpdateRequest(group.name(), group.sortOrder(), true));
+
+        assertThat(archivedCategory.archived()).isTrue();
+        assertThat(archivedGroup.archived()).isTrue();
+        assertApiError(
+                ApiErrorCode.ARCHIVED_CATEGORY_NOT_ALLOWED,
+                () -> recurringService.updateAt(
+                        currentHousehold,
+                        paused.id(),
+                        updateFrom(paused, paused.amount(), true),
+                        NOON_AUGUST_28));
     }
 
     @Test
@@ -649,6 +859,22 @@ class RecurringIntegrationTest {
                 .isInstanceOfSatisfying(
                         ApiException.class,
                         exception -> assertThat(exception.code()).isEqualTo(code));
+    }
+
+    private void assertFutureApiError(Future<?> future, ApiErrorCode code) {
+        assertThatThrownBy(() -> future.get(5, TimeUnit.SECONDS))
+                .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                        assertThat(exception.getCause())
+                                .isInstanceOfSatisfying(
+                                        ApiException.class,
+                                        apiException -> assertThat(apiException.code())
+                                                .isEqualTo(code)));
+    }
+
+    private void awaitLatch(CountDownLatch latch, String name) throws InterruptedException {
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            throw new AssertionError("Timed out waiting for " + name);
+        }
     }
 
     private void clearDatabase() {

@@ -9,6 +9,7 @@ import io.github.xxh3898.ourledger.api.ApiErrorResponse;
 import io.github.xxh3898.ourledger.api.ApiException;
 import io.github.xxh3898.ourledger.api.RequestValidator;
 import io.github.xxh3898.ourledger.category.Category;
+import io.github.xxh3898.ourledger.category.CategoryReferenceLock;
 import io.github.xxh3898.ourledger.category.CategoryService;
 import io.github.xxh3898.ourledger.category.CategoryType;
 import io.github.xxh3898.ourledger.household.HouseholdMember;
@@ -36,6 +37,7 @@ public class TransactionService {
     private final TransactionAccountEntryRepository entryRepository;
     private final HouseholdMemberResolver householdMemberResolver;
     private final CategoryService categoryService;
+    private final CategoryReferenceLock categoryReferenceLock;
     private final AccountService accountService;
 
     public TransactionService(
@@ -43,12 +45,14 @@ public class TransactionService {
             TransactionAccountEntryRepository entryRepository,
             HouseholdMemberResolver householdMemberResolver,
             CategoryService categoryService,
+            CategoryReferenceLock categoryReferenceLock,
             AccountService accountService
     ) {
         this.transactionRepository = transactionRepository;
         this.entryRepository = entryRepository;
         this.householdMemberResolver = householdMemberResolver;
         this.categoryService = categoryService;
+        this.categoryReferenceLock = categoryReferenceLock;
         this.accountService = accountService;
     }
 
@@ -216,6 +220,9 @@ public class TransactionService {
             Long destinationAccountId,
             String memo
     ) {
+        if (categoryId != null) {
+            categoryReferenceLock.lockCategoryAndGroup(householdId, categoryId);
+        }
         validatePosting(
                 householdId, type, amount, scope, ownerMemberId, payerMemberId,
                 categoryId, accountId, sourceAccountId, destinationAccountId,

@@ -147,27 +147,30 @@ export function RecurringTransactionSheet({
   }
 
   function selectType(type: RecurringTransaction['type']) {
-    const currentMemberId = household.members
-      .find((member) => member.userId === currentUserId)?.memberId.toString() ?? ''
-    const sourceAccount = sourceAccounts[0]
-    const destinationAccount = accounts.find((account) => !account.archived
-      && account.id !== sourceAccount?.id)
-    setForm((current) => ({
-      ...current,
-      type,
-      categoryId: type === 'TRANSFER'
-        ? ''
-        : categories.find((category) => category.type === type)?.id.toString() ?? '',
-      accountId: type === 'TRANSFER'
-        ? ''
-        : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
-      sourceAccountId: type === 'TRANSFER' ? sourceAccount?.id.toString() ?? '' : '',
-      destinationAccountId: type === 'TRANSFER'
-        ? destinationAccount?.id.toString() ?? ''
-        : '',
-      ownerMemberId: type === 'TRANSFER' ? '' : current.ownerMemberId || currentMemberId,
-      payerMemberId: type === 'EXPENSE' ? current.payerMemberId || currentMemberId : '',
-    }))
+    setForm((current) => {
+      if (type === current.type) return current
+      const currentMemberId = household.members
+        .find((member) => member.userId === currentUserId)?.memberId.toString() ?? ''
+      const sourceAccount = sourceAccounts[0]
+      const destinationAccount = accounts.find((account) => !account.archived
+        && account.id !== sourceAccount?.id)
+      return {
+        ...current,
+        type,
+        categoryId: type === 'TRANSFER'
+          ? ''
+          : categories.find((category) => category.type === type)?.id.toString() ?? '',
+        accountId: type === 'TRANSFER'
+          ? ''
+          : accounts.find((account) => isPrimaryAccountForType(type, account))?.id.toString() ?? '',
+        sourceAccountId: type === 'TRANSFER' ? sourceAccount?.id.toString() ?? '' : '',
+        destinationAccountId: type === 'TRANSFER'
+          ? destinationAccount?.id.toString() ?? ''
+          : '',
+        ownerMemberId: type === 'TRANSFER' ? '' : current.ownerMemberId || currentMemberId,
+        payerMemberId: type === 'EXPENSE' ? current.payerMemberId || currentMemberId : '',
+      }
+    })
   }
 
   function toInput(): RecurringTransactionInput {
