@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.6
+version: 0.7
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -21,7 +21,10 @@ related:
 | 반복거래 | 7 | O | O | idempotency |
 | 결혼자금 | 8 | O | O | Account 연결, 중복 입력 금지 |
 | 자산 흐름 | 9 | O | O | ASSET-LIABILITY |
-| CSV/PWA/배포 | 10 | O | O | export 보안, API cache 금지, Access/Tunnel 보호 |
+| CSV 내보내기 | 10A | O | O | current Household, canonical Entry, formula 방어, no-store |
+| PWA 설치 | 10B | - | - | manifest, service worker, production icon |
+| Production runtime | 10C | - | - | Compose, backup/restore, observability |
+| Production activation | 10D | - | - | Access/Tunnel, secret, bootstrap, deploy |
 
 ## Slice 5 Budget 구현
 
@@ -65,6 +68,15 @@ related:
 - Frontend: Assets destination, canonical 소유 filter URL/history, accessible SVG/table, ASSET/LIABILITY Account 목록
 - 일관성: repeatable-read snapshot, current point와 current summary 일치, Goal link/unlink로 원장 불변
 - 제한: aggregate persistence/cache, migration, Account mutation 재설계, Goal 지표 병합, CSV/PWA/production 없음
+
+## Slice 10A CSV Export 구현
+
+- Backend: 필수 `from/to`, 시작일 포함 최대 3,653일, Household timezone 범위의 동기 CSV attachment
+- 원장: 미삭제 Transaction당 한 row, canonical Entry fail-closed, REFUND·Recurring provenance와 archived reference 유지
+- 형식: 한국어 19개 고정 column, UTF-8 BOM, RFC 4180 CRLF/quote, spreadsheet formula prefix 방어
+- Frontend: Settings의 기간 form, pending/error/success, 안전한 filename fallback, Blob URL 즉시 회수
+- 보안: CurrentHousehold만 사용, `no-store`/`nosniff`, `lastFour`·email·credential 비노출
+- 제한: import, XLSX, 세부 filter, async/history/temp file, PWA, backup 실행, production activation 없음
 
 ## 공통 요구
 

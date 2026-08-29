@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.1
+version: 1.2
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -156,6 +156,19 @@ Assets Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
 - current balance·baseline·월 delta의 bounded batch query 구조와 N+1 부재
 - canonical Assets response, `lastFour` 비노출, 인증 REST Docs
 
+CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
+
+- 필수/parse/역전 날짜와 3,653일 허용·3,654일 거부 stable code
+- Household timezone `[fromStart, toPlusOneStart)` 양 끝과 `occurred_at ASC, id ASC`
+- INCOME, ASSET/CREDIT_CARD EXPENSE, ASSET→ASSET/LIABILITY TRANSFER, partial/full REFUND
+- generated recurring provenance, archived Account/Category, PERSONAL/SHARED owner/payer
+- logical delete와 foreign Household 제외, canonical Entry 손상 409
+- UTF-8 BOM, 19개 고정 header, CRLF, comma/quote/newline, nullable cell
+- `=`, `+`, `-`, `@`, TAB, CR formula prefix와 trim 전·후 방어
+- `Content-Type`, attachment filename, `no-store`, `nosniff`, 401/403와 REST Docs
+- Transaction/Entry/Account/Category/Member 최대 5개 query와 temp file/persistence 부재
+- `lastFour`, email, foreign reference, credential 비노출
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -284,6 +297,15 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - loading 중 이전 금융 숫자 제거, stable error retry, 전체 Account 없음과 선택 bucket 없음 구분
 - Account Settings opener focus 복귀와 Assets Paw Household 오늘, 전체 하단 destination 이동 회귀
 
+같은 `App.test.tsx`는 CSV Export Slice에서 다음 계약을 추가로 검증한다.
+
+- Settings `데이터 내보내기` section과 Household timezone 월 1일~오늘 기본값
+- 날짜 수정, pending 중복 요청 차단, 실패 뒤 입력 보존
+- same-origin CSV response의 Blob download, 안전한 server filename과 고정 fallback
+- object URL revoke, 성공 status, Settings 유지와 opener focus 회귀
+- `INVALID_REQUEST`, `EXPORT_RANGE_TOO_LARGE`, network, non-CSV response의 stable 오류
+- local/session storage에 인증 token/cookie를 저장하지 않는 요청 경계
+
 `budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
 
 ## Production 보안 검증
@@ -302,7 +324,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다. Assets는 `AssetsApiDocsTest`에서 `assets-read-model`, `assets-authentication-required` snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다. Assets는 `AssetsApiDocsTest`에서 `assets-read-model`, `assets-authentication-required` snippet을 생성한다. CSV는 `TransactionCsvExportApiDocsTest`에서 `transaction-csv-export`, `transaction-csv-export-range-too-large` snippet을 만들고 `TransactionCsvExportIntegrationTest`가 canonical byte를 고정한다.
 
 ## 회귀 우선순위
 

@@ -9,6 +9,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.useRealTimers()
   window.history.replaceState({}, '', '/')
@@ -19,6 +20,17 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function csvResponse(
+  contentDisposition = 'attachment; filename="our-ledger-transactions_2026-08-01_2026-08-31.csv"',
+) {
+  return new Response('\uFEFF거래ID,발생일\r\n', {
+    headers: {
+      'Content-Type': 'text/csv; charset=UTF-8',
+      'Content-Disposition': contentDisposition,
+    },
   })
 }
 
@@ -521,6 +533,10 @@ type RouterOptions = {
   failGoalUpdate?: boolean
   failGoalLink?: boolean
   failGoalUnlink?: boolean
+  transactionCsvResponse?: (
+    url: URL,
+    init?: RequestInit,
+  ) => Response | Promise<Response>
 }
 
 function transactionDate(occurredAt: string) {
@@ -841,6 +857,9 @@ function installLedgerRouter(options: RouterOptions = {}) {
 
     if (url.pathname === '/api/v1/me') return jsonResponse(currentUser)
     if (url.pathname === '/api/v1/households/current') return jsonResponse(currentHousehold)
+    if (url.pathname === '/api/v1/exports/transactions.csv' && method === 'GET') {
+      return options.transactionCsvResponse?.(url, init) ?? csvResponse()
+    }
 
     if (url.pathname === '/api/v1/goals/marriage' && method === 'GET') {
       if (options.goalReadGate) await options.goalReadGate
@@ -1954,6 +1973,187 @@ describe('App', () => {
     expect((await within(settings).findAllByText('생활')).length).toBeGreaterThan(0)
     expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/accounts' && init?.method === 'POST')).toBe(true)
+  })
+
+  it('downloads the selected current-Household period from Settings and restores focus', async () => {
+    vi.setSystemTime(new Date('2026-09-30T15:30:00Z'))
+    useCalendarUrl()
+    const createObjectURL = vi.fn(() => 'blob:our-ledger-export')
+    const revokeObjectURL = vi.fn()
+    const NativeURL = URL
+    class DownloadURL extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    }
+    vi.stubGlobal('URL', DownloadURL)
+    const downloaded: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloaded.push(this.download)
+    })
+    const { fetchMock } = installLedgerRouter({
+      transactionCsvResponse: () => csvResponse(
+        'attachment; filename="our-ledger-transactions_2026-08-01_2026-08-29.csv"',
+      ),
+    })
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: '설정' })
+    opener.focus()
+    fireEvent.click(opener)
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    expect(within(settings).getByRole('heading', { name: '데이터 내보내기' }))
+      .toBeInTheDocument()
+    expect(within(settings).getByText(/현재 Household의 유효 거래/)).toHaveTextContent(
+      '삭제된 거래는 제외하며, CSV는 운영 backup의 대체물이 아닙니다.',
+    )
+    const from = within(settings).getByLabelText('시작일')
+    const to = within(settings).getByLabelText('종료일')
+    expect(from).toHaveValue('2026-10-01')
+    expect(to).toHaveValue('2026-10-01')
+    fireEvent.change(from, { target: { value: '2026-08-01' } })
+    fireEvent.change(to, { target: { value: '2026-08-29' } })
+
+    const submit = within(settings).getByRole('button', { name: 'CSV 내려받기' })
+    submit.focus()
+    fireEvent.click(submit)
+
+    expect(await within(settings).findByText('CSV를 내려받았어요.')).toBeInTheDocument()
+    expect(settings).toBeInTheDocument()
+    expect(submit).toHaveFocus()
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:our-ledger-export')
+    expect(downloaded).toEqual(['our-ledger-transactions_2026-08-01_2026-08-29.csv'])
+    const exportCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).startsWith('/api/v1/exports/transactions.csv?'))
+    expect(String(exportCall?.[0])).toContain('from=2026-08-01&to=2026-08-29')
+    expect(exportCall?.[1]?.credentials).toBe('same-origin')
+    expect(new Headers(exportCall?.[1]?.headers).get('Accept')).toBe('text/csv')
+
+    fireEvent.click(within(settings).getByRole('button', { name: '설정 닫기' }))
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('falls back to the fixed date filename when the server filename is unsafe', async () => {
+    useCalendarUrl()
+    const createObjectURL = vi.fn(() => 'blob:safe-fallback')
+    const NativeURL = URL
+    class DownloadURL extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', DownloadURL)
+    const downloaded: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloaded.push(this.download)
+    })
+    installLedgerRouter({
+      transactionCsvResponse: () => csvResponse('attachment; filename="../../financial.csv"'),
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+
+    fireEvent.click(within(settings).getByRole('button', { name: 'CSV 내려받기' }))
+
+    expect(await within(settings).findByText('CSV를 내려받았어요.')).toBeInTheDocument()
+    expect(downloaded).toEqual(['our-ledger-transactions_2026-08-01_2026-08-28.csv'])
+  })
+
+  it('prevents duplicate CSV requests while an export is pending', async () => {
+    useCalendarUrl()
+    let releaseGate: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+    const NativeURL = URL
+    class DownloadURL extends NativeURL {
+      static createObjectURL = vi.fn(() => 'blob:pending-export')
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', DownloadURL)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const { fetchMock } = installLedgerRouter({
+      transactionCsvResponse: async () => {
+        await gate
+        return csvResponse()
+      },
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const submit = within(settings).getByRole('button', { name: 'CSV 내려받기' })
+
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).startsWith('/api/v1/exports/transactions.csv?'))).toHaveLength(1))
+    expect(within(settings).getByRole('button', { name: 'CSV 준비 중…' })).toBeDisabled()
+    releaseGate?.()
+    expect(await within(settings).findByText('CSV를 내려받았어요.')).toBeInTheDocument()
+  })
+
+  it('keeps export dates through request range network and non-CSV errors', async () => {
+    useCalendarUrl()
+    const createObjectURL = vi.fn(() => 'blob:should-not-run')
+    const NativeURL = URL
+    class DownloadURL extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', DownloadURL)
+    installLedgerRouter({
+      transactionCsvResponse: (url) => {
+        const from = url.searchParams.get('from')
+        if (from === '2026-08-31') {
+          return jsonResponse({ code: 'INVALID_REQUEST', message: '날짜 범위를 확인해 주세요.' }, 400)
+        }
+        if (from === '2010-01-01') {
+          return jsonResponse({
+            code: 'EXPORT_RANGE_TOO_LARGE',
+            message: '한 번에 내보낼 수 있는 기간은 최대 10년입니다.',
+          }, 422)
+        }
+        if (from === '2026-08-02') throw new TypeError('network detail')
+        return jsonResponse({ unexpected: true })
+      },
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const from = within(settings).getByLabelText('시작일')
+    const to = within(settings).getByLabelText('종료일')
+    const submit = within(settings).getByRole('button', { name: 'CSV 내려받기' })
+
+    fireEvent.change(from, { target: { value: '2026-08-31' } })
+    fireEvent.change(to, { target: { value: '2026-08-01' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(settings).getByRole('alert'))
+      .toHaveTextContent('날짜 범위를 확인해 주세요.'))
+    expect(from).toHaveValue('2026-08-31')
+    expect(to).toHaveValue('2026-08-01')
+
+    fireEvent.change(from, { target: { value: '2010-01-01' } })
+    fireEvent.change(to, { target: { value: '2026-08-28' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(settings).getByRole('alert'))
+      .toHaveTextContent('한 번에 내보낼 수 있는 기간은 최대 10년입니다.'))
+
+    fireEvent.change(from, { target: { value: '2026-08-02' } })
+    fireEvent.change(to, { target: { value: '2026-08-03' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(settings).getByRole('alert'))
+      .toHaveTextContent('CSV를 내려받지 못했습니다. 네트워크 연결을 확인해 주세요.'))
+
+    fireEvent.change(from, { target: { value: '2026-08-03' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(settings).getByRole('alert'))
+      .toHaveTextContent('CSV 형식의 응답을 받지 못했습니다.'))
+    expect(from).toHaveValue('2026-08-03')
+    expect(to).toHaveValue('2026-08-03')
+    expect(createObjectURL).not.toHaveBeenCalled()
   })
 
   it('manages active paused and ended recurring rules inside Settings', async () => {

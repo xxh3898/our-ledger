@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.2
+version: 1.3
 last_updated: 2026-08-29
 related:
   - 04-api/error-contract.md
@@ -400,6 +400,23 @@ Account는 ASSET→LIABILITY, actual Member PERSONAL→SHARED, `sortOrder`, ID �
 과거 월은 Account opening date 이전 기여도를 0으로 보고 해당 월말까지의 active Transaction Entry를 합산한다. 논리삭제 Transaction은 제외하고 generated recurring Transaction은 일반 원장과 동일하게 포함한다. Goal link/unlink는 결과를 바꾸지 않는다. 별도 Assets aggregate table이나 cache는 사용하지 않는다.
 
 실제 response와 인증 오류는 `AssetsApiDocsTest`의 `assets-read-model`, `assets-authentication-required` snippet으로 검증한다.
+
+## CSV Export API
+
+```text
+GET /api/v1/exports/transactions.csv?from=2026-08-01&to=2026-08-29
+```
+
+- `from`, `to`는 필수 `YYYY-MM-DD`이고 current Household timezone의 포함 날짜다.
+- `from > to`, 누락, parse 실패는 `400 INVALID_REQUEST`다.
+- 시작일을 포함해 최대 3,653일까지 허용하며 초과는 `422 EXPORT_RANGE_TOO_LARGE`다.
+- request에 `householdId`, Member identity, type/scope/Category/Account filter를 받지 않는다.
+- 미삭제 Transaction을 `occurred_at ASC, id ASC`로 읽고 Transaction당 한 row를 만든다.
+- canonical Entry exact set이 손상됐으면 CSV를 쓰기 전에 `409 TRANSACTION_ENTRY_SET_INVALID` JSON 오류로 실패한다.
+
+성공 응답은 `text/csv; charset=UTF-8`, 날짜만 포함한 ASCII attachment filename, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`를 사용한다. UTF-8 BOM과 19개 한국어 고정 column, REFUND/Recurring provenance, RFC 4180 및 formula 방어 계약은 [CSV 거래 내보내기](csv-export.md)를 따른다.
+
+Backend는 Transaction, Entry, Account, Category, Member를 최대 5개 bounded batch query로 조회한다. 별도 export persistence, lock, server temp file, background job은 만들지 않는다. 실제 success/error response와 byte contract는 `TransactionCsvExportApiDocsTest`의 `transaction-csv-export`, `transaction-csv-export-range-too-large` snippet과 `TransactionCsvExportIntegrationTest`로 검증한다.
 
 ## 인증 상태와 CSRF
 

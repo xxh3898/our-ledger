@@ -9,6 +9,7 @@ public enum ApiErrorCode {
     HOUSEHOLD_MEMBERSHIP_AMBIGUOUS("현재 Household를 하나로 결정할 수 없습니다."),
     CSRF_TOKEN_INVALID("요청 위조 방지 token이 없거나 유효하지 않습니다."),
     INVALID_REQUEST("요청 형식을 확인해 주세요."),
+    EXPORT_RANGE_TOO_LARGE("한 번에 내보낼 수 있는 기간은 최대 10년입니다."),
     RESOURCE_NOT_FOUND("현재 Household에서 리소스를 찾을 수 없습니다."),
     RESOURCE_STATE_CONFLICT("현재 상태에서 요청을 처리할 수 없습니다."),
     CATEGORY_NAME_CONFLICT("같은 유형의 활성 Category 이름이 이미 존재합니다."),

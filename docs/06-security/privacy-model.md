@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-29
 related:
   - ADR-008
   - 03-data/data-retention.md
@@ -59,7 +59,15 @@ Access JWT 전체 값이나 Access session cookie를 애플리케이션 데이�
 
 ## Export
 
-CSV는 사용자 재무 데이터 이동성을 제공한다. export 요청도 내부 User 및 Household 권한을 검증하고 임시 파일을 장기 보관하지 않는다.
+CSV는 사용자 재무 데이터 이동성을 제공한다. export 요청도 내부 User 및 Household 권한을 검증하고 서버 파일·history를 보관하지 않는다.
+
+- 포함: Transaction ID, local 발생시각, 유형·금액·귀속, 표시명, Category/Account 이름, memo, Refund/Recurring provenance, audit 시각
+- 제외: Account/Card 전체 번호, `lastFour`, email, Access JWT/cookie, CSRF credential, secret
+- 응답: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`
+- Spreadsheet: 사용자/reference text의 위험 formula prefix를 ASCII apostrophe로 가역 방어
+- 로그: CSV body와 전체 memo를 기록하지 않음
+
+사용자가 내려받은 CSV는 사용자 기기에 재무정보 파일로 남을 수 있으므로 앱은 자동 업로드·공유·장기 server copy를 만들지 않는다. CSV는 운영 backup 또는 삭제 복원 수단이 아니다.
 
 ## 운영자 접근
 

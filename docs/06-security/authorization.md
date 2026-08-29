@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - ADR-001
@@ -67,6 +67,8 @@ Cloudflare Access 정책 자체의 변경은 애플리케이션 권한이 아니
 Basic Ledger controller는 request에 `householdId`를 받지 않고 `CurrentHousehold`를 service에 전달한다. Account, Category Group/Category, Transaction detail은 `id + household_id`로 조회하고 Member/Account/Category/Entry/audit 참조는 DB composite FK로도 같은 Household임을 강제한다. 다른 Household의 ID와 없는 ID는 모두 `404 RESOURCE_NOT_FOUND`로 응답한다.
 
 Marriage Goal endpoint도 request에 Household ID를 받지 않는다. public MARRIAGE Goal은 current principal의 Household로만 조회하고 Account link/unlink는 `accountId + household_id` 경계 안에서 처리한다. Goal/Account/linked actor는 DB composite FK로 같은 Household를 강제하며 foreign Account와 미존재 Account를 모두 `404 RESOURCE_NOT_FOUND`로 일반화한다.
+
+CSV export도 request에서 Household ID나 Member identity를 받지 않는다. `CurrentHousehold.householdId`와 timezone으로 기간 Transaction을 제한하고 Entry·Account·Category·Member batch query에 같은 Household 경계를 적용한다. 다른 Household row는 CSV 생성 후보나 formula 처리 단계에 들어오지 않는다.
 
 ## 인증 성공과 인가 성공의 분리
 

@@ -15,6 +15,7 @@ import {
   createAccount,
   createCategory,
   createCategoryGroup,
+  downloadTransactionCsv,
   loadRecurringTransactions,
   updateRecurringTransaction,
 } from './ledgerApi.ts'
@@ -48,6 +49,88 @@ function recurringInput(recurring: RecurringTransaction): RecurringTransactionIn
     autoPost: true,
     active: recurring.active,
   }
+}
+
+function TransactionExport({ household }: { household: CurrentHousehold }) {
+  const today = todayInTimeZone(household.timezone)
+  const [from, setFrom] = useState(() => `${today.slice(0, 7)}-01`)
+  const [to, setTo] = useState(() => today)
+  const [pending, setPending] = useState(false)
+  const pendingRef = useRef(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (pendingRef.current) return
+    pendingRef.current = true
+    setPending(true)
+    setError(null)
+    setSuccess(false)
+    let objectUrl: string | null = null
+    try {
+      const download = await downloadTransactionCsv(from, to)
+      objectUrl = URL.createObjectURL(download.blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = download.filename
+      link.hidden = true
+      document.body.append(link)
+      try {
+        link.click()
+      } finally {
+        link.remove()
+      }
+      setSuccess(true)
+    } catch (downloadError) {
+      setError(errorMessage(downloadError))
+    } finally {
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
+      pendingRef.current = false
+      setPending(false)
+    }
+  }
+
+  return (
+    <section className="settings-panel" aria-labelledby="transaction-export-title">
+      <div className="panel-heading">
+        <div>
+          <p className="section-kicker">Export</p>
+          <h3 id="transaction-export-title">데이터 내보내기</h3>
+        </div>
+      </div>
+      <p className="field-hint">
+        현재 Household의 유효 거래를 CSV로 내보냅니다. 삭제된 거래는 제외하며,
+        CSV는 운영 backup의 대체물이 아닙니다.
+      </p>
+      <form className="compact-form" onSubmit={submit}>
+        <label>
+          시작일
+          <input
+            required
+            type="date"
+            value={from}
+            onChange={(event) => setFrom(event.target.value)}
+          />
+        </label>
+        <label>
+          종료일
+          <input
+            required
+            type="date"
+            value={to}
+            onChange={(event) => setTo(event.target.value)}
+          />
+        </label>
+        <button className="primary-button" type="submit" disabled={pending}>
+          {pending ? 'CSV 준비 중…' : 'CSV 내려받기'}
+        </button>
+      </form>
+      {pending && <p role="status">CSV를 준비하고 있어요.</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {success && <p className="save-success" role="status">CSV를 내려받았어요.</p>}
+    </section>
+  )
 }
 
 function scheduleText(recurring: RecurringTransaction) {
@@ -579,6 +662,7 @@ export function SettingsSheet({
             accounts={accounts}
             categories={categories}
           />
+          <TransactionExport household={household} />
           <AccountSetup
             currentUserId={currentUserId}
             household={household}

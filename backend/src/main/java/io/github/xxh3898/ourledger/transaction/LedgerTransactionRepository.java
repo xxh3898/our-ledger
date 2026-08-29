@@ -71,6 +71,13 @@ public interface LedgerTransactionRepository
             );
 
     List<LedgerTransaction>
+            findAllByHouseholdIdAndDeletedAtIsNullAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtAscIdAsc(
+                    Long householdId,
+                    Instant fromInclusive,
+                    Instant toExclusive
+            );
+
+    List<LedgerTransaction>
             findAllByHouseholdIdAndTypeAndDeletedAtIsNullOrderByOccurredAtDescIdDesc(
                     Long householdId,
                     TransactionType type

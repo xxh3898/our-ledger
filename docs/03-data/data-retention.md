@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-29
 related:
   - 06-security/privacy-model.md
   - 08-operations/backup-restore.md
@@ -35,6 +35,14 @@ Account, Category, Category Group은 거래가 연결되면 archive한다. archi
 - 애플리케이션 사용자 비밀번호와 `password_hash` 미저장
 - `Cf-Access-Jwt-Assertion`, `CF_Authorization` cookie, CSRF credential 미저장·로그 금지
 - CSV에 내부 기술 식별정보를 최소화
+
+## CSV Export
+
+- CSV는 current Household의 요청 시점 유효 Transaction에서 메모리로 생성하며 export table, history, cache, server temp file을 남기지 않는다.
+- 논리삭제 Transaction은 제외하고 archived Account/Category 이름은 과거 거래 검산을 위해 유지한다.
+- Transaction ID와 REFUND 원거래 ID는 lineage 검산에 필요한 최소 기술 ID로 포함한다.
+- Account/Card 전체 번호, `lastFour`, email, Access/CSRF credential은 포함하지 않는다.
+- CSV는 사용자가 내려받은 뒤 browser와 사용자 기기의 보존 정책을 따르며 서버 운영 backup이나 삭제 복원의 대체물이 아니다.
 
 ## 실제 삭제
 

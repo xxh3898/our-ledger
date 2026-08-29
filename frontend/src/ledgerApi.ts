@@ -488,20 +488,72 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers,
   })
   if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as {
-      code?: string
-      message?: string
-    }
-    throw new LedgerApiError(
-      error.message ?? '요청을 처리하지 못했습니다.',
-      response.status,
-      error.code,
-    )
+    throw await responseError(response)
   }
   if (response.status === 204) {
     return undefined as T
   }
   return (await response.json()) as T
+}
+
+async function responseError(response: Response) {
+  const error = (await response.json().catch(() => ({}))) as {
+    code?: string
+    message?: string
+  }
+  return new LedgerApiError(
+    error.message ?? '요청을 처리하지 못했습니다.',
+    response.status,
+    error.code,
+  )
+}
+
+const safeCsvFilename = /^our-ledger-transactions_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/
+const safeDate = /^\d{4}-\d{2}-\d{2}$/
+
+function csvFallbackFilename(from: string, to: string) {
+  if (!safeDate.test(from) || !safeDate.test(to)) {
+    return 'our-ledger-transactions.csv'
+  }
+  return `our-ledger-transactions_${from}_${to}.csv`
+}
+
+function csvFilename(contentDisposition: string | null, from: string, to: string) {
+  const match = contentDisposition?.match(
+    /(?:^|;)\s*filename\s*=\s*(?:"([^"]*)"|([^;]+))/i,
+  )
+  const candidate = (match?.[1] ?? match?.[2] ?? '').trim()
+  return safeCsvFilename.test(candidate) ? candidate : csvFallbackFilename(from, to)
+}
+
+export async function downloadTransactionCsv(from: string, to: string) {
+  const parameters = new URLSearchParams({ from, to })
+  let response: Response
+  try {
+    response = await fetch(`/api/v1/exports/transactions.csv?${parameters}`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'text/csv' },
+    })
+  } catch {
+    throw new LedgerApiError(
+      'CSV를 내려받지 못했습니다. 네트워크 연결을 확인해 주세요.',
+      0,
+    )
+  }
+  if (!response.ok) {
+    throw await responseError(response)
+  }
+  const contentType = response.headers.get('Content-Type')
+    ?.split(';', 1)[0]
+    .trim()
+    .toLowerCase()
+  if (contentType !== 'text/csv') {
+    throw new LedgerApiError('CSV 형식의 응답을 받지 못했습니다.', response.status)
+  }
+  return {
+    blob: await response.blob(),
+    filename: csvFilename(response.headers.get('Content-Disposition'), from, to),
+  }
 }
 
 export async function loadCurrentUser(signal: AbortSignal): Promise<CurrentUser> {

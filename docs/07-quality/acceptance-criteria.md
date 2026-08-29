@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -35,7 +35,10 @@ related:
 - Assets의 actual Member PERSONAL/SHARED 소계는 Account ownership으로 귀속되고 합이 Household와 일치하며 다른 Household data를 포함하지 않는다.
 - Assets가 Household timezone 직전 11개 완료 월말과 현재 한 점을 반환하고 opening date, logical delete, generated recurring 거래를 같은 원장 의미로 처리한다.
 - Assets 화면이 canonical all/Member/shared URL, accessible 추이 표, loading/error/empty, Account Settings와 Quick Entry 경로를 제공한다.
-- CSV로 지정 기간 데이터를 내보낼 수 있다.
+- Settings에서 Household timezone 현재 월 기본 범위 또는 지정 기간의 current Household 거래 CSV를 내려받을 수 있다.
+- CSV는 미삭제 Transaction당 한 row, 19개 한국어 고정 column, UTF-8 BOM, RFC 4180, 안정 정렬을 지킨다.
+- REFUND/Recurring provenance와 archived reference를 유지하고 canonical Entry 손상은 fail-closed한다.
+- 사용자/reference text의 formula prefix를 방어하며 foreign Household, `lastFour`, email, credential을 포함하지 않는다.
 - PWA를 모바일 홈 화면에 설치할 수 있다.
 
 ## 품질

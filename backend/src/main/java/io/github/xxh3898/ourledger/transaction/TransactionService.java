@@ -28,7 +28,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 public class TransactionService {
@@ -767,84 +766,18 @@ public class TransactionService {
                 .stream()
                 .sorted(Comparator.comparingInt(entry -> entry.getEntryRole().ordinal()))
                 .toList();
-        if (!hasValidEntrySet(transaction, entries)) {
+        if (!TransactionEntrySetValidator.isValid(
+                transaction,
+                entries,
+                accountId -> accountService.requireAccount(
+                        transaction.getHouseholdId(), accountId)
+        )) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     ApiErrorCode.TRANSACTION_ENTRY_SET_INVALID
             );
         }
         return entries;
-    }
-
-    private boolean hasValidEntrySet(
-            LedgerTransaction transaction,
-            List<TransactionAccountEntry> entries
-    ) {
-        if ((transaction.getAdjustmentType() == AdjustmentType.NORMAL
-                && transaction.getReversesTransactionId() != null)
-                || (transaction.getAdjustmentType() == AdjustmentType.REFUND
-                && (transaction.getType() != TransactionType.EXPENSE
-                || transaction.getReversesTransactionId() == null))) {
-            return false;
-        }
-        if (transaction.getType() == TransactionType.TRANSFER) {
-            if (transaction.getAdjustmentType() != AdjustmentType.NORMAL) {
-                return false;
-            }
-            if (entries.size() != 2 || roles(entries).size() != 2) {
-                return false;
-            }
-            TransactionAccountEntry source = entry(entries, EntryRole.SOURCE);
-            TransactionAccountEntry destination = entry(entries, EntryRole.DESTINATION);
-            if (source == null || destination == null
-                    || source.getAccountId().equals(destination.getAccountId())) {
-                return false;
-            }
-            Account sourceAccount = accountService.requireAccount(
-                    transaction.getHouseholdId(), source.getAccountId());
-            Account destinationAccount = accountService.requireAccount(
-                    transaction.getHouseholdId(), destination.getAccountId());
-            long expectedDestinationDelta = destinationAccount.getNature() == AccountNature.ASSET
-                    ? transaction.getAmount()
-                    : Math.negateExact(transaction.getAmount());
-            return sourceAccount.getNature() == AccountNature.ASSET
-                    && sourceAccount.getType() != AccountType.CREDIT_CARD
-                    && source.getBalanceDelta() == Math.negateExact(transaction.getAmount())
-                    && destination.getBalanceDelta() == expectedDestinationDelta;
-        }
-
-        if (entries.size() != 1 || entries.getFirst().getEntryRole() != EntryRole.PRIMARY) {
-            return false;
-        }
-        TransactionAccountEntry primary = entries.getFirst();
-        Account account = accountService.requireAccount(
-                transaction.getHouseholdId(), primary.getAccountId());
-        long expectedDelta;
-        if (transaction.getType() == TransactionType.INCOME
-                && account.getNature() == AccountNature.ASSET
-                && account.getType() != AccountType.CREDIT_CARD) {
-            expectedDelta = transaction.getAmount();
-        } else if (transaction.getType() == TransactionType.EXPENSE
-                && account.getType() == AccountType.CREDIT_CARD
-                && account.getNature() == AccountNature.LIABILITY) {
-            expectedDelta = transaction.getAmount();
-        } else if (transaction.getType() == TransactionType.EXPENSE
-                && account.getNature() == AccountNature.ASSET
-                && account.getType() != AccountType.CREDIT_CARD) {
-            expectedDelta = Math.negateExact(transaction.getAmount());
-        } else {
-            return false;
-        }
-        if (transaction.getAdjustmentType() == AdjustmentType.REFUND) {
-            expectedDelta = Math.negateExact(expectedDelta);
-        }
-        return primary.getBalanceDelta() == expectedDelta;
-    }
-
-    private Set<EntryRole> roles(List<TransactionAccountEntry> entries) {
-        return entries.stream()
-                .map(TransactionAccountEntry::getEntryRole)
-                .collect(Collectors.toSet());
     }
 
     private TransactionAccountEntry entry(
