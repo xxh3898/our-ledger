@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.2
+version: 1.3
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -155,6 +155,23 @@ Assets Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
 - current trend 점과 current summary의 같은 snapshot 일치, Account 없음 12개 zero point
 - current balance·baseline·월 delta의 bounded batch query 구조와 N+1 부재
 - canonical Assets response, `lastFour` 비노출, 인증 REST Docs
+
+Immutable Production Runtime Harness Slice는 추가로 다음을 실제 Docker runtime에서 검증한다.
+
+- Java 25 JDK→Distroless Temurin Java 25와 Node 24→Nginx multi-stage clean build, tag+manifest digest 고정
+- Dockerfile-specific context allowlist와 최종 API image의 shell/package manager/build tool/source/test/cache, Web image의 Node/npm/source/node_modules 부재
+- API/Web non-root, read-only root filesystem, `cap_drop: ALL`, `no-new-privileges`, tmpfs, pid/resource limit
+- PostgreSQL official entrypoint 호환 named volume, internal database network, API/DB host publish 부재
+- Web 유일 port의 `127.0.0.1` ephemeral bind와 source/Docker socket/host network/privileged 부재
+- Nginx root, hashed asset, SPA deep link와 `no-store`/immutable cache header
+- `/api`와 `/api/**`의 canonical JSON 401, forged local identity 401, API body/status/content type passthrough
+- Cloudflare JWT/Host/X-Forwarded-For/X-Forwarded-Proto/request ID proxy directive와 CSV `Content-Disposition` 비은닉
+- public `/actuator/**` 404, safe static `/healthz`, internal API readiness
+- production profile의 env datasource, Cloudflare required 설정, bootstrap false, recurring scheduler true
+- disposable PostgreSQL의 Flyway V1→V8 clean history, API restart 뒤 history/readiness 유지
+- Spring graceful shutdown log/exit와 성공·실패 trap 이후 project container/network/volume/image tag residue 0
+
+`scripts/verify-production-runtime.sh`는 실제 운영 값 대신 고유 Compose project, Docker가 할당한 loopback port, 합성 credential과 disposable volume만 사용한다. 같은 script를 local `verify.sh`와 Hosted Full CI exact HEAD에서 실행한다. 실제 production deployment, migration, backup/restore, Cloudflare/Tunnel과 monitor는 이 테스트 대상이 아니다.
 
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
@@ -337,4 +354,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene를 검증한다.
+`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime smoke를 검증한다.

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.7
+version: 0.8
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -22,8 +22,9 @@ related:
 | 결혼자금 | 8 | O | O | Account 연결, 중복 입력 금지 |
 | 자산 흐름 | 9 | O | O | ASSET-LIABILITY |
 | CSV 내보내기 | 10A | O | O | current Household, canonical Entry, formula 방어, no-store |
-| PWA 설치 | 10B | - | - | manifest, service worker, production icon |
-| Production runtime | 10C | - | - | Compose, backup/restore, observability |
+| Immutable runtime | 10C-1 | O | O | multi-stage image, same-origin Nginx, production Compose/smoke |
+| Runtime lifecycle | 10C-2 | - | - | backup/restore, observability, 운영 runbook |
+| PWA 설치 | 10B | - | - | 최종 한글 이름·production icon 결정까지 HOLD |
 | Production activation | 10D | - | - | Access/Tunnel, secret, bootstrap, deploy |
 
 ## Slice 5 Budget 구현
@@ -77,6 +78,15 @@ related:
 - Frontend: Settings의 기간 form, pending/error/success, 안전한 filename fallback, Blob URL 즉시 회수
 - 보안: CurrentHousehold만 사용, `no-store`/`nosniff`, `lastFour`·email·credential 비노출
 - 제한: import, XLSX, 세부 filter, async/history/temp file, PWA, backup 실행, production activation 없음
+
+## Slice 10C-1 Immutable Runtime Harness 구현
+
+- Image: Java 25 JDK→Distroless Java 25 API와 Node 24 build→Nginx Web multi-stage, base manifest digest 고정
+- Nginx: non-root 8080, SPA/static과 `/api/**` same-origin, API/CSV no-store, hashed asset immutable, `/actuator/**` 차단
+- Spring: `production` profile, env datasource, Flyway, JPA validate, Cloudflare 필수 설정, local identity/자동 bootstrap fail-closed
+- Compose: Web loopback-only publish, API/DB host port 없음, PostgreSQL named volume/internal network, app read-only/capability hardening
+- 검증: 고유 project·임시 port·합성 설정·disposable volume의 clean build/start/restart/graceful stop와 residue 0
+- 제한: PWA, image push, Cloudflare/Tunnel, 실제 secret/User/DB, backup/restore, observability, deploy 없음
 
 ## 공통 요구
 

@@ -1,0 +1,14 @@
+**
+!frontend
+!frontend/index.html
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/tsconfig.app.json
+!frontend/tsconfig.node.json
+!frontend/vite.config.ts
+!frontend/src
+!frontend/src/**
+!infra
+!infra/nginx
+!infra/nginx/nginx.conf

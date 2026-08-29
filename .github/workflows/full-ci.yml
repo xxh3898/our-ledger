@@ -38,3 +38,13 @@ jobs:
 
   frontend:
     uses: ./.github/workflows/frontend-ci.yml
+
+  production-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Production runtime 검증
+        run: ./scripts/verify-production-runtime.sh

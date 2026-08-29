@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 10A — CSV Export
-- 구현 코드: Auth/Household부터 Assets까지의 canonical 원장·분석·Goal 흐름과 Settings 기간 지정 CSV 내보내기
+- 단계: Slice 10C-1 — Immutable Production Runtime Harness
+- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름과 immutable Backend/Frontend image, same-origin Nginx, production Compose smoke harness
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -37,7 +37,9 @@
 - CSV 내보내기
 - PWA 설치
 
-현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니며 PWA와 production activation은 후속 Gate다.
+현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니다.
+
+Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고, Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가한다. 실제 Cloudflare/Tunnel, production secret/User/DB, backup·restore, observability activation과 deploy는 포함하지 않는다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
 
 ## 기술 기준
 
@@ -88,10 +90,11 @@ our-ledger/
 ├─ README.md
 ├─ backend/             # Spring Boot API, Flyway, Gradle Wrapper
 ├─ frontend/            # React/TypeScript/Vite, npm lockfile
-├─ infra/               # production 자산은 후속 Slice에서 추가
+├─ infra/               # immutable image와 non-root Nginx production 자산
 ├─ docs/                # 제품·domain·data·quality 계약
 ├─ scripts/             # local/CI 검증 진입점
 ├─ compose.dev.yaml     # local 개발 전용
+├─ compose.prod.yaml    # image 기반 production origin harness
 ├─ compose.verify.yaml  # host runtime이 없을 때의 격리 검증
 └─ .github/
 ```
@@ -147,9 +150,11 @@ docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app down
 ./scripts/verify.sh
 ```
 
-이 명령은 repository/docs/Flyway/Compose 검사, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build를 순서대로 실행한다.
+이 명령은 repository/docs/Flyway/Compose 검사, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build, disposable production runtime smoke를 순서대로 실행한다.
 
-host에 Java 25 또는 Node.js 24가 없으면 `compose.verify.yaml`의 격리 container를 사용한다. 이 fallback은 운영 resource나 Docker socket을 참조하지 않으며 검증 PostgreSQL data는 container 종료와 함께 사라지고 dependency cache volume은 보존된다. Hosted Backend CI는 기본 Testcontainers 경로를 사용한다.
+host에 Java 25 또는 Node.js 24가 없으면 `compose.verify.yaml`의 격리 container를 사용한다. 이 fallback은 운영 resource나 Docker socket을 참조하지 않으며 검증 PostgreSQL data는 container 종료와 함께 사라지고 dependency cache volume은 보존된다. production runtime smoke는 매번 고유 Compose project와 임시 loopback port, 합성 credential, disposable PostgreSQL volume을 사용하고 성공·실패 모두에서 container/network/volume과 검증 image tag를 제거한다. Hosted Backend CI는 기본 Testcontainers 경로를 사용한다.
+
+production harness의 image build, 환경변수, render/start/inspect/stop/rollback 계약은 [`infra/README.md`](infra/README.md)를 따른다. 문서의 명령은 운영 실행 승인이나 실제 deploy 완료를 의미하지 않는다.
 
 ## 범위 밖
 

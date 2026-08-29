@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.6
+version: 0.7
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -52,6 +52,19 @@ related:
 - 핵심 모바일 E2E 통과
 - API 응답과 로그에 secret·Access JWT·Access cookie·stack trace 없음
 
+### Slice 10C-1 Immutable Runtime Harness Gate
+
+- Java 25 Backend와 Node 24 Frontend가 multi-stage로 build되고 최종 image에 shell/package manager/build tool/source/test/cache가 남지 않는다.
+- API와 Web runtime이 non-root로 실행되고 Web/API root filesystem은 read-only이며 capability와 privilege escalation이 차단된다.
+- Nginx가 `/`와 SPA deep link를 정적 frontend로, `/api`와 `/api/**`를 Spring API로만 전달한다.
+- Cloudflare Access JWT, original Host, forwarded address/proto, request ID가 API proxy에 전달되고 status/body/content type/CSV `Content-Disposition`을 숨기지 않는다.
+- API/CSV와 `index.html`은 `no-store`, hashed asset은 immutable cache를 사용한다.
+- `/actuator/**`는 public Nginx에서 404이고 `/healthz`는 backend/DB 세부정보가 없는 정적 응답이다.
+- production profile에서 missing/blank Cloudflare/DB 설정이 fail-closed하고 forged local identity만으로 API에 접근할 수 없다.
+- production Compose는 Web만 loopback port에 publish하고 API/DB host port, source bind mount, host network, privileged, Docker socket을 사용하지 않는다.
+- disposable smoke에서 Flyway V1→V8, JPA validate, API restart 후 schema history 유지, graceful stop과 resource residue 0을 검증한다.
+- Hosted Full CI가 PR exact HEAD의 같은 runtime smoke를 통과한다.
+
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
@@ -63,6 +76,8 @@ related:
 - 자동 backup 성공 확인
 - 별도 환경에서 restore drill 1회 성공
 - health check와 uptime monitor 확인
+
+위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, backup/restore와 uptime monitor는 10C-1 완료 기준이 아니다. 10C-1은 합성 설정과 disposable resource의 origin harness 검증까지만 수행하며 10C-2/10D에서 별도 승인·검증한다.
 
 ## 문서
 
