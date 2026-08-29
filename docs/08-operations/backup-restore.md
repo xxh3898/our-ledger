@@ -11,7 +11,7 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. host 설치, backup/migration 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. Slice 10D-2B1은 public standalone wrapper의 project operation lock과 lock을 다시 얻지 않는 internal backup core를 분리해 future deploy의 nested self-deadlock을 제거한다. host 설치, backup/migration 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
 
 실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
@@ -58,11 +58,11 @@ Slice 10C-2B1의 `production-status.sh`는 이 marker와 strict inventory를 bac
   --backup-dir <absolute-dedicated-owner-only-directory>
 ```
 
-command는 exact repository `compose.prod.yaml`, project/config/image label, PostgreSQL running/healthy, project-scoped volume/internal network를 확인한다. `pg_dump → dump fsync → pg_restore --list → Flyway post-check → sidecar/hash → partial directory fsync → final rename → backup directory fsync → last-success atomic replace → backup directory fsync` 순서로 publish한다. stdout에는 final artifact path, UTC timestamp와 schema version만 출력한다. failure는 nonzero exit다.
+public command는 fixed production app root의 B1 host worker를 통해 shared project operation lock을 먼저 얻고, pending recovery가 없을 때만 non-executable internal core를 호출한다. core는 exact runtime-config release의 artifact 이름 `compose.yaml`, project/config/image label, PostgreSQL running/healthy, project-scoped volume/internal network를 확인한다. `pg_dump → dump fsync → pg_restore --list → Flyway post-check → sidecar/hash → partial directory fsync → final rename → backup directory fsync → last-success atomic replace → backup directory fsync` 순서로 publish한다. stdout에는 final artifact path, UTC timestamp와 schema version만 출력한다. failure는 nonzero exit다.
 
-backup window 전후 successful Flyway version이 같고 failed migration count가 모두 0인 경우에만 artifact를 publish한다. version 변화나 failed row를 감지하면 sidecar/final bundle을 만들지 않고 partial을 폐기하며 기존 `last-success.json`을 유지한다. 이 gate는 migration과 backup의 mutual exclusion을 제공하지 않고, overlap이 관측된 archive를 성공으로 인정하지 않는 fail-closed 경계다.
+backup window 전후 successful Flyway version이 같고 failed migration count가 모두 0인 경우에만 artifact를 publish한다. version 변화나 failed row를 감지하면 sidecar/final bundle을 만들지 않고 partial을 폐기하며 기존 `last-success.json`을 유지한다. shared project lock은 B1/B2가 관리하는 deploy와 standalone backup을 직렬화하고, pre/post Flyway gate는 lock authority 밖의 예기치 않은 migration overlap까지 성공으로 인정하지 않는 fail-closed 방어다.
 
-동일 backup directory의 concurrent 실행은 lock directory로 차단한다. stale lock은 실행 중인 backup과 partial/final/marker 상태 확인 없이 자동 제거하지 않는다.
+deploy와 standalone backup의 concurrent 실행은 fixed app root의 `operations/lock` atomic directory 하나로 차단한다. lock은 current owner mode `0700`, non-blocking이며 stale lock을 PID만 보고 자동 제거하거나 steal하지 않는다. public `--skip-lock`과 environment bypass는 없다. internal core는 public 진입점이 아니고 future deploy가 이미 shared lock을 가진 상태에서만 직접 호출한다.
 
 ## 보관기간
 
@@ -85,7 +85,7 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 
 ## Future schedule과 offsite
 
-`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. 10D-1은 plist를 설치하거나 실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 dry run은 10D-2B, LaunchAgent load와 scheduled backup 실행은 10D-3의 별도 운영 승인이다.
+`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. B1은 plist나 fixed app root를 설치·실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 dry run은 10D-2B2, LaunchAgent load와 scheduled backup 실행은 10D-3의 별도 운영 승인이다.
 
 future offsite는 다음 순서를 따른다.
 
@@ -142,4 +142,4 @@ production DB를 drop/recreate하거나 `docker compose down --volumes`하는 co
 - CSV는 지정 기간의 미삭제 Transaction과 최소 reference/provenance만 포함하며 schema, Flyway history, 논리삭제 row, 운영 설정을 복구하지 못한다.
 - CSV 성공은 `pg_dump`, 외부 보관, retention, restore drill 성공을 의미하지 않는다.
 - 서버는 CSV history나 temp file을 backup처럼 보관하지 않는다.
-- 10C-2A source/drill, 10D-1 immutable transport와 10D-2A candidate migration gate는 구현됐지만 production backup/migration/restore 실행과 보관·외부복제 활성화는 10D-2B/10D-3의 별도 운영 Gate다.
+- 10C-2A source/drill, 10D-1 immutable transport, 10D-2A candidate migration과 10D-2B1 shared lock/state source gate는 구현됐지만 production backup/migration/restore 실행과 host install·보관·외부복제 활성화는 10D-2B2/10D-3의 별도 운영 Gate다.

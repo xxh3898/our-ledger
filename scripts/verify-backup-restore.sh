@@ -4,14 +4,18 @@ set -euo pipefail
 umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-COMPOSE_FILE="$ROOT_DIR/compose.prod.yaml"
-BACKUP_COMMAND="$ROOT_DIR/scripts/backup-production.sh"
+cd "$ROOT_DIR"
 ARTIFACT_HELPER="$ROOT_DIR/scripts/backup_tools/backup_artifact.py"
 FIXTURE_SQL="$ROOT_DIR/scripts/backup_tools/fixture.sql"
 STATE_SQL="$ROOT_DIR/scripts/backup_tools/state-fingerprint.sql"
 INTEGRITY_SQL="$ROOT_DIR/scripts/backup_tools/integrity-check.sql"
 STATE_CHECKER="$ROOT_DIR/scripts/backup_tools/check_fixture_state.py"
 POSTGRES_IMAGE="postgres:18.6-alpine3.23@sha256:697c180dbf244d3ce4a8f4cbc0156cde840af055c1bf8b76aebe422a4822086f"
+git_head="$(git rev-parse HEAD)"
+[[ "$git_head" =~ ^[0-9a-f]{40}$ ]] || {
+  printf 'Backup/Restore source HEAD가 exact commit SHA가 아닙니다.\n' >&2
+  exit 1
+}
 
 fail() {
   echo "$1" >&2
@@ -27,6 +31,10 @@ runtime_temp_root="${TMPDIR:-/tmp}"
 runtime_temp_dir="$(mktemp -d "$runtime_temp_root/our-ledger-backup-restore.XXXXXX")"
 runtime_temp_dir="$(cd "$runtime_temp_dir" && pwd -P)"
 chmod 700 "$runtime_temp_dir"
+synthetic_app_root="$runtime_temp_dir/host"
+runtime_source="$runtime_temp_dir/runtime-source"
+runtime_digest="sha256:$(printf 'd%.0s' {1..64})"
+runtime_release="$synthetic_app_root/runtime-config/releases/${runtime_digest#sha256:}"
 
 case "$runtime_temp_dir" in
   */our-ledger-backup-restore.*) ;;
@@ -52,6 +60,93 @@ mkdir -m 700 \
   "$failure_backup_dir" \
   "$fault_bin_dir" \
   "$fault_python_dir"
+
+python3 -B - "$ROOT_DIR" "$runtime_source" "$git_head" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+source = Path(sys.argv[2])
+git_head = sys.argv[3]
+sys.path.insert(0, str(repo))
+
+from scripts.host_tools.host_state import RELEASE_DIRECTORIES, RELEASE_FILES
+
+source.mkdir(mode=0o700)
+for relative in sorted(RELEASE_DIRECTORIES, key=lambda item: item.count("/")):
+    (source / relative).mkdir(mode=0o700)
+
+labels = {
+    "io.homeserver.cleanup.environment": "development",
+    "io.homeserver.cleanup.project": "our-ledger",
+    "io.homeserver.cleanup.task": "issue-41-host-state-runtime-config-staging",
+    "io.homeserver.cleanup.lifecycle": "task",
+    "io.homeserver.cleanup.retain": "false",
+    "io.homeserver.cleanup.git-head": git_head,
+}
+targets = {
+    "services": {"web", "api", "api-migration", "postgres"},
+    "networks": {"application", "database"},
+    "volumes": {"postgres-data"},
+}
+
+def labeled_compose(value: str) -> str:
+    output = []
+    section = None
+    for line in value.splitlines():
+        if line and not line.startswith(" ") and line.endswith(":"):
+            section = line[:-1]
+        output.append(line)
+        if (
+            section in targets
+            and line.startswith("  ")
+            and not line.startswith("    ")
+            and line.endswith(":")
+        ):
+            name = line.strip()[:-1]
+            if name in targets[section]:
+                output.append("    labels:")
+                for key, label_value in labels.items():
+                    output.append(f'      {key}: "{label_value}"')
+    return "\n".join(output) + "\n"
+
+for relative, mode in RELEASE_FILES.items():
+    target = source / relative
+    repository_relative = "compose.prod.yaml" if relative == "compose.yaml" else relative
+    repository_source = repo / repository_relative
+    if relative == "compose.yaml":
+        target.write_text(
+            labeled_compose(repository_source.read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
+    else:
+        shutil.copyfile(repository_source, target)
+    target.chmod(mode)
+PY
+
+python3 -B -m scripts.host_tools.synthetic_host \
+  --app-root "$synthetic_app_root" \
+  activate \
+  --source-root "$runtime_source" \
+  --application-revision "$git_head" \
+  --runtime-config-digest "$runtime_digest" \
+  --runtime-config-revision "$git_head"
+
+COMPOSE_FILE="$runtime_release/compose.yaml"
+BACKUP_COMMAND=(
+  python3 -B -m scripts.host_tools.synthetic_host
+  --app-root "$synthetic_app_root"
+  backup
+)
+cleanup_labels=(
+  --label io.homeserver.cleanup.environment=development
+  --label io.homeserver.cleanup.project=our-ledger
+  --label io.homeserver.cleanup.task=issue-41-host-state-runtime-config-staging
+  --label io.homeserver.cleanup.lifecycle=task
+  --label io.homeserver.cleanup.retain=false
+  --label "io.homeserver.cleanup.git-head=$git_head"
+)
 {
   printf 'OUR_LEDGER_WEB_IMAGE=%s\n' "$unused_web_image"
   printf 'OUR_LEDGER_API_IMAGE=%s\n' "$api_image"
@@ -83,6 +178,27 @@ failure_compose=(
   --env-file "$env_file"
   --file "$COMPOSE_FILE"
 )
+
+"${source_compose[@]}" config --format json \
+  | python3 -B -c '
+import json
+import sys
+
+git_head = sys.argv[1]
+config = json.load(sys.stdin)
+expected = {
+    "io.homeserver.cleanup.environment": "development",
+    "io.homeserver.cleanup.project": "our-ledger",
+    "io.homeserver.cleanup.task": "issue-41-host-state-runtime-config-staging",
+    "io.homeserver.cleanup.lifecycle": "task",
+    "io.homeserver.cleanup.retain": "false",
+    "io.homeserver.cleanup.git-head": git_head,
+}
+for group in ("services", "networks", "volumes"):
+    for resource in config[group].values():
+        if resource.get("labels") != expected:
+            raise SystemExit("synthetic cleanup labels differ")
+' "$git_head"
 
 run_candidate_migration() {
   local project_kind="$1"
@@ -228,36 +344,36 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
   "$ROOT_DIR/scripts/backup_tools/test_backup_artifact.py"
 
 expect_failure "missing env file" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name missing-project \
     --env-file "$runtime_temp_dir/missing.env" \
     --backup-dir "$failure_backup_dir"
 expect_failure "missing backup directory" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name missing-project \
     --env-file "$env_file" \
     --backup-dir "$runtime_temp_dir/missing-backups"
 expect_failure "repository backup directory" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name missing-project \
     --env-file "$env_file" \
     --backup-dir "$ROOT_DIR"
 expect_failure "root backup directory" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name missing-project \
     --env-file "$env_file" \
     --backup-dir /
 
 chmod 500 "$failure_backup_dir"
 expect_failure "unwritable backup directory" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name missing-project \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"
 chmod 700 "$failure_backup_dir"
 
 expect_failure "missing Compose project/postgres service" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name "our-ledger-backup-missing-$run_token" \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"
@@ -267,9 +383,28 @@ docker build \
   --progress plain \
   --no-cache \
   --pull \
+  "${cleanup_labels[@]}" \
   --tag "$api_image" \
   --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
   "$ROOT_DIR"
+
+docker image inspect "$api_image" \
+  | python3 -B -c '
+import json
+import sys
+
+labels = json.load(sys.stdin)[0]["Config"]["Labels"]
+expected = {
+    "io.homeserver.cleanup.environment": "development",
+    "io.homeserver.cleanup.project": "our-ledger",
+    "io.homeserver.cleanup.task": "issue-41-host-state-runtime-config-staging",
+    "io.homeserver.cleanup.lifecycle": "task",
+    "io.homeserver.cleanup.retain": "false",
+    "io.homeserver.cleanup.git-head": sys.argv[1],
+}
+if any(labels.get(key) != value for key, value in expected.items()):
+    raise SystemExit("synthetic API image cleanup labels differ")
+' "$git_head"
 
 "${source_compose[@]}" up --detach --wait --wait-timeout 120 postgres
 run_candidate_migration source "$runtime_temp_dir/source-migration.log"
@@ -302,7 +437,7 @@ printf '%s' "$source_state" | python3 "$STATE_CHECKER"
 
 printf '\n[backup/restore 4/11] production-safe one-shot custom backup\n'
 source_api_started_at="$(docker inspect --format '{{.State.StartedAt}}' "$source_api_id")"
-"$BACKUP_COMMAND" \
+"${BACKUP_COMMAND[@]}" \
   --project-name "$source_project" \
   --env-file "$env_file" \
   --backup-dir "$backup_dir" \
@@ -354,13 +489,13 @@ printf '\n[backup/restore 5/11] marker preservation and injected backup failures
 marker_sha_before="$(file_sha256 "$marker_path")"
 bundle_count_before="$(bundle_count)"
 
-mkdir -m 700 "$backup_dir/.our-ledger-backup.lock"
-expect_failure "concurrent backup lock" \
-  "$BACKUP_COMMAND" \
+mkdir -m 700 "$synthetic_app_root/operations/lock"
+expect_failure "concurrent project operation lock" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name "$source_project" \
     --env-file "$env_file" \
     --backup-dir "$backup_dir"
-rmdir "$backup_dir/.our-ledger-backup.lock"
+rmdir "$synthetic_app_root/operations/lock"
 
 real_docker="$(command -v docker)"
 fault_docker="$fault_bin_dir/docker"
@@ -410,7 +545,7 @@ expect_failure "pg_dump command" \
     PATH="$fault_bin_dir:$PATH" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=pg-dump \
-    "$BACKUP_COMMAND" \
+    "${BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -421,7 +556,7 @@ expect_failure "dump fsync" \
   env \
     PYTHONPATH="$fault_python_dir" \
     OUR_LEDGER_FAULT_MODE=dump-fsync \
-    "$BACKUP_COMMAND" \
+    "${BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -433,7 +568,7 @@ expect_failure "Flyway schema version overlap" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=schema-version-change \
     OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/schema-version-state" \
-    "$BACKUP_COMMAND" \
+    "${BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -445,7 +580,7 @@ expect_failure "post-check failed Flyway migration" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=post-failed-migration \
     OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/post-failed-state" \
-    "$BACKUP_COMMAND" \
+    "${BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -602,7 +737,7 @@ fi
 
 "${failure_compose[@]}" stop --timeout 30 postgres >/dev/null
 expect_failure "stopped/unhealthy postgres" \
-  "$BACKUP_COMMAND" \
+  "${BACKUP_COMMAND[@]}" \
     --project-name "$failure_project" \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"

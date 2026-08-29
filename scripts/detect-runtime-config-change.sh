@@ -53,6 +53,9 @@ if git diff --quiet \
   runtime-config.Dockerfile \
   scripts/backup-production.sh \
   scripts/backup_tools/backup_artifact.py \
+  scripts/backup_tools/backup_core.sh \
+  scripts/host_tools/host_state.py \
+  scripts/host_tools/production_host.py \
   scripts/monitor-production.sh \
   scripts/production-status.sh \
   scripts/release_tools/release_contract.py \
