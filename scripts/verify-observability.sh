@@ -43,7 +43,7 @@ export CLOUDFLARE_ACCESS_ISSUER=https://observability.cloudflareaccess.example
 export CLOUDFLARE_ACCESS_JWK_SET_URI=https://observability.cloudflareaccess.example/certs
 export CLOUDFLARE_ACCESS_AUDIENCE=observability-audience
 export OUR_LEDGER_RECURRING_INITIAL_DELAY_MS=0
-export OUR_LEDGER_RECURRING_POLL_DELAY_MS=2000
+export OUR_LEDGER_RECURRING_POLL_DELAY_MS=10000
 
 umask 077
 {
