@@ -21,7 +21,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 @Configuration(proxyBeanMethods = false)
-@Profile("!local & !test")
+@Profile("!local & !test & !migration")
 @EnableConfigurationProperties(CloudflareAccessProperties.class)
 public class CloudflareAccessSecurityConfiguration {
 

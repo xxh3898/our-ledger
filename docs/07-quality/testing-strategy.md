@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.7
-last_updated: 2026-08-29
+version: 1.8
+last_updated: 2026-08-30
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -167,11 +167,14 @@ Immutable Production Runtime Harness Slice는 추가로 다음을 실제 Docker 
 - `/api`와 `/api/**`의 canonical JSON 401, forged local identity 401, API body/status/content type passthrough
 - Cloudflare JWT/Host/X-Forwarded-For/X-Forwarded-Proto/request ID proxy directive와 CSV `Content-Disposition` 비은닉
 - public `/actuator/**` 404, safe static `/healthz`, internal API readiness
-- production profile의 env datasource, Cloudflare required 설정, bootstrap false, recurring scheduler true
-- disposable PostgreSQL의 Flyway V1→V8 clean history, API restart 뒤 history/readiness 유지
+- normal production profile의 env datasource, Cloudflare required 설정, Flyway false, JPA validate, bootstrap false와 recurring scheduler true
+- 같은 candidate image의 profile-gated one-shot에서만 Flyway true, Web NONE, bootstrap/scheduler false와 명시적 exit 0
+- unmigrated DB normal startup의 schema mutation 없는 failure, one-shot V1→V8 clean history와 migrated normal API restart 뒤 history/readiness 유지
+- migration idempotent rerun의 fixture/cursor 불변, failed Flyway history, synthetic schema damage, unreachable DB, invalid profile/flag의 nonzero와 credential/PII 비노출
+- V1~V8 migration regular file의 filename과 byte SHA-256 고정
 - Spring graceful shutdown log/exit와 성공·실패 trap 이후 project container/network/volume/image tag residue 0
 
-`scripts/verify-production-runtime.sh`는 실제 운영 값 대신 고유 Compose project, Docker가 할당한 loopback port, 합성 credential과 disposable volume만 사용한다. 같은 script를 local `verify.sh`와 Hosted Full CI exact HEAD에서 실행한다. 실제 production deployment, migration, backup/restore, Cloudflare/Tunnel과 monitor는 이 테스트 대상이 아니다.
+`scripts/verify-production-runtime.sh`는 실제 운영 값 대신 고유 Compose project, Docker가 할당한 loopback port, 합성 credential과 disposable volume만 사용한다. `api-migration`과 normal `api`는 같은 exact-HEAD image를 사용하며 같은 script를 local `verify.sh`와 Hosted Full CI exact HEAD에서 실행한다. 실제 production deployment, migration, backup/restore, Cloudflare/Tunnel과 monitor는 이 테스트 대상이 아니다.
 
 Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
 
@@ -185,7 +188,7 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 - 2 User/1 Household/2 Member, 세 Account nature/type, Category, INCOME/EXPENSE/TRANSFER/REFUND와 Budget/Recurring/Goal synthetic fixture
 - source와 별도 고유 project/network/volume의 empty PostgreSQL에 fail-fast single-transaction restore
 - Flyway V1→V8, core row, Transaction/Entry/Refund lineage, Account balance와 net worth source/target equality
-- Household composite FK/Entry·Goal Account unique enforcement와 exact-HEAD production API JPA/readiness startup 뒤 state 불변
+- Household composite FK/Entry·Goal Account unique enforcement, restored V8의 same-image migration rerun과 normal production API JPA/readiness startup 뒤 state 불변
 - missing restore DB failure와 성공·실패 trap 뒤 exact project container/network/volume/image tag residue 0
 
 `scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
@@ -202,7 +205,7 @@ Operational Status Harness는 추가로 다음을 검증한다.
 - container environment, raw health body, secret/email/재무 상세/artifact 이름/absolute path가 snapshot에 없는 privacy allowlist
 - status command가 `config --quiet`, `ps`, `inspect`, GET-only container exec 밖의 backup/DB/service/file mutation을 호출하지 않음
 
-`scripts/verify-observability.sh`는 exact-HEAD API/Web image, 고유 Compose project와 owner-only 합성 backup/DB fixture로 poll success, generated occurrence, isolated rule failure, API unavailable, process 재시작 뒤 not-yet-run reset과 public actuator 404를 검증한다. 성공·실패 뒤 container/network/volume/image/temp residue 0과 backup byte-identical을 요구한다. local `verify.sh`와 Hosted Full CI의 독립 `observability` job에서 실행하며 실제 production status/monitor/alert는 대상이 아니다.
+`scripts/verify-observability.sh`는 exact-HEAD API/Web image, 고유 Compose project와 owner-only 합성 backup/DB fixture를 사용한다. 같은 candidate image의 migration one-shot을 먼저 완료한 뒤 normal API에서 poll success, generated occurrence, isolated rule failure, API unavailable, process 재시작 뒤 not-yet-run reset과 public actuator 404를 검증한다. 성공·실패 뒤 container/network/volume/image/temp residue 0과 backup byte-identical을 요구한다. local `verify.sh`와 Hosted Full CI의 독립 `observability` job에서 실행하며 실제 production status/monitor/alert는 대상이 아니다.
 
 Monitor/Alert Policy Harness는 추가로 다음을 검증한다.
 
@@ -229,7 +232,7 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
 - publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
 - GHCR token stdin-only restricted SSH boundary와 token/secret의 command argument·artifact 비포함
-- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2 host install authority와 분리한다.
+- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
 `scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 runtime-config source만 build/extract한다. 합성 `.env.production.example`로 Compose render와 공개 script help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.

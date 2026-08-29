@@ -94,6 +94,7 @@ docker compose \
 docker compose \
   --env-file "$ROOT_DIR/.env.production.example" \
   -f "$ROOT_DIR/compose.prod.yaml" \
+  --profile migration \
   config --format json \
   | python3 "$ROOT_DIR/scripts/check-production-compose.py"
 

@@ -183,7 +183,23 @@ PY
 }
 backup_before="$(backup_fingerprint)"
 
-printf '\n[observability 4/8] disposable production-like stack\n'
+printf '\n[observability 4/8] disposable migration and production-like stack\n'
+"${compose[@]}" up --detach --wait --wait-timeout 120 postgres
+"${compose[@]}" run --rm --no-deps api-migration \
+  > "$status_root/candidate-migration.log" 2>&1
+if [[ "$(grep -Fxc 'migration-validation: success' \
+  "$status_root/candidate-migration.log")" != "1" ]]; then
+  echo "Observability fixture candidate migration marker가 올바르지 않습니다." >&2
+  exit 1
+fi
+if grep -Fq -- "$runtime_password" "$status_root/candidate-migration.log"; then
+  echo "Observability candidate migration log에 synthetic credential이 노출됐습니다." >&2
+  exit 1
+fi
+if grep -Fq 'jdbc:postgresql://' "$status_root/candidate-migration.log"; then
+  echo "Observability candidate migration success output에 connection URL이 노출됐습니다." >&2
+  exit 1
+fi
 "${compose[@]}" up --detach --wait --wait-timeout 240
 published_address="$("${compose[@]}" port web 8080)"
 if [[ "$published_address" != 127.0.0.1:* ]]; then

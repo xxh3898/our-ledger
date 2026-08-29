@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.7
-last_updated: 2026-08-29
+version: 0.8
+last_updated: 2026-08-30
 related:
   - AGENTS.md
   - ADR-008
@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/status/backup/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/status/backup/migration/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
 
 ## 목표 구조
 
@@ -66,6 +66,7 @@ originRequest:
 
 - `web`: Node 24에서 build한 Vite `dist`를 제공하는 non-root Nginx 1.30.4
 - `api`: shell/package manager/Gradle/source 없이 Distroless Temurin Java 25와 Spring Boot jar만 포함한 non-root runtime
+- `api-migration`: `migration` Compose profile에서만 보이는 동일 API image의 no-port, restart-disabled one-shot Flyway/JPA validation service
 - `postgres`: PostgreSQL 18.6 official image와 project-scoped named volume
 
 `backup`과 `cloudflared` service는 production Compose에 포함하지 않는다. backup은 관리 host가 existing `postgres` service 안의 logical client를 일회성 호출하며 source/DB volume 또는 Docker socket을 application container에 mount하지 않는다. production DB는 internal database network에서만 접근하고 host port를 publish하지 않는다. API도 host port가 없으며 Nginx만 `127.0.0.1:${OUR_LEDGER_ORIGIN_PORT}`에 publish한다.
@@ -81,6 +82,24 @@ Web/API image의 build stage와 runtime stage는 분리하고 base image tag와 
 production secret은 저장소에 두지 않는다. `.env.production.example`에는 변수 이름과 무해한 placeholder만 기록하고 실제 허용 이메일, Access audience, tunnel credential, DB password를 넣지 않는다. 환경변수 표와 render/start/inspect/stop 명령은 [`infra/README.md`](../../infra/README.md)를 따른다.
 
 local/CI는 Cloudflare Access 없이 테스트 가능한 개발·테스트 전용 identity 경로를 사용할 수 있으나 production profile에서는 해당 우회 경로를 활성화하지 않는다.
+
+## Candidate migration과 normal startup
+
+normal `api`는 `production` profile에서 Flyway를 비활성화하고 JPA `ddl-auto=validate`만 수행한다. 따라서 unmigrated 또는 candidate entity model과 맞지 않는 schema에는 startup을 실패시키되 table/history를 만들지 않는다. bootstrap은 false, recurring scheduler는 normal runtime 계약대로 true다.
+
+`api-migration`은 같은 `${OUR_LEDGER_API_IMAGE}`를 `production,migration` profile로 실행한다. 이 mode만 Flyway를 활성화하고 JPA validate를 이어서 수행하며 Web application context, HTTP listener, bootstrap runner와 recurring scheduling을 만들지 않는다. 둘 다 성공하면 `migration-validation: success` 한 줄 뒤 Spring context를 닫고 exit 0, 어느 단계나 authority 검증이 실패하면 nonzero다. `migration` 단독, local/test 혼합, Flyway/JPA/Web/bootstrap/scheduler override와 datasource 누락은 fail closed한다.
+
+후속 10D-2B host worker가 사용할 canonical command shape는 healthy PostgreSQL과 exact candidate image가 확정된 기존 Compose에서 다음과 같다. 이 예시는 실제 production 실행 승인이 아니다.
+
+```bash
+docker compose \
+  --project-name our-ledger-production \
+  --env-file .env.production \
+  --file compose.prod.yaml \
+  run --rm --no-deps api-migration
+```
+
+one-shot이 0으로 끝난 뒤에만 normal `up --detach --wait` cutover를 진행한다. caller가 별도 migration image, host checkout SQL, mutable tag, arbitrary profile/command/path를 authority로 제공하지 않는다.
 
 ## Nginx same-origin 계약
 
@@ -113,12 +132,15 @@ API container healthcheck는 JDK build stage에서 컴파일한 최소 `HttpClie
 - missing/blank required env fail-closed와 rendered Compose security/network/mount 계약
 - API/Web clean image build와 runtime content/non-root 검사
 - Nginx static/SPA/cache/API 401/local identity 401/actuator 차단
-- PostgreSQL Flyway V1→V8, JPA validate, API restart 뒤 persistence/readiness
+- unmigrated DB normal startup의 schema mutation 없는 failure
+- same-candidate one-shot Flyway V1→V8/JPA validate와 idempotent rerun
+- Flyway/JPA/DB/profile failure nonzero, HTTP/bootstrap/scheduler 부재와 V1~V8 byte 고정
+- migrated normal API startup/restart 뒤 Flyway history와 persistence/readiness 유지
 - Spring graceful shutdown과 exact project container/network/volume/image tag residue 0
 
 Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke는 운영 Compose를 기동하거나 `/Users/homeserver/Server` resource를 참조하지 않는다.
 
-`./scripts/verify-backup-restore.sh`는 별도 고유 source/target/failure Compose project, 합성 credential과 disposable volume으로 actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture와 exact-HEAD production API readiness를 비교하고 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
+`./scripts/verify-backup-restore.sh`는 별도 고유 source/target/failure Compose project, 합성 credential과 disposable volume으로 candidate one-shot→actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture, restored V8 migration rerun과 exact-HEAD normal production API readiness를 비교하고 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
 
 `./scripts/production-status.sh`는 exact production Compose project, Git 밖 owner-only env file과 backup directory를 입력받아 service/origin/recurring/backup/filesystem raw JSON만 출력한다. `config --quiet`, `ps`, `inspect`와 internal GET 외에 container recreate/restart, DB/backup write, file cleanup을 하지 않는다. wrong project/config authority는 fail closed하고 개별 stopped/unreachable/invalid 상태는 나머지 관측과 함께 명시한다.
 
@@ -137,7 +159,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. 실제 Mac mini release directory의 owner와 directory mode, current/pending/state path는 10D-2 host transaction이 추출·설치 시 별도로 강제한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. 실제 Mac mini release directory의 owner와 directory mode, current/pending/state path는 10D-2B host transaction이 추출·설치 시 별도로 강제한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 
@@ -148,9 +170,9 @@ deploy-our-ledger-v1 <exact-40-sha> update <sha256:64-lowercase-hex> <bounded-ac
 
 helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. 이 source에는 host-side command가 없으므로 실제 host가 token을 읽거나 artifact를 pull/cutover할 수 없고, kill switch를 활성화할 운영 근거도 아직 없다.
 
-## 10D-2/10D-3 activation boundary
+## 10D-2B/10D-3 activation boundary
 
-10D-2 restricted host bootstrap과 10D-3 public activation은 다음 목표 상태 전이를 별도 Issue, 계획, production 승인으로 구현·검증한다.
+10D-2B restricted host deployment transaction과 10D-3 public activation은 다음 목표 상태 전이를 별도 Issue, 계획, production 승인으로 구현·검증한다.
 
 ```text
 main merge/release intent
@@ -162,7 +184,7 @@ main merge/release intent
 → project operation lock
 → current runtime identity check
 → predeploy verified backup
-→ migration이 있으면 승인된 one-shot Flyway + validate
+→ 10D-2A의 same-candidate one-shot Flyway + JPA validate
 → same-SHA API/Web cutover
 → Compose readiness
 → Cloudflare Access를 우회하지 않는 approved smoke
@@ -179,7 +201,7 @@ main merge/release intent
 - image rollback과 DB restore를 분리한다. backward-incompatible migration 뒤 previous image가 호환된다고 가정하거나 production DB restore를 자동 rollback으로 사용하지 않는다.
 - `down --volumes`, broad Docker prune, automatic reverse migration과 caller가 임의 shell/Compose path/image를 넘기는 SSH를 금지한다.
 
-10D-1에는 workflow와 artifact/intent 검증 source만 있다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, restricted wrapper, operation lock, backup/migration/cutover worker와 Mac mini install/dry run은 10D-2다. Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+10D-2A에는 candidate image 내부 lifecycle과 synthetic gate만 있다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, restricted wrapper, operation lock, backup/migration/cutover worker와 Mac mini install/dry run은 10D-2B다. Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -194,7 +216,7 @@ main merge/release intent
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, status/monitor 실행 또는 production backup/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
+10C source와 10D-1/10D-2A source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
 
 ## 롤백
 

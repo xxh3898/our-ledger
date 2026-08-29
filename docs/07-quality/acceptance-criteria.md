@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.1
-last_updated: 2026-08-29
+version: 1.2
+last_updated: 2026-08-30
 related:
   - 00-overview/roadmap.md
   - ADR-008
@@ -62,7 +62,7 @@ related:
 - `/actuator/**`는 public Nginx에서 404이고 `/healthz`는 backend/DB 세부정보가 없는 정적 응답이다.
 - production profile에서 missing/blank Cloudflare/DB 설정이 fail-closed하고 forged local identity만으로 API에 접근할 수 없다.
 - production Compose는 Web만 loopback port에 publish하고 API/DB host port, source bind mount, host network, privileged, Docker socket을 사용하지 않는다.
-- disposable smoke에서 Flyway V1→V8, JPA validate, API restart 후 schema history 유지, graceful stop과 resource residue 0을 검증한다.
+- disposable smoke에서 같은 candidate API image의 one-shot Flyway V1→V8/JPA validate 뒤 normal API readiness, restart schema history 유지, graceful stop과 resource residue 0을 검증한다.
 - Hosted Full CI가 PR exact HEAD의 같은 runtime smoke를 통과한다.
 
 ### Slice 10C-2A Backup/Restore Safety Gate
@@ -77,7 +77,7 @@ related:
 - empty target은 source와 다른 고유 Compose project/network/volume, host DB port 없는 PostgreSQL과 synthetic credential만 사용한다.
 - restore는 checksum/metadata/archive 검증 뒤 `pg_restore --exit-on-error --single-transaction --no-owner --no-acl`로 실행하고 warning/error를 성공으로 처리하지 않는다.
 - restored target의 Flyway V1~V8, core row/Transaction/Entry/Refund lineage, Account balance·총자산·총부채·순자산이 source와 동일하다.
-- restored target의 Household composite FK/unique가 계속 enforced되고 exact-HEAD production API의 Flyway/JPA/readiness startup이 schema/data state를 바꾸지 않는다.
+- restored target의 Household composite FK/unique가 계속 enforced되고 same-image migration rerun과 exact-HEAD normal production API의 JPA/readiness startup이 schema/data state를 바꾸지 않는다.
 - zero/truncated/corrupt, checksum/metadata mismatch, missing project/service, stopped/unhealthy PostgreSQL, injected pg_dump failure와 restore target failure를 실제 gate에서 거부한다.
 - 성공·실패 뒤 synthetic source/target/failure project의 container/network/volume과 unique API image tag residue가 0이다.
 - Hosted Full CI가 PR exact HEAD에서 별도 backup/restore job을 실제 secret과 artifact upload 없이 통과한다.
@@ -121,14 +121,27 @@ related:
 - `main` push와 controlled manual dispatch가 같은 재사용 Full CI를 먼저 실행하며 production concurrency는 `our-ledger-production`, `cancel-in-progress: false`로 직렬화된다.
 - `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 정확히 `true`가 아니면 validation만 실행되고 GHCR login/publish, Tailscale, SSH와 production environment job은 시작하지 않는다.
 - API와 Web은 같은 exact 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로만 publish하도록 정의하며 `latest`와 임의 image/tag를 허용하지 않는다.
-- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2 설치 단계가 강제한다.
+- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B 설치 단계가 강제한다.
 - last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
 - restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
 - GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
 - publish/deploy privileged job의 모든 third-party action ref는 exact 40자리 commit SHA다.
 - local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
-- 10D-1 완료는 source contract만 뜻한다. restricted host wrapper와 operation lock은 10D-2, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+- 10D-1 완료는 source contract만 뜻한다. restricted host wrapper와 operation lock은 10D-2B, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+
+### Slice 10D-2A Candidate Migration/Validation Gate
+
+- normal `production` profile은 `spring.flyway.enabled=false`, JPA `ddl-auto=validate`, bootstrap false, recurring scheduler true이며 clean schema를 생성하지 않고 fail closed한다.
+- profile-gated `api-migration`은 normal API와 동일한 exact candidate image, production datasource와 application/database network를 사용하고 host port 없이 disposable `--rm` one-shot으로 실행된다.
+- migration mode는 `production,migration`, Flyway enabled, JPA validate, Web application type `NONE`, bootstrap/scheduler false를 강제하고 local/test 혼합이나 설정 override를 nonzero로 거부한다.
+- Flyway migrate와 candidate entity model validation이 모두 성공한 뒤에만 고정된 비민감 marker를 한 번 출력하고 deterministic exit 0을 반환한다. Flyway/JPA/DB/profile failure는 nonzero다.
+- clean DB V1→V8, 같은 DB idempotent rerun, failed Flyway history, synthetic schema damage, unreachable DB와 invalid profile/flag를 actual PostgreSQL/container process에서 검증한다.
+- migration mode는 HTTP listener, recurring poll/occurrence와 User/Household bootstrap write를 만들지 않고, rerun 전후 financial fixture와 schedule cursor가 동일하다.
+- normal API의 unmigrated DB failure와 migrated DB startup/restart를 함께 검증하고 Flyway history/checksum이 normal lifecycle에서 바뀌지 않는다.
+- V1~V8 migration filename과 byte SHA-256을 repository gate로 고정하고 신규 V9 또는 기존 migration 수정 없이 backup/restore와 observability smoke를 같은 one-shot 순서로 실행한다.
+- 성공·실패 cleanup 뒤 exact synthetic project container/network/volume/image residue가 0이며 credential/token/email을 output evidence로 노출하지 않는다.
+- Hosted Full CI가 PR exact HEAD에서 전체 gate를 통과하고 actual production/GHCR/Tailscale/SSH/HomeOps/Cloudflare를 사용하지 않는다.
 
 ## 운영
 
@@ -142,7 +155,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/restore/HomeOps reporter와 LaunchAgent는 10D-1 완료 기준이 아니다. 10D-1은 kill switch가 닫힌 release source와 합성 검증까지만 제공하며 restricted host bootstrap은 10D-2, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/migration/restore/HomeOps reporter와 LaunchAgent는 10D-2A 완료 기준이 아니다. 10D-2A는 same-image candidate migration의 합성 검증까지만 제공하며 restricted host transaction은 10D-2B, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 
