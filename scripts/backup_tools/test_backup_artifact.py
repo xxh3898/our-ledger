@@ -113,6 +113,21 @@ class BackupArtifactTest(unittest.TestCase):
             self.backup_directory,
         )
 
+    def test_should_validate_backup_directory_without_writing_when_readOnly(self) -> None:
+        before = list(self.backup_directory.iterdir())
+
+        with mock.patch.object(
+            contract.tempfile,
+            "mkstemp",
+            side_effect=AssertionError("read-only validation attempted a write"),
+        ):
+            validated = contract.validate_backup_directory_read_only(
+                str(self.repo_root), str(self.backup_directory)
+            )
+
+        self.assertEqual(validated, self.backup_directory)
+        self.assertEqual(list(self.backup_directory.iterdir()), before)
+
     def test_should_reject_missing_relative_traversal_and_protected_paths(self) -> None:
         with self.assertRaises(contract.ContractError):
             contract.validate_backup_directory(str(self.repo_root), "relative/backups")

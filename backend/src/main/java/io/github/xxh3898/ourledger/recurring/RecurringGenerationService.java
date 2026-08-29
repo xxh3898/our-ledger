@@ -17,15 +17,18 @@ public class RecurringGenerationService {
     private final RecurringTransactionRepository recurringRepository;
     private final RecurringOccurrenceProcessor occurrenceProcessor;
     private final int batchSize;
+    private final RecurringSchedulerOperationalState operationalState;
 
     public RecurringGenerationService(
             RecurringTransactionRepository recurringRepository,
             RecurringOccurrenceProcessor occurrenceProcessor,
-            @Value("${our-ledger.recurring.scheduler.batch-size:100}") int batchSize
+            @Value("${our-ledger.recurring.scheduler.batch-size:100}") int batchSize,
+            RecurringSchedulerOperationalState operationalState
     ) {
         this.recurringRepository = recurringRepository;
         this.occurrenceProcessor = occurrenceProcessor;
         this.batchSize = batchSize;
+        this.operationalState = operationalState;
     }
 
     public int generateDue(Instant now) {
@@ -51,6 +54,7 @@ public class RecurringGenerationService {
                     }
                 }
             } catch (RuntimeException exception) {
+                operationalState.ruleFailed(now);
                 log.warn("Recurring rule generation failed. recurringId={}", recurringId, exception);
             }
         }

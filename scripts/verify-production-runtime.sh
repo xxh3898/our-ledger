@@ -134,7 +134,10 @@ docker create --name "$api_image_probe" "$api_image" >/dev/null
 docker export "$api_image_probe" | tar -tf - > "$runtime_temp_dir/api-image-contents.txt"
 docker rm "$api_image_probe" >/dev/null
 
-for required_path in app/app.jar opt/healthcheck/HttpHealthCheck.class; do
+for required_path in \
+  app/app.jar \
+  opt/healthcheck/HttpHealthCheck.class \
+  opt/healthcheck/HttpFetch.class; do
   if ! awk -v target="$required_path" '
     $0 == target || $0 == "./" target { found = 1 }
     END { exit !found }
@@ -361,6 +364,20 @@ fi
 
 "${compose[@]}" exec -T api \
   java -cp /opt/healthcheck HttpHealthCheck http://127.0.0.1:8080/actuator/health/readiness
+operations_response="$("${compose[@]}" exec -T api \
+  java -cp /opt/healthcheck HttpFetch http://127.0.0.1:8080/actuator/health/operations)"
+if ! python3 -c '
+import json
+import sys
+
+status, separator, body = sys.stdin.read().partition("\n")
+payload = json.loads(body)
+assert separator and status == "200"
+assert "recurringScheduler" in payload["components"]
+' <<< "$operations_response"; then
+  echo "HttpFetch가 internal operations status/body를 구분하지 못했습니다." >&2
+  exit 1
+fi
 
 printf '\n[production 8/9] Flyway V1-V8 and restart persistence\n'
 flyway_versions="$("${compose[@]}" exec -T postgres \

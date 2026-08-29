@@ -140,7 +140,9 @@ def _docker_data_roots() -> list[Path]:
     return [candidate.resolve() for candidate in candidates if candidate.exists()]
 
 
-def validate_backup_directory(repo_root_value: str, backup_path_value: str) -> Path:
+def validate_backup_directory_read_only(
+    repo_root_value: str, backup_path_value: str
+) -> Path:
     repo_root = _canonical_existing(repo_root_value, "repository root")
     backup_path = _canonical_existing(backup_path_value, "backup directory")
     _require_owner_only(backup_path, "backup directory", directory=True)
@@ -159,6 +161,13 @@ def validate_backup_directory(repo_root_value: str, backup_path_value: str) -> P
             not _is_within(backup_path, docker_root),
             "backup directory로 Docker/PostgreSQL data path를 사용할 수 없습니다.",
         )
+    return backup_path
+
+
+def validate_backup_directory(repo_root_value: str, backup_path_value: str) -> Path:
+    backup_path = validate_backup_directory_read_only(
+        repo_root_value, backup_path_value
+    )
 
     descriptor, probe_name = tempfile.mkstemp(
         prefix=".our-ledger-write-probe.", dir=backup_path

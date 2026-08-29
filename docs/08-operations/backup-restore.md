@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-29
 related:
   - 03-data/data-retention.md
@@ -46,6 +46,8 @@ our-ledger_production_20260829T031500Z_v8_a1b2c3d4e5f6.backup/
 metadata field는 `formatVersion`, `createdAt`, `schemaVersion`, `sizeBytes`, `sha256`, `dumpFilename`, `pgDumpVersion`, `postgresServerVersion`로 고정한다. email, memo, Category/Account 내용, DB password, Cloudflare credential, full Compose config와 absolute host path는 포함하지 않는다.
 
 `last-success.json`은 같은 비민감 metadata와 `bundleDirectory`만 담는다. verified bundle commit 뒤 temporary owner-only file에서 atomic replace하며 failed backup은 이전 marker를 덮어쓰지 않는다.
+
+Slice 10C-2B1의 `production-status.sh`는 이 marker와 strict inventory를 backup freshness의 유일한 source로 read-only 관측한다. marker가 없거나 marker/bundle 계약이 invalid하면 현재 시각을 성공 시각으로 채우지 않고 `MISSING/INVALID`를 반환한다. status command는 backup write probe, `pg_dump`, cleanup 또는 marker 갱신을 호출하지 않으며 artifact 이름·hash·absolute backup path를 snapshot에 복사하지 않는다.
 
 ### One-shot command
 

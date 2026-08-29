@@ -18,6 +18,7 @@ required_paths=(
   "frontend/package-lock.json"
   "infra/docker/api.Dockerfile"
   "infra/docker/HttpHealthCheck.java"
+  "infra/docker/HttpFetch.java"
   "infra/docker/web.Dockerfile"
   "infra/nginx/nginx.conf"
   "docs/README.md"
@@ -31,7 +32,11 @@ required_paths=(
   "scripts/backup_tools/integrity-check.sql"
   "scripts/backup_tools/state-fingerprint.sql"
   "scripts/backup_tools/test_backup_artifact.py"
+  "scripts/production-status.sh"
+  "scripts/status_tools/production_status.py"
+  "scripts/status_tools/test_production_status.py"
   "scripts/verify-backup-restore.sh"
+  "scripts/verify-observability.sh"
   "scripts/verify-production-runtime.sh"
 )
 

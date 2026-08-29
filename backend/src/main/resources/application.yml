@@ -14,6 +14,11 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        operations:
+          include: recurringScheduler
+          show-components: always
+          show-details: always
   endpoints:
     web:
       exposure:
@@ -40,5 +45,6 @@ our-ledger:
   recurring:
     scheduler:
       enabled: ${OUR_LEDGER_RECURRING_SCHEDULER_ENABLED:true}
+      initial-delay-ms: ${OUR_LEDGER_RECURRING_INITIAL_DELAY_MS:0}
       poll-delay-ms: ${OUR_LEDGER_RECURRING_POLL_DELAY_MS:60000}
       batch-size: ${OUR_LEDGER_RECURRING_BATCH_SIZE:100}

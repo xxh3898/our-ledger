@@ -20,6 +20,11 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        operations:
+          include: recurringScheduler
+          show-components: always
+          show-details: always
   endpoints:
     web:
       exposure:

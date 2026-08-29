@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.2
+version: 1.3
 last_updated: 2026-08-29
 related:
   - 01-product/feature-matrix.md
@@ -28,7 +28,8 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10A. CSV Export | 기간 지정 원장 CSV, spreadsheet 안전성 | Settings에서 검산·이동용 CSV 다운로드 |
 | 10C-1. Immutable Runtime Harness | multi-stage image, Nginx, production profile/Compose, smoke | 실제 secret 없는 production origin 검증 |
 | 10C-2A. Backup/Restore Safety Gate | custom backup, integrity metadata, disposable restore | 합성 데이터의 재현 가능한 복구 검증 |
-| 10C-2B. Observability/Alert Harness | health, backup freshness, scheduler/disk signal | 안전한 감시 interface 검증 |
+| 10C-2B1. Operational Status Harness | health, backup freshness, recurring/filesystem raw signal | privacy-safe read-only snapshot 검증 |
+| 10C-2B2. Monitor/Alert Policy | threshold, evaluator, monitor와 알림 채널 | 운영 정책 승인 뒤 감시 활성화 |
 | 10B. PWA Installability | manifest, service worker, production icon | 최종 이름·icon 결정 뒤 모바일 홈 화면 설치 가능 |
 | 10D. Production Activation | Cloudflare, secret, bootstrap, deploy, backup schedule/replication | 허용된 두 사용자의 실제 운영 시작 |
 
@@ -92,10 +93,11 @@ Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 �
 - **10B PWA Installability**: 최종 한글 앱 이름·production icon 결정 전까지 보류한다. 결정 뒤 manifest와 service worker 설치 계약을 별도 검증한다.
 - **10C-1 Immutable Runtime Harness**: digest-pinned multi-stage image, non-root same-origin Nginx, production Spring profile, image-only Compose를 합성 설정과 disposable PostgreSQL로 검증한다. Web만 loopback에 publish하고 API/DB host port, source mount, local identity를 금지한다.
 - **10C-2A Backup/Restore Safety Gate**: existing healthy PostgreSQL의 one-shot custom dump를 atomic bundle, checksum, 비민감 metadata와 latest-success marker로 commit한다. 합성 non-empty DB를 별도 project/volume에 실제 복구하고 V1~V8, row count, financial sample, 제약과 production API readiness를 검증한다.
-- **10C-2B Observability/Alert Harness**: 10C-2A의 latest-success/exit status와 API/Web/PostgreSQL health, recurring scheduler, disk signal을 안전한 monitor interface로 연결한다. 실제 threshold/channel activation은 포함하지 않는다.
+- **10C-2B1 Operational Status Harness**: exact Compose runtime, loopback Nginx health, process-local recurring scheduler raw signal, 10C-2A verified marker/inventory와 backup filesystem을 read-only canonical JSON으로 결합한다. unknown/unreachable/invalid를 success로 위장하지 않고 secret·PII·재무 상세·absolute path를 제외한다.
+- **10C-2B2 Monitor/Alert Policy**: B1 raw snapshot에 stale/disk/retry threshold와 evaluator를 적용하고 Uptime Kuma/Netdata 등 실제 monitor와 알림 채널을 연결한다. 숫자·채널·실행 schedule은 별도 운영 승인 전 확정하지 않는다.
 - **10D Production Activation**: 실제 Cloudflare/도메인/secret/User bootstrap/deploy, backup schedule·retention·외부 암호화 복제와 production restore 승인을 별도 운영 Gate로 처리한다.
 
-10C-2A 완료는 one-shot source와 synthetic local/Hosted restore gate가 준비됐다는 뜻이다. 실제 production backup 실행, disaster recovery 준비 완료, retention/외부복제, observability 활성화, PWA, production activation 또는 deploy 완료를 의미하지 않는다.
+10C-2B1 완료는 one-shot backup/restore source와 raw status interface가 synthetic local/Hosted gate에서 검증됐다는 뜻이다. 실제 production status/backup 실행, disaster recovery 준비 완료, retention/외부복제, monitor/alert 활성화, PWA, production activation 또는 deploy 완료를 의미하지 않는다.
 
 ## Release Gate
 

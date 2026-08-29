@@ -96,11 +96,19 @@ required_api_environment = {
     "CLOUDFLARE_ACCESS_AUDIENCE",
     "OUR_LEDGER_BOOTSTRAP_ENABLED",
     "OUR_LEDGER_RECURRING_SCHEDULER_ENABLED",
+    "OUR_LEDGER_RECURRING_INITIAL_DELAY_MS",
+    "OUR_LEDGER_RECURRING_POLL_DELAY_MS",
 }
 require(required_api_environment <= set(api_environment), "api production 환경변수 계약이 누락됐습니다.")
 require(api_environment["SPRING_PROFILES_ACTIVE"] == "production", "api는 production profile만 활성화해야 합니다.")
 require(api_environment["OUR_LEDGER_BOOTSTRAP_ENABLED"] == "false", "production bootstrap은 false여야 합니다.")
 require(api_environment["OUR_LEDGER_RECURRING_SCHEDULER_ENABLED"] == "true", "production recurring scheduler는 true여야 합니다.")
+require(str(api_environment["OUR_LEDGER_RECURRING_INITIAL_DELAY_MS"]).isdigit()
+        and int(api_environment["OUR_LEDGER_RECURRING_INITIAL_DELAY_MS"]) >= 0,
+        "production recurring initial delay가 잘못됐습니다.")
+require(str(api_environment["OUR_LEDGER_RECURRING_POLL_DELAY_MS"]).isdigit()
+        and int(api_environment["OUR_LEDGER_RECURRING_POLL_DELAY_MS"]) > 0,
+        "production recurring poll delay가 잘못됐습니다.")
 require("OUR_LEDGER_LOCAL_IDENTITY_EMAIL" not in api_environment,
         "production api에 local identity 환경변수가 전달되면 안 됩니다.")
 

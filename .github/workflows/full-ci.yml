@@ -58,3 +58,13 @@ jobs:
 
       - name: Backup/Restore 검증
         run: ./scripts/verify-backup-restore.sh
+
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Observability/status 검증
+        run: ./scripts/verify-observability.sh

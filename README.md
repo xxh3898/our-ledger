@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 10C-2A — Backup/Restore Safety Gate
-- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL custom backup과 disposable restore drill
+- 단계: Slice 10C-2B1 — Operational Status Harness
+- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL backup/restore와 privacy-safe read-only status snapshot
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -39,9 +39,9 @@
 
 현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니다.
 
-Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다.
+Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다. Slice 10C-2B1은 Web/API/PostgreSQL, Nginx origin, recurring scheduler, verified backup marker와 backup filesystem을 한 번에 읽는 canonical JSON status command를 추가한다.
 
-이 source gate는 실제 production backup을 실행하거나 schedule·retention·외부복제·production restore를 활성화하지 않는다. Cloudflare/Tunnel, production secret/User/DB, observability/alert와 deploy도 별도 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
+이 source gate는 실제 production status/backup을 실행하거나 monitor·alert, schedule·retention·외부복제·production restore를 활성화하지 않는다. Cloudflare/Tunnel, production secret/User/DB와 deploy도 별도 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
 
 ## 기술 기준
 
@@ -152,11 +152,11 @@ docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app down
 ./scripts/verify.sh
 ```
 
-이 명령은 repository/docs/Flyway/Compose 검사, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build, disposable backup/restore drill과 production runtime smoke를 순서대로 실행한다.
+이 명령은 repository/docs/Flyway/Compose 검사, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build, disposable backup/restore drill, production runtime smoke와 observability/status smoke를 순서대로 실행한다.
 
 host에 Java 25 또는 Node.js 24가 없으면 `compose.verify.yaml`의 격리 container를 사용한다. 이 fallback은 운영 resource나 Docker socket을 참조하지 않으며 검증 PostgreSQL data는 container 종료와 함께 사라지고 dependency cache volume은 보존된다. production runtime smoke는 매번 고유 Compose project와 임시 loopback port, 합성 credential, disposable PostgreSQL volume을 사용하고 성공·실패 모두에서 container/network/volume과 검증 image tag를 제거한다. Hosted Backend CI는 기본 Testcontainers 경로를 사용한다.
 
-production harness의 image build, 환경변수, render/start/inspect/stop/rollback과 backup one-shot 계약은 [`infra/README.md`](infra/README.md)를 따른다. 문서의 명령은 운영 실행 승인, 실제 backup/restore 또는 deploy 완료를 의미하지 않는다.
+production harness의 image build, 환경변수, render/start/inspect/stop/rollback, backup one-shot과 read-only status 계약은 [`infra/README.md`](infra/README.md)를 따른다. 문서의 명령은 운영 실행 승인, 실제 status/backup/restore 또는 deploy 완료를 의미하지 않는다.
 
 ## 범위 밖
 
