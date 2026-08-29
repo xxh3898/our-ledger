@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C-1의 immutable production origin, Slice 10C-2A의 backup/restore source gate, Slice 10C-2B1의 operational status와 10C-2B2 monitor policy harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host one-shot custom backup, isolated restore drill, privacy-safe read-only status와 policy/state/HomeOps reporter synthetic harness까지다. 실제 Mac mini deploy/status/backup/restore/monitor/HomeOps reporter, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C의 immutable production origin, backup/restore, operational status/monitor source와 Slice 10D-1의 immutable Release/Deploy source harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow와 secret-free runtime-config artifact까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini deploy/status/backup/restore/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -19,7 +19,7 @@ infra/
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
-backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. restore와 policy 검증 진입점은 `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`다. production Compose에 backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
+repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. restore, policy와 release 검증 진입점은 `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -39,6 +39,27 @@ local image build 예시는 다음과 같다. 이 명령은 image를 registry에
 docker build --file infra/docker/api.Dockerfile --tag our-ledger-api:sha-replace-with-exact-commit .
 docker build --file infra/docker/web.Dockerfile --tag our-ledger-web:sha-replace-with-exact-commit .
 ```
+
+## Release source 계약
+
+`.github/workflows/deploy.yml`은 `main` exact HEAD에서 reusable Full CI를 먼저 실행한다. `OUR_LEDGER_DEPLOY_ENABLED` repository variable이 없거나 정확히 `true`가 아니면 publish와 deploy job은 건너뛰어 GHCR login/push, Tailscale과 SSH가 실행되지 않는다. workflow는 production concurrency `our-ledger-production`을 `cancel-in-progress: false`로 직렬화한다.
+
+kill switch 이후 source contract는 API/Web/runtime-config를 같은 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로 publish하고 digest 형식을 확인한다. runtime-config detector는 last successful Production revision과 candidate 사이 exact source allowlist를 비교해 `keep` 또는 `update`만 반환하며 invalid/missing/non-ancestor range를 거부한다. restricted intent grammar는 다음 두 개뿐이다.
+
+```text
+deploy-our-ledger-v1 <sha> keep <actor>
+deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
+```
+
+GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. 이 저장소에는 해당 intent를 실행하는 Mac mini wrapper가 없으며 actual credential도 구성하지 않았다. 따라서 10D-1에서는 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. restricted wrapper, operation lock, predeploy backup/migration/cutover/readiness/rollback과 host 설치는 10D-2, public route/secret/User/schedule과 kill switch 활성화는 10D-3의 별도 승인 대상이다.
+
+local source 검증은 다음 command다.
+
+```bash
+./scripts/verify-release-transport.sh
+```
+
+이 gate는 helper/unit와 workflow source를 확인하고 `scratch` runtime-config를 `--network none`으로 build/extract해 exact file/mode/label, forbidden material 부재, script help와 Compose render를 검증한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
 
 ## 환경변수
 

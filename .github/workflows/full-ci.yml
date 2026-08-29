@@ -8,8 +8,8 @@ on:
   push:
     branches:
       - dev
-      - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -78,3 +78,13 @@ jobs:
 
       - name: Monitor policy/HomeOps 검증
         run: ./scripts/verify-monitor-policy.sh
+
+  release-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Release/Deploy source 검증
+        run: ./scripts/verify-release-transport.sh

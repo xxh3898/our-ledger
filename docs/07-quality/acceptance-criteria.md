@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.0
+version: 1.1
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -116,6 +116,19 @@ related:
 - monitor plist는 60초, backup plist는 `00:35/06:35/12:35/18:35`, repository 밖 fixed bootstrap과 `KeepAlive` 부재를 고정하며 실제 install/load를 실행하지 않는다.
 - Hosted Full CI가 PR exact HEAD에서 독립 `monitor-policy` job을 통과하고 actual production HomeOps reporter/spool/API, notification, LaunchAgent/backup/offsite를 활성화하지 않는다.
 
+### Slice 10D-1 Immutable Release/Deploy Source Harness Gate
+
+- `main` push와 controlled manual dispatch가 같은 재사용 Full CI를 먼저 실행하며 production concurrency는 `our-ledger-production`, `cancel-in-progress: false`로 직렬화된다.
+- `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 정확히 `true`가 아니면 validation만 실행되고 GHCR login/publish, Tailscale, SSH와 production environment job은 시작하지 않는다.
+- API와 Web은 같은 exact 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로만 publish하도록 정의하며 `latest`와 임의 image/tag를 허용하지 않는다.
+- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist만 owner-only mode로 포함한다.
+- last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
+- restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
+- GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
+- local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
+- Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
+- 10D-1 완료는 source contract만 뜻한다. restricted host wrapper와 operation lock은 10D-2, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
@@ -128,7 +141,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production status/backup/restore/HomeOps reporter와 LaunchAgent는 10C-2B2 완료 기준이 아니다. 10C-2B2는 raw read-only interface와 확정 policy/state/reporter source의 합성 검증까지만 제공하며 actual monitored-service 등록, central typed incident, notification, schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/restore/HomeOps reporter와 LaunchAgent는 10D-1 완료 기준이 아니다. 10D-1은 kill switch가 닫힌 release source와 합성 검증까지만 제공하며 restricted host bootstrap은 10D-2, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 

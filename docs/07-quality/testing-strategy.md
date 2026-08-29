@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.6
+version: 1.7
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -220,6 +220,19 @@ Monitor/Alert Policy Harness는 추가로 다음을 검증한다.
 
 `scripts/verify-monitor-policy.sh`는 Python pure/unit, synthetic external reporter와 plist parser만 사용하고 Docker, actual status/backup/HomeOps reporter·spool·API/LaunchAgent를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `monitor-policy` job에서 실행한다.
 
+Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
+
+- release helper의 exact 40자리 SHA, `sha256:` digest, bounded actor와 keep/update restricted command grammar
+- command injection, extra argument, arbitrary path/image/shell fragment와 invalid/zero revision 거부
+- runtime-config detector의 application-only `keep`, runtime source/force/bootstrap `update`, missing/non-ancestor range fail-closed
+- `main` validation의 재사용 Full CI 단일 authority, production concurrency와 default-off kill switch
+- publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
+- GHCR token stdin-only restricted SSH boundary와 token/secret의 command argument·artifact 비포함
+- `scratch` runtime-config artifact의 exact file allowlist, owner-only mode, symlink와 env/key/dump/state 부재
+- 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
+
+`scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 runtime-config source만 build/extract한다. 합성 `.env.production.example`로 Compose render와 공개 script help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.
+
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
 - 필수/parse/역전 날짜와 3,653일 허용·3,654일 거부 stable code
@@ -401,4 +414,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다.
+`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
