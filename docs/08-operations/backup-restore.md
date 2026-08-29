@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.2
+last_updated: 2026-08-29
 related:
   - 03-data/data-retention.md
   - 07-quality/acceptance-criteria.md
@@ -52,3 +52,8 @@ backup 성공 로그만으로 복구 가능성을 주장하지 않는다.
 ## CSV
 
 사용자 CSV export는 운영 backup의 대체물이 아니다. CSV는 데이터 이동성과 수동 확인을 위한 기능이다.
+
+- CSV는 지정 기간의 미삭제 Transaction과 최소 reference/provenance만 포함하며 schema, Flyway history, 논리삭제 row, 운영 설정을 복구하지 못한다.
+- CSV 성공은 `pg_dump`, 외부 보관, retention, restore drill 성공을 의미하지 않는다.
+- 서버는 CSV history나 temp file을 backup처럼 보관하지 않는다.
+- backup/restore 실행과 보관 정책 확정은 Slice 10C/10D의 별도 운영 Gate다.

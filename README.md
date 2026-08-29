@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 3 — Transfer/Card
-- 구현 코드: Auth/Household 경계, Account·Category 관리, 수입·지출·이체 원장과 신용카드 부채·카드대금 처리, React 빠른 입력
+- 단계: Slice 10A — CSV Export
+- 구현 코드: Auth/Household부터 Assets까지의 canonical 원장·분석·Goal 흐름과 Settings 기간 지정 CSV 내보내기
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -36,6 +36,8 @@
 - 결혼자금 목표와 예상 달성 시점
 - CSV 내보내기
 - PWA 설치
+
+현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니며 PWA와 production activation은 후속 Gate다.
 
 ## 기술 기준
 

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.0
+version: 1.1
 last_updated: 2026-08-29
 related:
   - 01-product/benchmark-weple-money.md
@@ -85,6 +85,12 @@ Assets는 같은 Couple header와 하단 탐색을 유지하고 Household 순자
 ## 반복 거래 설정
 
 반복 거래는 새 하단 탭을 만들지 않고 설정 Sheet 안의 독립 section으로 제공한다. active, paused, ended 규칙을 함께 보여 주고 생성·수정·일시정지·재개를 nested Sheet에서 처리한다. 재개 시 일시정지 기간을 소급 생성하지 않는다는 점을 action 근처에 명시한다. Calendar 선택일 거래, Budget 사용 내역, Statistics drill-down과 저축 활동에서 자동 생성된 거래는 `반복` text badge로 provenance를 표시한다. 세부 계약은 [반복 거래 설정](recurring-transactions.md)을 따른다.
+
+## 데이터 내보내기
+
+CSV는 새 하단 destination을 만들지 않고 Settings Sheet 안의 `데이터 내보내기` section에서 제공한다. 시작일과 종료일의 기본값은 Household timezone 현재 월 1일부터 오늘이며, 사용자가 수정한 값은 오류 뒤에도 유지한다.
+
+pending, JSON/network 오류, 성공을 text `status`/`alert`로 표시한다. 성공하면 browser download를 시작하지만 Settings를 닫거나 keyboard focus를 body로 이동하지 않는다. 설명에는 current Household의 유효 거래, 논리삭제 제외, 운영 backup 대체 불가를 함께 명시한다. 세부 형식은 [CSV 거래 내보내기](../04-api/csv-export.md)를 따른다.
 
 ## Marriage Goal 상세
 

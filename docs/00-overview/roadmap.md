@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.9
+version: 1.0
 last_updated: 2026-08-29
 related:
   - 01-product/feature-matrix.md
@@ -25,7 +25,10 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 7. Recurring | 월급·구독·적금 자동 생성 | 반복 입력 감소 |
 | 8. Marriage Goal | Goal/Account 연결, 달성률·예상일 | 결혼자금 추적 가능 |
 | 9. Assets | 자산·부채·순자산·월 추이 | 재무 상태 확인 가능 |
-| 10. Production | PWA, CSV, backup, Cloudflare Access/Tunnel, Mac mini 배포 | 허용된 두 사용자의 실제 운영 시작 |
+| 10A. CSV Export | 기간 지정 원장 CSV, spreadsheet 안전성 | Settings에서 검산·이동용 CSV 다운로드 |
+| 10B. PWA Installability | manifest, service worker, production icon | 모바일 홈 화면 설치 가능 |
+| 10C. Production Runtime Harness | Compose, Nginx, backup/restore, observability | 실제 secret 없는 운영 harness 검증 |
+| 10D. Production Activation | Cloudflare, secret, bootstrap, deploy, restore drill | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Slice 3 구현 경계
 
@@ -78,6 +81,17 @@ Assets는 current Household의 active·archived Account와 유효 Account Entry�
 월 추이는 Household timezone 기준 직전 11개 완료 월말과 현재 시점 한 점을 제공한다. Account의 `opening_balance_as_of` 이전 월 기여도는 0이고, 과거 거래 수정·논리삭제는 다음 조회부터 해당 월말을 다시 계산한다. 현재 점은 같은 repeatable-read snapshot의 현재 Household 합계와 정확히 일치한다.
 
 Frontend는 기존 Assets 하단 destination을 활성화하고 actual Member/공동 소유 filter, accessible 추이 표, ASSET/LIABILITY Account 목록과 Settings Account 관리 진입을 제공한다. Goal link는 Assets 원장 값을 바꾸지 않는다. 별도 aggregate/cache/table, migration, Account write path 변경, Goal 지표 병합, CSV·PWA·production 작업은 포함하지 않는다.
+
+## Slice 10 운영 Gate
+
+Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 한 승인으로 묶지 않는다.
+
+- **10A CSV Export**: current Household의 유효 Transaction과 canonical Entry를 Household timezone 기간으로 읽어 한국어 CSV attachment를 생성한다. 별도 persistence, migration, background job, server temp file은 만들지 않는다.
+- **10B PWA Installability**: 앱 이름·production icon을 확정한 뒤 manifest와 service worker 설치 계약을 검증한다.
+- **10C Production Runtime Harness**: 실제 credential 없이 Compose/Nginx/backup/restore/observability 구조와 rollback을 검증한다.
+- **10D Production Activation**: 실제 Cloudflare/도메인/secret/User bootstrap/deploy/restore drill을 별도 운영 Gate로 승인한다.
+
+10A 완료는 production readiness, backup 완료, PWA 설치 가능 또는 운영 시작을 의미하지 않는다.
 
 ## Release Gate
 

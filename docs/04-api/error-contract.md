@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.7
+version: 0.8
 last_updated: 2026-08-29
 related:
   - 06-security/authorization.md
@@ -48,6 +48,7 @@ related:
 - `HOUSEHOLD_MEMBERSHIP_REQUIRED`
 - `HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`
 - `CSRF_TOKEN_INVALID`
+- `EXPORT_RANGE_TOO_LARGE`
 - `HOUSEHOLD_MEMBER_LIMIT_REACHED`
 - `RESOURCE_NOT_FOUND`
 - `TRANSACTION_VERSION_CONFLICT`
@@ -123,6 +124,15 @@ related:
 - `GOAL_VERSION_CONFLICT`: stale Goal PATCH optimistic version (`409`)
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`: 같은 Account의 기존 link 또는 DB assignment unique race (`409`)
 - `GOAL_ACCOUNT_NOT_ELIGIBLE`: archived, non-ASSET, `savings_enabled=false` Account 신규 연결 (`422`)
+
+### CSV Export code
+
+- `INVALID_REQUEST`: `from`/`to` 누락·parse 실패·역전 (`400`)
+- `EXPORT_RANGE_TOO_LARGE`: 시작일 포함 3,653일 초과 동기 export (`422`)
+- `TRANSACTION_ENTRY_SET_INVALID`: export 대상 Transaction의 canonical Entry role/delta/Account 조합 손상 (`409`)
+- 인증과 내부 User/Household 결정 실패는 기존 `401`/`403` code를 재사용한다.
+
+CSV 성공 body를 쓰기 전에 validation, authorization, query, canonical Entry 검증을 모두 끝낸다. 실패 response는 CSV가 아니라 기존 JSON 오류 형식이다.
 
 ## 보안
 
