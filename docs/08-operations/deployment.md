@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-29
 related:
   - AGENTS.md
@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가한다. 실제 image registry push, Mac mini production Compose/backup 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention·외부복제, production restore와 monitor는 실행하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가한다. Slice 10C-2B1은 existing stack과 verified marker를 변경하지 않고 읽는 operational status command를 추가한다. 실제 image registry push, Mac mini production Compose/status/backup 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention·외부복제, production restore와 monitor/alert는 실행하지 않았다.
 
 ## 목표 구조
 
@@ -102,9 +102,9 @@ local/CI는 Cloudflare Access 없이 테스트 가능한 개발·테스트 전�
 
 readiness가 통과하기 전 신규 container로 traffic을 전환하지 않는다.
 
-API container healthcheck는 JDK build stage에서 컴파일한 최소 `HttpClient` class로 내부 readiness를 검사한다. runtime image에 curl/package manager를 추가하지 않는다. Web healthcheck는 Nginx `/healthz`, PostgreSQL은 `pg_isready`를 사용한다.
+API container healthcheck는 JDK build stage에서 컴파일한 최소 `HttpClient` class로 내부 readiness를 검사한다. 같은 build stage의 GET-only `HttpFetch`는 host status collector가 internal operations response의 HTTP status와 body를 읽을 때만 사용한다. runtime image에 curl/shell/package manager를 추가하지 않는다. Web healthcheck는 Nginx `/healthz`, PostgreSQL은 `pg_isready`를 사용한다.
 
-Health endpoint를 인터넷에 별도 공개하여 Access를 우회하지 않는다. public Nginx는 actuator를 차단한다. 외부 모니터링이 필요하면 별도 service token 또는 최소 권한 Access 정책을 production gate에서 설계한다.
+`/actuator/health/operations`는 `recurringScheduler` raw signal만 details와 함께 제공하며 global `show-details: never`를 바꾸지 않는다. 이 component는 liveness/readiness group에 포함되지 않아 recurring failure가 API restart 신호가 되지 않는다. Health endpoint를 인터넷에 별도 공개하여 Access를 우회하지 않고 public Nginx는 `/actuator/**`를 계속 404 처리한다. 외부 모니터링이 필요하면 B1 host snapshot을 사용하고 service token 또는 최소 권한 Access 정책은 별도 production gate에서 설계한다.
 
 ## 검증 하네스
 
@@ -120,6 +120,10 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 
 `./scripts/verify-backup-restore.sh`는 별도 고유 source/target/failure Compose project, 합성 credential과 disposable volume으로 actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture와 exact-HEAD production API readiness를 비교하고 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
 
+`./scripts/production-status.sh`는 exact production Compose project, Git 밖 owner-only env file과 backup directory를 입력받아 service/origin/recurring/backup/filesystem raw JSON만 출력한다. `config --quiet`, `ps`, `inspect`와 internal GET 외에 container recreate/restart, DB/backup write, file cleanup을 하지 않는다. wrong project/config authority는 fail closed하고 개별 stopped/unreachable/invalid 상태는 나머지 관측과 함께 명시한다.
+
+`./scripts/verify-observability.sh`는 같은 command를 exact-HEAD disposable stack에서 검증한다. synthetic recurring success/rule failure, API unavailable/restart reset, verified marker/inventory, public actuator 차단, privacy와 resource residue 0을 확인하며 실제 production resource를 사용하지 않는다.
+
 ## 배포 Gate
 
 에이전트는 production deploy와 Cloudflare Access/Tunnel 설정 변경을 수행하지 않는다. 사용자가 다음을 확인한 뒤 명시적으로 실행한다.
@@ -133,7 +137,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - `cloudflared` Access 검증 설정
 - health check
 
-10C-1/10C-2A source/CI 통과는 위 production deploy 또는 production backup/restore Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다.
+10C-1/10C-2A/10C-2B1 source/CI 통과는 위 production deploy, status 실행 또는 production backup/restore/monitor Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다.
 
 ## 롤백
 

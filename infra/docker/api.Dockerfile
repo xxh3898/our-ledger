@@ -14,7 +14,9 @@ RUN ./gradlew --no-daemon clean bootJar \
     && cp build/libs/our-ledger-backend-0.1.0-SNAPSHOT.jar /out/app.jar
 
 COPY infra/docker/HttpHealthCheck.java /tmp/HttpHealthCheck.java
-RUN javac --release 25 -d /out/healthcheck /tmp/HttpHealthCheck.java
+COPY infra/docker/HttpFetch.java /tmp/HttpFetch.java
+RUN javac --release 25 -d /out/healthcheck \
+    /tmp/HttpHealthCheck.java /tmp/HttpFetch.java
 
 FROM gcr.io/distroless/java25-debian13:nonroot@sha256:fce4a1d66284e8866c46113d9bdc286c46fb8c3c3f0a098f877034349e88debe AS runtime
 

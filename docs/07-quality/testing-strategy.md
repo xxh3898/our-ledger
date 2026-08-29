@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.4
+version: 1.5
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -190,6 +190,20 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 
 `scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
 
+Operational Status Harness는 추가로 다음을 검증한다.
+
+- process-local recurring state의 초기/disabled, poll start/completion, success/advanced count, top-level failure/rethrow, consecutive reset과 concurrent snapshot
+- 여러 rule failure의 total/current poll count, 비식별 field exact contract와 기존 one-rule failure isolation
+- `recurringScheduler` HealthIndicator의 `UNKNOWN/UP/DOWN`, operations group detail, global detail 비노출과 readiness/liveness 독립
+- 기존 `HttpHealthCheck`의 one-argument/HTTP 200 계약과 `HttpFetch`의 HTTP status/body, non-200, network failure 구분
+- backup directory read-only validation이 write probe를 만들지 않고 backup 생성 validator는 기존 probe/fsync를 유지함
+- exact Compose label/config authority, running/stopped/unhealthy/missing service, loopback origin, API unreachable과 canonical JSON exact field
+- valid/missing/invalid/future marker, valid/invalid/incomplete/foreign inventory, freshness와 filesystem available/unavailable
+- container environment, raw health body, secret/email/재무 상세/artifact 이름/absolute path가 snapshot에 없는 privacy allowlist
+- status command가 `config --quiet`, `ps`, `inspect`, GET-only container exec 밖의 backup/DB/service/file mutation을 호출하지 않음
+
+`scripts/verify-observability.sh`는 exact-HEAD API/Web image, 고유 Compose project와 owner-only 합성 backup/DB fixture로 poll success, generated occurrence, isolated rule failure, API unavailable, process 재시작 뒤 not-yet-run reset과 public actuator 404를 검증한다. 성공·실패 뒤 container/network/volume/image/temp residue 0과 backup byte-identical을 요구한다. local `verify.sh`와 Hosted Full CI의 독립 `observability` job에서 실행하며 실제 production status/monitor/alert는 대상이 아니다.
+
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
 - 필수/parse/역전 날짜와 3,653일 허용·3,654일 거부 stable code
@@ -356,7 +370,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 ## 계약 테스트
 
-Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
+Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health`와 internal `actuator-operations-health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
 Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다. Assets는 `AssetsApiDocsTest`에서 `assets-read-model`, `assets-authentication-required` snippet을 생성한다. CSV는 `TransactionCsvExportApiDocsTest`에서 `transaction-csv-export`, `transaction-csv-export-range-too-large` snippet을 만들고 `TransactionCsvExportIntegrationTest`가 canonical byte를 고정한다.
 
@@ -371,4 +385,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime smoke를 검증한다.
+`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime, backup/restore, observability smoke를 검증한다.

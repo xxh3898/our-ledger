@@ -17,14 +17,31 @@ public class RecurringScheduler {
 
     private final RecurringGenerationService generationService;
     private final Clock clock;
+    private final RecurringSchedulerOperationalState operationalState;
 
-    public RecurringScheduler(RecurringGenerationService generationService, Clock clock) {
+    public RecurringScheduler(
+            RecurringGenerationService generationService,
+            Clock clock,
+            RecurringSchedulerOperationalState operationalState
+    ) {
         this.generationService = generationService;
         this.clock = clock;
+        this.operationalState = operationalState;
     }
 
-    @Scheduled(fixedDelayString = "${our-ledger.recurring.scheduler.poll-delay-ms:60000}")
+    @Scheduled(
+            fixedDelayString = "${our-ledger.recurring.scheduler.poll-delay-ms:60000}",
+            initialDelayString = "${our-ledger.recurring.scheduler.initial-delay-ms:0}"
+    )
     void generateDueOccurrences() {
-        generationService.generateDue(clock.instant());
+        java.time.Instant startedAt = clock.instant();
+        operationalState.pollStarted(startedAt);
+        try {
+            int advanced = generationService.generateDue(startedAt);
+            operationalState.pollSucceeded(clock.instant(), advanced);
+        } catch (RuntimeException exception) {
+            operationalState.pollFailed(clock.instant());
+            throw exception;
+        }
     }
 }

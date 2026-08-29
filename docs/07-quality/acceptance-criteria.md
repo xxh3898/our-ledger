@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -82,6 +82,20 @@ related:
 - 성공·실패 뒤 synthetic source/target/failure project의 container/network/volume과 unique API image tag residue가 0이다.
 - Hosted Full CI가 PR exact HEAD에서 별도 backup/restore job을 실제 secret과 artifact upload 없이 통과한다.
 
+### Slice 10C-2B1 Operational Status Harness Gate
+
+- recurring scheduler는 process 시작, poll 시작/완료, top-level 성공/실패, advanced occurrence와 rule 단위 실패를 비식별 in-memory counter/timestamp로 기록하고 restart 시 reset된다.
+- rule 하나의 생성 실패는 기존 격리와 다음 rule 진행을 유지하고 poll 자체가 정상 반환하면 operations 상태는 `UP`이며 raw failure count만 증가한다.
+- top-level scheduler 예외는 `DOWN`으로 기록한 뒤 같은 예외 semantics를 유지하고 다음 성공 poll에서 consecutive execution failure count를 reset한다.
+- `/actuator/health/operations`는 `recurringScheduler`만 details와 함께 제공하며 미실행/진행 중 `UNKNOWN`, 성공 `UP`, top-level 실패 `DOWN`을 사용한다.
+- global health detail은 `never`를 유지하고 recurring signal은 liveness/readiness group에 포함되지 않으며 public Nginx `/actuator/**`는 계속 404다.
+- Distroless API의 GET-only `HttpFetch`는 HTTP status/body와 transport failure를 구분하면서 기존 one-argument/HTTP 200 `HttpHealthCheck`를 바꾸지 않는다.
+- `production-status.sh`는 strict project, Git 밖 owner-only env/backup path와 exact Compose labels를 요구하고 runtime/backup을 변경하지 않은 채 JSON object 하나만 출력한다.
+- snapshot은 Web/API/PostgreSQL state/health/restart count, loopback origin status, recurring raw signal, verified backup freshness/inventory와 filesystem capacity만 exact allowlist로 포함한다.
+- missing/stopped/unhealthy/unreachable, invalid/missing marker와 filesystem unavailable을 success로 위장하지 않으며 secret·email·금융 상세·container ID·absolute path를 포함하지 않는다.
+- disposable smoke는 exact-HEAD image, 합성 backup/DB만 사용해 recurring success/rule failure/API unavailable/restart reset/public actuator 차단과 resource residue 0을 검증한다.
+- Hosted Full CI가 PR exact HEAD에서 독립 observability job을 통과하며 threshold/evaluator/monitor/channel은 활성화하지 않는다.
+
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
@@ -94,7 +108,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 uptime monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production backup/restore와 uptime monitor는 10C-2A 완료 기준이 아니다. 10C-2A는 source one-shot과 합성 disposable restore 가능성을 검증하며 실제 schedule·retention·외부복제·production restore는 10D에서 별도 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production status/backup/restore와 uptime monitor는 10C-2B1 완료 기준이 아니다. 10C-2B1은 raw read-only interface와 합성 disposable 검증까지만 제공하며 실제 threshold/channel, schedule·retention·외부복제·production restore는 후속 운영 Gate에서 별도 승인한다.
 
 ## 문서
 
