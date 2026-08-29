@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -56,6 +56,15 @@ related:
 - 지표: raw 달성률, 남은 금액, 현재 월, 6개월 추세, 완료 3개월 평균, 명시적 projection 상태, 최근 근거
 - Frontend: Home actual/empty card, `?screen=goal` 상세, create/edit/link Sheet, unlink 확인, accessible SVG/table
 - 제한: CUSTOM UI, 수동 기여금, aggregate cache, Goal 삭제, 새 Bottom tab, Assets/production asset 없음
+
+## Slice 9 Assets 구현
+
+- Backend: active·archived Account와 유효 Entry에서 current balance를 batch 파생하는 Household read model
+- 지표: 총자산, 총부채, 순자산과 actual Member PERSONAL/SHARED 소유 소계
+- 추이: Household timezone의 직전 11개 완료 월말과 현재 한 점, opening date 이전 Account 기여 0
+- Frontend: Assets destination, canonical 소유 filter URL/history, accessible SVG/table, ASSET/LIABILITY Account 목록
+- 일관성: repeatable-read snapshot, current point와 current summary 일치, Goal link/unlink로 원장 불변
+- 제한: aggregate persistence/cache, migration, Account mutation 재설계, Goal 지표 병합, CSV/PWA/production 없음
 
 ## 공통 요구
 

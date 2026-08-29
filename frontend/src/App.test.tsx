@@ -160,6 +160,124 @@ const statisticsData = {
   ],
 }
 
+const assetsData = {
+  asOf: '2026-08-28T03:00:00Z',
+  timezone: 'Asia/Seoul',
+  household: {
+    totalAssets: 2_950_000,
+    totalLiabilities: -100_000,
+    netWorth: 3_050_000,
+  },
+  members: [
+    {
+      memberId: 100,
+      displayName: 'Owner',
+      totalAssets: 3_000_000,
+      totalLiabilities: 0,
+      netWorth: 3_000_000,
+    },
+    {
+      memberId: 101,
+      displayName: 'Member',
+      totalAssets: -50_000,
+      totalLiabilities: 0,
+      netWorth: -50_000,
+    },
+  ],
+  shared: {
+    totalAssets: 0,
+    totalLiabilities: -100_000,
+    netWorth: 100_000,
+  },
+  accounts: [
+    {
+      id: 200,
+      name: 'Owner 주거래 통장',
+      institution: '우리은행',
+      type: 'CHECKING',
+      nature: 'ASSET',
+      ownership: 'PERSONAL',
+      owner: { memberId: 100, displayName: 'Owner' },
+      openingBalance: 2_000_000,
+      openingBalanceAsOf: '2025-01-01',
+      ledgerDelta: 1_000_000,
+      currentBalance: 3_000_000,
+      currency: 'KRW',
+      savingsEnabled: false,
+      archived: false,
+      sortOrder: 0,
+    },
+    {
+      id: 201,
+      name: 'Member 예전 통장',
+      institution: null,
+      type: 'CHECKING',
+      nature: 'ASSET',
+      ownership: 'PERSONAL',
+      owner: { memberId: 101, displayName: 'Member' },
+      openingBalance: 0,
+      openingBalanceAsOf: '2025-01-01',
+      ledgerDelta: -50_000,
+      currentBalance: -50_000,
+      currency: 'KRW',
+      savingsEnabled: false,
+      archived: true,
+      sortOrder: 0,
+    },
+    {
+      id: 202,
+      name: '공동 결혼자금',
+      institution: '저축은행',
+      type: 'SAVINGS',
+      nature: 'ASSET',
+      ownership: 'SHARED',
+      owner: null,
+      openingBalance: 0,
+      openingBalanceAsOf: '2026-08-01',
+      ledgerDelta: 0,
+      currentBalance: 0,
+      currency: 'KRW',
+      savingsEnabled: true,
+      archived: false,
+      sortOrder: 0,
+    },
+    {
+      id: 203,
+      name: '공동 카드',
+      institution: '카드사',
+      type: 'CREDIT_CARD',
+      nature: 'LIABILITY',
+      ownership: 'SHARED',
+      owner: null,
+      openingBalance: 0,
+      openingBalanceAsOf: '2025-01-01',
+      ledgerDelta: -100_000,
+      currentBalance: -100_000,
+      currency: 'KRW',
+      savingsEnabled: false,
+      archived: false,
+      sortOrder: 0,
+    },
+  ],
+  monthlyTrend: Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(Date.UTC(2025, 8 + index, 1))
+    const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+    const complete = index < 11
+    const assets = complete ? 1_850_000 + index * 100_000 : 2_950_000
+    const liabilities = -100_000
+    return {
+      month,
+      complete,
+      asOf: complete
+        ? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) - 1).toISOString()
+        : '2026-08-28T03:00:00Z',
+      assets,
+      liabilities,
+      netWorth: assets - liabilities,
+    }
+  }),
+}
+
 const savingsActivities = [{
   transactionId: 900,
   occurredAt: '2026-08-10T12:00:00+09:00',
@@ -391,6 +509,9 @@ type RouterOptions = {
   statistics?: Record<string, unknown>
   savingsActivities?: Array<Record<string, unknown>>
   statisticsGate?: Promise<void>
+  assets?: Record<string, unknown>
+  assetsGate?: Promise<void>
+  failAssetsRead?: boolean
   failRecurringCreate?: boolean
   recurringCreateGate?: Promise<void>
   goal?: Record<string, unknown> | null
@@ -884,6 +1005,16 @@ function installLedgerRouter(options: RouterOptions = {}) {
       if (options.statisticsGate) await options.statisticsGate
       return jsonResponse(options.statistics ?? statisticsData)
     }
+    if (url.pathname === '/api/v1/assets' && method === 'GET') {
+      if (options.assetsGate) await options.assetsGate
+      if (options.failAssetsRead) {
+        return jsonResponse({
+          code: 'SERVICE_UNAVAILABLE',
+          message: '자산 원장을 불러오지 못했습니다.',
+        }, 503)
+      }
+      return jsonResponse(options.assets ?? assetsData)
+    }
     if (url.pathname === '/api/v1/budgets' && method === 'GET') {
       return jsonResponse(budgetMonthResponse(url))
     }
@@ -1040,6 +1171,10 @@ function useStatisticsUrl(search = 'preset=this-month&view=all') {
   window.history.replaceState({}, '', `/?screen=statistics&${search}`)
 }
 
+function useAssetsUrl(search = 'view=all') {
+  window.history.replaceState({}, '', `/?screen=assets&${search}`)
+}
+
 function useGoalUrl() {
   window.history.replaceState({}, '', '/?screen=goal')
 }
@@ -1120,7 +1255,7 @@ describe('App', () => {
     expect(screen.getByText('주거래 통장 → 비상금 통장')).toBeInTheDocument()
     expect(screen.getByText('반복')).toBeInTheDocument()
     expect(screen.queryByText(/목표에 돈 추가|기여금 추가|Goal 입금/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /자산준비 중/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '자산' })).toBeEnabled()
   })
 
   it('creates a Goal with a blank amount, prevents duplicate pending submit, and restores focus', async () => {
@@ -2133,7 +2268,7 @@ describe('App', () => {
     expect(failedAmount).toHaveValue(19000)
   })
 
-  it('keeps Budget and Statistics active while Assets remains disabled', async () => {
+  it('keeps Budget, Statistics, and Assets available from the primary navigation', async () => {
     useCalendarUrl()
     installLedgerRouter()
     render(<App />)
@@ -2143,7 +2278,7 @@ describe('App', () => {
       .toHaveAttribute('aria-current', 'page')
     expect(within(navigation).getByRole('button', { name: /예산/ })).not.toBeDisabled()
     expect(within(navigation).getByRole('button', { name: /통계/ })).not.toBeDisabled()
-    expect(within(navigation).getByRole('button', { name: /자산/ })).toBeDisabled()
+    expect(within(navigation).getByRole('button', { name: '자산' })).toBeEnabled()
   })
 
   it('renders actual Budget scope cards and distinguishes unset, zero, and overrun states', async () => {
@@ -2517,7 +2652,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: '이번 기간 요약' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '통계' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('button', { name: /자산/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '자산' })).toBeEnabled()
     expect(screen.getAllByText('3,000,000원').length).toBeGreaterThan(0)
     expect(screen.getAllByText('128,450원').length).toBeGreaterThan(0)
     expect(screen.getAllByText('33.3%').length).toBeGreaterThan(0)
@@ -2777,7 +2912,7 @@ describe('App', () => {
     expect(screen.getAllByText('-10,000원').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('uses Household today for Statistics Paw and preserves Calendar, Budget, and disabled Assets', async () => {
+  it('uses Household today for Statistics Paw and preserves Calendar, Budget, and Assets', async () => {
     useStatisticsUrl()
     installLedgerRouter()
     render(<App />)
@@ -2794,6 +2929,185 @@ describe('App', () => {
       .toHaveAttribute('aria-current', 'page'))
     fireEvent.click(screen.getByRole('button', { name: '예산' }))
     expect(await screen.findByRole('heading', { name: '예산' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /자산/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '자산' })).toBeEnabled()
+  })
+
+  it('renders actual Assets ledger values, archived accounts, and an accessible 12-point trend', async () => {
+    window.history.replaceState({}, '', '/?screen=assets')
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+
+    const heroHeading = await screen.findByRole('heading', { name: '우리 순자산' })
+    const hero = heroHeading.closest('section') as HTMLElement
+    expect(window.location.search).toBe('?screen=assets&view=all')
+    expect(screen.getByRole('button', { name: '자산' })).toHaveAttribute('aria-current', 'page')
+    expect(hero).toHaveTextContent('3,050,000원')
+    expect(hero).toHaveTextContent('2,950,000원')
+    expect(hero).toHaveTextContent('-100,000원')
+    expect(screen.getByRole('img', {
+      name: '우리 전체 최근 11개 완료 월말과 현재 순자산 추이',
+    })).toBeInTheDocument()
+
+    const trendTable = screen.getByRole('table', { name: '우리 전체 월별 자산·부채·순자산' })
+    expect(within(trendTable).getAllByRole('row')).toHaveLength(13)
+    expect(within(trendTable).getByText('2026년 8월 현재')).toBeInTheDocument()
+    expect(within(trendTable).getByText('진행 중')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ASSET Account' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'LIABILITY Account' })).toBeInTheDocument()
+    expect(screen.getByText('Member 예전 통장')).toBeInTheDocument()
+    expect(screen.getByText('보관됨')).toBeInTheDocument()
+    expect(screen.getByText('저축')).toBeInTheDocument()
+    expect(screen.getByText('-50,000원')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      input === '/api/v1/assets' && (init?.method ?? 'GET') === 'GET')).toBe(true)
+  })
+
+  it('filters current Assets ownership in the URL without changing the Household trend', async () => {
+    useAssetsUrl()
+    installLedgerRouter()
+    render(<App />)
+
+    const scope = await screen.findByRole('navigation', { name: '현재 자산 소유 기준' })
+    const trendTable = screen.getByRole('table', { name: '우리 전체 월별 자산·부채·순자산' })
+    expect(within(trendTable).getAllByRole('row')).toHaveLength(13)
+
+    fireEvent.click(within(scope).getByRole('button', { name: 'Member' }))
+    expect(await screen.findByRole('heading', { name: 'Member 현재' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?screen=assets&view=personal&memberId=101')
+    expect(screen.getByText('Member 예전 통장')).toBeInTheDocument()
+    expect(screen.getByText('LIABILITY Account가 없어요.')).toBeInTheDocument()
+    expect(screen.queryByText('Owner 주거래 통장')).not.toBeInTheDocument()
+    expect(screen.queryByText('공동 카드')).not.toBeInTheDocument()
+    expect(screen.getByRole('table', { name: '우리 전체 월별 자산·부채·순자산' }))
+      .toBe(trendTable)
+
+    fireEvent.click(within(scope).getByRole('button', { name: '공동' }))
+    expect(await screen.findByRole('heading', { name: '공동 현재' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?screen=assets&view=shared')
+    expect(screen.getByText('공동 결혼자금')).toBeInTheDocument()
+    expect(screen.getByText('공동 카드')).toBeInTheDocument()
+    expect(screen.queryByText('Member 예전 통장')).not.toBeInTheDocument()
+    expect(within(trendTable).getAllByRole('row')).toHaveLength(13)
+  })
+
+  it('normalizes invalid Assets URLs and restores actual member and shared history state', async () => {
+    useAssetsUrl('view=personal&memberId=999&unexpected=value')
+    installLedgerRouter()
+    render(<App />)
+
+    const scope = await screen.findByRole('navigation', { name: '현재 자산 소유 기준' })
+    expect(window.location.search).toBe('?screen=assets&view=all')
+    expect(within(scope).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true')
+
+    window.history.pushState({}, '', '/?screen=assets&view=personal&memberId=100')
+    fireEvent(window, new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: 'Owner 현재' })).toBeInTheDocument()
+    expect(within(scope).getByRole('button', { name: 'Owner' })).toHaveAttribute('aria-pressed', 'true')
+
+    window.history.pushState({}, '', '/?screen=assets&view=shared')
+    fireEvent(window, new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: '공동 현재' })).toBeInTheDocument()
+    expect(within(scope).getByRole('button', { name: '공동' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('clears stale Assets numbers while reloading and retries a failed read', async () => {
+    useAssetsUrl()
+    let releaseAssets!: () => void
+    const options: RouterOptions = {}
+    installLedgerRouter(options)
+    const rendered = render(<App />)
+    expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
+
+    options.assetsGate = new Promise<void>((resolve) => { releaseAssets = resolve })
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+    await screen.findByRole('heading', { name: '이번 달 우리가 쓴 돈' })
+    fireEvent.click(screen.getByRole('button', { name: '자산' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('자산 원장을 계산하고 있어요.')
+    expect(screen.queryByText('3,050,000원')).not.toBeInTheDocument()
+    releaseAssets()
+    expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
+    rendered.unmount()
+
+    useAssetsUrl()
+    const retryOptions: RouterOptions = { failAssetsRead: true }
+    installLedgerRouter(retryOptions)
+    render(<App />)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('자산 원장을 불러오지 못했습니다.')
+    retryOptions.failAssetsRead = false
+    fireEvent.click(within(alert).getByRole('button', { name: '다시 불러오기' }))
+    expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
+  })
+
+  it('shows the no-account Assets state without suppressing the 12 zero snapshots', async () => {
+    useAssetsUrl()
+    installLedgerRouter({
+      assets: {
+        ...assetsData,
+        household: { totalAssets: 0, totalLiabilities: 0, netWorth: 0 },
+        members: assetsData.members.map((member) => ({
+          ...member,
+          totalAssets: 0,
+          totalLiabilities: 0,
+          netWorth: 0,
+        })),
+        shared: { totalAssets: 0, totalLiabilities: 0, netWorth: 0 },
+        accounts: [],
+        monthlyTrend: assetsData.monthlyTrend.map((point) => ({
+          ...point,
+          assets: 0,
+          liabilities: 0,
+          netWorth: 0,
+        })),
+      },
+    })
+    const rendered = render(<App />)
+
+    expect(await screen.findByText('아직 Account가 없어요. Account 관리에서 첫 계좌를 만들어 주세요.'))
+      .toBeInTheDocument()
+    expect(screen.getAllByText('0원').length).toBeGreaterThan(0)
+    expect(within(screen.getByRole('table', { name: '우리 전체 월별 자산·부채·순자산' }))
+      .getAllByRole('row')).toHaveLength(13)
+    rendered.unmount()
+
+    useAssetsUrl()
+    installLedgerRouter({
+      assets: {
+        ...assetsData,
+        accounts: assetsData.accounts.filter((account) => account.owner?.memberId !== 101),
+      },
+    })
+    render(<App />)
+    const scope = await screen.findByRole('navigation', { name: '현재 자산 소유 기준' })
+    fireEvent.click(within(scope).getByRole('button', { name: 'Member' }))
+    expect(await screen.findByText('선택한 소유 기준 Account가 없어요.')).toBeInTheDocument()
+  })
+
+  it('opens Account management and Quick Entry from Assets and restores the account opener', async () => {
+    useAssetsUrl()
+    installLedgerRouter()
+    render(<App />)
+
+    const opener = await screen.findByRole('button', { name: 'Account 관리 열기' })
+    opener.focus()
+    fireEvent.click(opener)
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    fireEvent.click(within(settings).getByRole('button', { name: '설정 닫기' }))
+    await waitFor(() => expect(opener).toHaveFocus())
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-08-28 빠른 입력 열기' }))
+    const quickEntry = await screen.findByRole('dialog', { name: '빠른 입력' })
+    expect(within(quickEntry).getByLabelText('날짜')).toHaveValue('2026-08-28')
+    fireEvent.click(within(quickEntry).getByRole('button', { name: '빠른 입력 닫기' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+    expect(await screen.findByRole('heading', { name: '이번 달 우리가 쓴 돈' }))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '예산' }))
+    expect(await screen.findByRole('heading', { name: '예산' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '통계' }))
+    expect(await screen.findByRole('heading', { name: '통계' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '자산' }))
+    expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
   })
 })

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.0
+version: 1.1
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -144,6 +144,18 @@ Marriage Goal Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
 - 같은 version target 동시 PATCH 한 건만 성공, stale error, 인증·CSRF·Household 경계
 - canonical Goal empty/read/create/update/link/unlink/error REST Docs
 
+Assets Slice는 추가로 다음을 실제 PostgreSQL에서 검증한다.
+
+- active·archived Account, opening balance와 active Entry delta의 current balance
+- ASSET/LIABILITY signed 합, 음수·0 balance, Household/actual Member/SHARED 검산
+- Account ownership 귀속과 Transaction Scope의 독립성, foreign Household data 제외
+- INCOME/EXPENSE/REFUND/TRANSFER, generated recurring Transaction, logical delete의 원장 효과
+- Goal Account link/unlink와 snapshot의 Assets 값 불변
+- Household timezone 직전 11개 완료 월말과 현재 한 점, UTC 자정 경계, opening date 이전 0
+- current trend 점과 current summary의 같은 snapshot 일치, Account 없음 12개 zero point
+- current balance·baseline·월 delta의 bounded batch query 구조와 N+1 부재
+- canonical Assets response, `lastFour` 비노출, 인증 REST Docs
+
 Auth/Household Slice는 추가로 다음을 PostgreSQL에서 검증한다.
 
 - Flyway V1/V2 clean 적용과 JPA schema validate
@@ -209,7 +221,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 실패 시 Sheet·입력 보존
 - 선택일 edit/delete 후 월·일 갱신
 - 설정 Sheet의 Account/Category 기능 보존
-- 미구현 하단 tab disabled
+- 활성 하단 destination과 `aria-current` 전환
 
 같은 test는 Refund Correctness Gate에서 다음 계약을 추가로 검증한다.
 
@@ -222,7 +234,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 같은 test는 Budget Slice에서 다음 계약을 추가로 검증한다.
 
-- Budget destination active state와 Calendar 복귀, Statistics/Assets disabled
+- Budget destination active state와 Calendar/Statistics/Assets 이동 회귀
 - HOUSEHOLD/실제 Member/SHARED 기본 카드와 Category Budget
 - 미설정, 0원, 100% 초과의 text·금액 구분
 - `screen=budget&month=YYYY-MM` 월 이동과 popstate
@@ -233,7 +245,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 같은 test와 `statisticsState.test.ts`는 Statistics Slice에서 다음 계약을 추가로 검증한다.
 
-- Statistics destination 활성/`aria-current`, Assets disabled와 Calendar/Budget 이동 회귀
+- Statistics destination 활성/`aria-current`와 Calendar/Budget/Assets 이동 회귀
 - 이번 달 ALL 기본값, 모든 preset의 이전 calendar range, custom same-day-count comparison
 - invalid date/range/foreign Member canonicalization과 direct/back/forward URL state
 - Member/SHARED API query mapping과 pending 중 stale 숫자 제거
@@ -263,6 +275,15 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - Sheet initial focus, Escape/backdrop/close, opener focus 복귀
 - loading 중 이전 Goal 금융 수치 제거와 Goal 없음/연결 없음/error 분리
 
+같은 `App.test.tsx`와 `assetsState.test.ts`는 Assets Slice에서 다음 계약을 추가로 검증한다.
+
+- direct/refresh/popstate에서 all/actual Member/shared canonical URL과 invalid Member fail-closed
+- actual API 총자산·총부채·순자산, 음수·0·archived/savings Account와 ASSET/LIABILITY 그룹
+- 소유 filter가 현재 소계·Account만 바꾸고 Household 12-point 추이는 유지
+- accessible SVG 이름과 12-row semantic table, current `진행 중` 의미
+- loading 중 이전 금융 숫자 제거, stable error retry, 전체 Account 없음과 선택 bucket 없음 구분
+- Account Settings opener focus 복귀와 Assets Paw Household 오늘, 전체 하단 destination 이동 회귀
+
 `budgetState.test.ts`는 timezone 현재 월, 잘못된 month 정규화, 연도 경계 월 이동과 Budget URL serialization을 검증한다.
 
 ## Production 보안 검증
@@ -281,7 +302,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 
 Spring REST Docs를 사용해 API 구현과 문서를 동기화한다. `/actuator/health` 외에 Auth/Household Slice는 `current-user`, `current-household` response field snippet을 생성한다. 사람이 작성한 도메인 문서를 API 스키마로 대체하지 않는다.
 
-Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다.
+Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 `ledger-account-*`, `ledger-category-*`, `ledger-transaction-*` create/list/detail/update/delete, `ledger-refund-*`, `ledger-calendar-month` snippet을 생성한다. Budget은 `BudgetApiDocsTest`에서 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, duplicate/version conflict snippet을 생성한다. Recurring은 `RecurringApiDocsTest`에서 `recurring-create`, `recurring-list`, `recurring-update`, `recurring-version-conflict` snippet을 생성한다. Marriage Goal은 `MarriageGoalApiDocsTest`에서 empty/read/create/update/link/unlink와 business error snippet을 생성한다. Statistics는 `StatisticsApiDocsTest`에서 `statistics-read-model`, `statistics-savings-activities`, `statistics-invalid-request` snippet을 생성한다. Assets는 `AssetsApiDocsTest`에서 `assets-read-model`, `assets-authentication-required` snippet을 생성한다.
 
 ## 회귀 우선순위
 

@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-28
+version: 0.3
+last_updated: 2026-08-29
 related:
   - 02-domain/financial-metrics.md
 ---
@@ -94,4 +94,4 @@ Router dependency 없이 `history.pushState/replaceState`와 `popstate`를 사�
 
 ## 하단 탐색과 Paw FAB
 
-Calendar, Budget, Statistics는 실제 destination이고 Statistics button에 현재 화면이면 `aria-current=page`를 적용한다. Assets는 disabled와 `준비 중`을 유지한다. Statistics Paw FAB는 보이지 않는 Calendar 선택일이 아니라 Household timezone 오늘 날짜로 Quick Entry를 연다.
+Calendar, Budget, Statistics, Assets는 실제 destination이고 Statistics button에 현재 화면이면 `aria-current=page`를 적용한다. Statistics Paw FAB는 보이지 않는 Calendar 선택일이 아니라 Household timezone 오늘 날짜로 Quick Entry를 연다.

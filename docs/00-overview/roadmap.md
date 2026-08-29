@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-29
 related:
   - 01-product/feature-matrix.md
@@ -70,6 +70,14 @@ Marriage Goal은 Household당 MARRIAGE 하나와 실제 Account link를 저장�
 V8은 Goal/audit과 same-Household GoalAccount link, Household MARRIAGE partial unique, Account assignment unique를 additive로 추가한다. Account 연결은 기존 posting과 같은 Account row lock에서 snapshot을 잡고 target 수정은 optimistic version을 사용한다.
 
 Home shell은 Goal 없음/연결 없음/실제 card 상태로 교체되고 card에서 `?screen=goal` 상세로 이동한다. 상세는 current/target/rate/remaining, 이번 달, 완료 3개월 평균과 projection 상태, 6개월 추세, Account, Transfer 근거를 제공한다. CUSTOM UI, GoalContribution, Goal 삭제, Assets, production asset/deploy는 포함하지 않는다.
+
+## Slice 9 Assets 구현 경계
+
+Assets는 current Household의 active·archived Account와 유효 Account Entry에서 현재 Account 잔액, 총자산, 총부채, 순자산을 매번 파생한다. PERSONAL 소계는 Account owner, SHARED 소계는 Account ownership을 기준으로 하며 Transaction Scope로 Account 소유를 추론하지 않는다.
+
+월 추이는 Household timezone 기준 직전 11개 완료 월말과 현재 시점 한 점을 제공한다. Account의 `opening_balance_as_of` 이전 월 기여도는 0이고, 과거 거래 수정·논리삭제는 다음 조회부터 해당 월말을 다시 계산한다. 현재 점은 같은 repeatable-read snapshot의 현재 Household 합계와 정확히 일치한다.
+
+Frontend는 기존 Assets 하단 destination을 활성화하고 actual Member/공동 소유 filter, accessible 추이 표, ASSET/LIABILITY Account 목록과 Settings Account 관리 진입을 제공한다. Goal link는 Assets 원장 값을 바꾸지 않는다. 별도 aggregate/cache/table, migration, Account write path 변경, Goal 지표 병합, CSV·PWA·production 작업은 포함하지 않는다.
 
 ## Release Gate
 
