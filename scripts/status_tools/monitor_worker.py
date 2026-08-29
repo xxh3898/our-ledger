@@ -18,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from scripts.backup_tools import backup_artifact
 from scripts.status_tools import monitor_policy
 
 
@@ -142,6 +143,37 @@ def validate_state_directory(repo_root: Path, value: str) -> Path:
                 "monitor state directory로 Docker/PostgreSQL data path를 사용할 수 없습니다.",
             )
     return state_directory
+
+
+def validate_backup_directory(repo_root: Path, value: str) -> Path:
+    try:
+        return backup_artifact.validate_backup_directory_read_only(
+            str(repo_root), value
+        )
+    except backup_artifact.ContractError as error:
+        raise ContractError("backup directory contract가 잘못됐습니다.") from error
+
+
+def validate_disjoint_directories(
+    state_directory: Path, backup_directory: Path
+) -> None:
+    require(
+        not _is_within(state_directory, backup_directory)
+        and not _is_within(backup_directory, state_directory),
+        "monitor state directory와 backup directory는 disjoint여야 합니다.",
+    )
+
+
+def validate_state_directory_entries(state_directory: Path) -> None:
+    allowed = {STATE_FILENAME, LOCK_FILENAME}
+    try:
+        entries = list(state_directory.iterdir())
+    except OSError as error:
+        raise ContractError("monitor state directory entry를 확인할 수 없습니다.") from error
+    require(
+        all(entry.name in allowed for entry in entries),
+        "monitor state directory에 예상 밖 entry가 있습니다.",
+    )
 
 
 def validate_heartbeat_config(repo_root: Path, value: str) -> Path:
@@ -495,7 +527,10 @@ def run_monitor(
     heartbeat_sender: HeartbeatSender = send_heartbeat,
     now: Callable[[], dt.datetime] = _now,
 ) -> tuple[dict[str, Any], int]:
+    backup_directory_path = validate_backup_directory(repo_root, backup_directory)
     state_directory = validate_state_directory(repo_root, state_directory_value)
+    validate_disjoint_directories(state_directory, backup_directory_path)
+    validate_state_directory_entries(state_directory)
     heartbeat_config = validate_heartbeat_config(repo_root, heartbeat_config_value)
     heartbeat_url = load_heartbeat_url(heartbeat_config)
     store = MonitorStateStore(state_directory)
@@ -503,7 +538,7 @@ def run_monitor(
     with MonitorLock(state_directory):
         try:
             snapshot = snapshot_provider(
-                repo_root, project_name, env_file, backup_directory
+                repo_root, project_name, env_file, str(backup_directory_path)
             )
         except StatusUnavailableError:
             observed_at = now()

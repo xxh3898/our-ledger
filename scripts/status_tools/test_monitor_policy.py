@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -14,6 +15,7 @@ import unittest
 from unittest import mock
 import urllib.parse
 
+from scripts.backup_tools import backup_artifact
 from scripts.status_tools import monitor_policy
 from scripts.status_tools import monitor_worker
 
@@ -447,6 +449,8 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
         self.repo_root.mkdir(mode=0o700)
         self.state_directory = self.root / "state"
         self.state_directory.mkdir(mode=0o700)
+        self.backup_directory = self.root / "backups"
+        self.backup_directory.mkdir(mode=0o700)
         self.config_path = self.root / "monitor-heartbeat.conf"
         self.config_path.write_text(
             "STATUS_HEARTBEAT_URL=https://monitor.invalid/api/push/test-token\n",
@@ -456,6 +460,52 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def create_valid_backup(
+        self, backup_directory: Path
+    ) -> Path:
+        backup_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        created_at = "2026-08-29T03:15:00Z"
+        stem = backup_artifact.create_stem(created_at, "8")
+        staging = backup_directory / f".our-ledger_backup_{stem}.partial"
+        staging.mkdir(mode=0o700)
+        dump = staging / f"{stem}.dump"
+        dump.write_bytes(b"PGDMPsynthetic-custom-archive")
+        dump.chmod(0o600)
+        backup_artifact.fsync_dump_file(backup_directory, staging, dump.name)
+        backup_artifact.write_sidecars(
+            backup_directory,
+            staging,
+            dump.name,
+            created_at,
+            "8",
+            "pg_dump (PostgreSQL) 18.6",
+            "18.6",
+        )
+        final_dump = backup_artifact.commit_bundle(
+            backup_directory, staging, f"{stem}.backup"
+        )
+        bundle = final_dump.parent
+        backup_artifact.verify_bundle(bundle)
+        return bundle
+
+    def tree_fingerprint(self, root: Path) -> dict[str, tuple]:
+        result: dict[str, tuple] = {}
+        for path in sorted(root.rglob("*")):
+            relative = str(path.relative_to(root))
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if path.is_symlink():
+                result[relative] = ("symlink", mode, os.readlink(path))
+            elif path.is_file():
+                result[relative] = (
+                    "file",
+                    mode,
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+            else:
+                result[relative] = ("directory", mode)
+        return result
 
     def test_should_atomically_store_owner_only_minimal_state(self) -> None:
         store = monitor_worker.MonitorStateStore(self.state_directory)
@@ -568,6 +618,89 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
                 self.repo_root, str(self.state_directory)
             )
 
+    def test_should_reject_backup_state_path_overlap_without_mutation(self) -> None:
+        cases: list[tuple[str, Path, Path]] = []
+
+        equal_backup = self.root / "equal-backup"
+        self.create_valid_backup(equal_backup)
+        cases.append(("equal", equal_backup, equal_backup))
+
+        bundle_backup = self.root / "bundle-backup"
+        bundle = self.create_valid_backup(bundle_backup)
+        cases.append(("verified-bundle", bundle_backup, bundle))
+
+        ancestor_state = self.root / "ancestor-state"
+        ancestor_state.mkdir(mode=0o700)
+        nested_backup = ancestor_state / "backups"
+        self.create_valid_backup(nested_backup)
+        cases.append(("state-ancestor", nested_backup, ancestor_state))
+
+        descendant_backup = self.root / "descendant-backup"
+        self.create_valid_backup(descendant_backup)
+        nested_state = descendant_backup / "monitor-state"
+        nested_state.mkdir(mode=0o700)
+        cases.append(("state-descendant", descendant_backup, nested_state))
+
+        for label, backup_directory, state_directory in cases:
+            with self.subTest(label=label):
+                before = self.tree_fingerprint(backup_directory)
+                provider = mock.Mock(return_value=healthy_snapshot())
+                sender = mock.Mock()
+
+                with self.assertRaises(monitor_worker.ContractError):
+                    monitor_worker.run_monitor(
+                        repo_root=self.repo_root,
+                        project_name="our-ledger",
+                        env_file="/synthetic/env",
+                        backup_directory=str(backup_directory),
+                        state_directory_value=str(state_directory),
+                        heartbeat_config_value=str(self.config_path),
+                        snapshot_provider=provider,
+                        heartbeat_sender=sender,
+                    )
+
+                provider.assert_not_called()
+                sender.assert_not_called()
+                self.assertEqual(self.tree_fingerprint(backup_directory), before)
+                self.assertFalse(
+                    os.path.lexists(state_directory / monitor_worker.LOCK_FILENAME)
+                )
+                self.assertFalse(
+                    os.path.lexists(state_directory / monitor_worker.STATE_FILENAME)
+                )
+                self.assertEqual(
+                    list(state_directory.glob(".monitor-state.*")), []
+                )
+
+    def test_should_reject_unexpected_state_entry_before_lock(self) -> None:
+        unexpected = self.state_directory / "unexpected.txt"
+        unexpected.write_bytes(b"preserve\n")
+        unexpected.chmod(0o600)
+        provider = mock.Mock(return_value=healthy_snapshot())
+        sender = mock.Mock()
+
+        with self.assertRaises(monitor_worker.ContractError):
+            monitor_worker.run_monitor(
+                repo_root=self.repo_root,
+                project_name="our-ledger",
+                env_file="/synthetic/env",
+                backup_directory=str(self.backup_directory),
+                state_directory_value=str(self.state_directory),
+                heartbeat_config_value=str(self.config_path),
+                snapshot_provider=provider,
+                heartbeat_sender=sender,
+            )
+
+        provider.assert_not_called()
+        sender.assert_not_called()
+        self.assertEqual(unexpected.read_bytes(), b"preserve\n")
+        self.assertFalse(
+            os.path.lexists(self.state_directory / monitor_worker.LOCK_FILENAME)
+        )
+        self.assertFalse(
+            os.path.lexists(self.state_directory / monitor_worker.STATE_FILENAME)
+        )
+
     def test_should_use_non_blocking_kernel_lock(self) -> None:
         with monitor_worker.MonitorLock(self.state_directory):
             with self.assertRaises(monitor_worker.LockBusyError):
@@ -653,7 +786,7 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
             repo_root=self.repo_root,
             project_name="our-ledger",
             env_file="/synthetic/env",
-            backup_directory="/synthetic/backup",
+            backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
             heartbeat_config_value=str(self.config_path),
             snapshot_provider=provider,
@@ -679,7 +812,7 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
             repo_root=self.repo_root,
             project_name="our-ledger",
             env_file="/synthetic/env",
-            backup_directory="/synthetic/backup",
+            backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
             heartbeat_config_value=str(self.config_path),
             snapshot_provider=unavailable,
@@ -703,7 +836,7 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
             repo_root=self.repo_root,
             project_name="our-ledger",
             env_file="/synthetic/env",
-            backup_directory="/synthetic/backup",
+            backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
             heartbeat_config_value=str(self.config_path),
             snapshot_provider=lambda *_args: healthy_snapshot(),
@@ -727,7 +860,7 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
                 repo_root=self.repo_root,
                 project_name="our-ledger",
                 env_file="/synthetic/env",
-                backup_directory="/synthetic/backup",
+                backup_directory=str(self.backup_directory),
                 state_directory_value=str(self.state_directory),
                 heartbeat_config_value=str(self.config_path),
                 snapshot_provider=lambda *_args: healthy_snapshot(),

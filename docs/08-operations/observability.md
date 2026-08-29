@@ -147,7 +147,7 @@ backup `markerState`는 `VALID`, `MISSING`, `INVALID`, `UNAVAILABLE`이다. `las
 
 ## Minimal monitor state
 
-state는 repository/DB가 아니라 operator가 10D에서 준비할 repository 밖 dedicated directory에 둔다. directory는 현재 사용자 소유 mode `0700`, `monitor-state.json`과 persistent lock file은 `0600`, final path는 symlink가 아니어야 한다.
+state는 repository/DB가 아니라 operator가 10D에서 준비할 repository 밖 dedicated directory에 둔다. directory는 현재 사용자 소유 mode `0700`, `monitor-state.json`과 persistent lock file은 `0600`, final path는 symlink가 아니어야 한다. canonical state directory와 backup directory는 서로 같거나 어느 한쪽의 하위일 수 없으며 반드시 disjoint해야 한다. worker는 이 관계와 state directory의 exact entry allowlist를 lock 생성 전에 검증하고, 위반 시 lock/state/temp file을 만들지 않은 채 fail closed한다.
 
 저장 field는 format version, `lastObservedAt`, safe target별 service failure streak, origin streak, 마지막으로 처리한 recurring poll completion timestamp, rule failure streak와 `lastOverallStatus`뿐이다. raw snapshot, container ID, artifact filename/path/hash, heartbeat URL, 사용자/Household/Member/Recurring/Account/Category ID, email, memo와 amount는 저장하지 않는다.
 
