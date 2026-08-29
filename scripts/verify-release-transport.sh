@@ -20,8 +20,8 @@ if ! command -v docker >/dev/null 2>&1 \
   exit 1
 fi
 
-image_tag="our-ledger-runtime-config:issue-37-${git_head:0:12}-$$"
-container_name="our-ledger-runtime-config-issue-37-$$"
+image_tag="our-ledger-runtime-config:issue-41-${git_head:0:12}-$$"
+container_name="our-ledger-runtime-config-issue-41-$$"
 
 if docker container inspect "$container_name" >/dev/null 2>&1 \
   || docker image inspect "$image_tag" >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ trap 'exit 130' HUP INT TERM
 cleanup_labels=(
   --label io.homeserver.cleanup.environment=development
   --label io.homeserver.cleanup.project=our-ledger
-  --label io.homeserver.cleanup.task=issue-37-release-deploy-source-harness
+  --label io.homeserver.cleanup.task=issue-41-host-state-runtime-config-staging
   --label io.homeserver.cleanup.lifecycle=task
   --label io.homeserver.cleanup.retain=false
   --label "io.homeserver.cleanup.git-head=$git_head"
@@ -124,6 +124,7 @@ expected_directories = {
     "infra/nginx",
     "scripts",
     "scripts/backup_tools",
+    "scripts/host_tools",
     "scripts/release_tools",
     "scripts/status_tools",
 }
@@ -132,6 +133,9 @@ expected_files = {
     "infra/nginx/nginx.conf": 0o600,
     "scripts/backup-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
+    "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/host_tools/host_state.py": 0o600,
+    "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
@@ -199,11 +203,13 @@ PY
 
 bash -n \
   "$runtime_dir/scripts/backup-production.sh" \
+  "$runtime_dir/scripts/backup_tools/backup_core.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
   "$runtime_dir/scripts/production-status.sh"
 (
   cd "$runtime_dir"
   python3 -B -m scripts.release_tools.release_contract --help >/dev/null
+  python3 -B -m scripts.host_tools.production_host --help >/dev/null
   python3 -B -m scripts.status_tools.production_status --help >/dev/null
   python3 -B -m scripts.status_tools.monitor_worker --help >/dev/null
 )

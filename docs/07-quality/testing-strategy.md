@@ -180,10 +180,10 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 
 - env/backup path의 absolute/canonical/owner-only/repository 밖 경계와 root·Docker data·symlink·traversal 거부
 - exact Compose project/config/image label, running/healthy PostgreSQL과 project-scoped volume/internal network
-- restrictive umask, concurrent directory lock, user-controlled text 없는 strict artifact filename
+- restrictive umask, shared project operation lock contention, user-controlled text 없는 strict artifact filename
 - custom-format online `pg_dump`, nonzero/`PGDMP`/`pg_restore --list`, SHA-256/size/metadata/checksum 일치
 - partial owner-only bundle의 atomic directory rename과 verified success 뒤 `last-success.json` atomic update
-- collision, lock, path, missing project/service, stopped/unhealthy DB, injected pg_dump failure에서 이전 bundle/marker 보존
+- collision, shared lock, path, missing project/service, stopped/unhealthy DB, injected pg_dump failure에서 이전 bundle/marker 보존
 - zero/truncated/corrupt archive, checksum mismatch, metadata mismatch와 archive-list failure의 restore 전 거부
 - 2 User/1 Household/2 Member, 세 Account nature/type, Category, INCOME/EXPENSE/TRANSFER/REFUND와 Budget/Recurring/Goal synthetic fixture
 - source와 별도 고유 project/network/volume의 empty PostgreSQL에 fail-fast single-transaction restore
@@ -232,10 +232,23 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
 - publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
 - GHCR token stdin-only restricted SSH boundary와 token/secret의 command argument·artifact 비포함
-- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B host install authority와 분리한다.
+- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
 `scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 runtime-config source만 build/extract한다. 합성 `.env.production.example`로 Compose render와 공개 script help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.
+
+Host State / Shared Operation Lock Harness는 다음을 추가로 검증한다.
+
+- fixed production root source와 production CLI의 root/state/Compose override·environment bypass 부재
+- owner-only host layout, atomic directory operation lock의 first/second holder, stale/symlink/tampered lock fail-closed
+- public standalone backup과 synthetic deploy의 공통 lock contention, lock-held internal backup core direct invocation의 self-deadlock 부재
+- exact digest-derived release path, exact allowlist/mode, same-content reuse와 same-digest different-content overwrite 거부
+- source/release symlink, hardlink, FIFO, unexpected entry, path-like digest와 external current target 거부
+- relative current atomic pointer와 formatVersion 1 state/pending의 `0600`, exact schema, file/directory fsync와 temp residue 부재
+- pending 중 신규 stage/transaction 차단, crash 뒤 pending 보존, unchanged previous에서만 explicit abandoned pending/stage cleanup 허용
+- runtime-config Dockerfile, detector, release gate의 new host/core source와 non-executable internal core mode 동기화
+
+`scripts/verify-host-state.sh`는 Python unit과 shell/source contract만 temp root에서 실행하고 실제 `/Users/homeserver/Server`, production resource와 network를 사용하지 않는다. `scripts/verify-backup-restore.sh`는 같은 test-only injected host adapter 아래 actual internal backup core를 disposable PostgreSQL과 경합시켜 artifact 의미가 유지됨을 검증한다. local `verify.sh`와 Hosted Full CI의 독립 `host-state` job에서 실행한다.
 
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
@@ -418,4 +431,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

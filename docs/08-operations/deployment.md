@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/status/backup/migration/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
 
 ## 목표 구조
 
@@ -89,7 +89,7 @@ normal `api`는 `production` profile에서 Flyway를 비활성화하고 JPA `ddl
 
 `api-migration`은 같은 `${OUR_LEDGER_API_IMAGE}`를 `production,migration` profile로 실행한다. 이 mode만 Flyway를 활성화하고 JPA validate를 이어서 수행하며 Web application context, HTTP listener, bootstrap runner와 recurring scheduling을 만들지 않는다. 둘 다 성공하면 `migration-validation: success` 한 줄 뒤 Spring context를 닫고 exit 0, 어느 단계나 authority 검증이 실패하면 nonzero다. `migration` 단독, local/test 혼합, Flyway/JPA/Web/bootstrap/scheduler override와 datasource 누락은 fail closed한다.
 
-후속 10D-2B host worker가 사용할 canonical command shape는 healthy PostgreSQL과 exact candidate image가 확정된 기존 Compose에서 다음과 같다. 이 예시는 실제 production 실행 승인이 아니다.
+후속 10D-2B2 host worker가 B1 shared lock 아래 사용할 canonical command shape는 healthy PostgreSQL과 exact candidate image가 확정된 기존 Compose에서 다음과 같다. 이 예시는 실제 production 실행 승인이 아니다.
 
 ```bash
 docker compose \
@@ -159,7 +159,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. 실제 Mac mini release directory의 owner와 directory mode, current/pending/state path는 10D-2B host transaction이 추출·설치 시 별도로 강제한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1 source는 release/state/current의 owner/mode를 강제하고 실제 Mac mini app root와 bootstrap 설치는 10D-2B2가 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 
@@ -168,11 +168,33 @@ deploy-our-ledger-v1 <exact-40-sha> keep <bounded-actor>
 deploy-our-ledger-v1 <exact-40-sha> update <sha256:64-lowercase-hex> <bounded-actor>
 ```
 
-helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. 이 source에는 host-side command가 없으므로 실제 host가 token을 읽거나 artifact를 pull/cutover할 수 없고, kill switch를 활성화할 운영 근거도 아직 없다.
+helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. 10D-2B1 host source는 token을 읽거나 artifact를 pull/cutover하지 않으므로 kill switch를 활성화할 운영 근거도 아직 없다.
 
-## 10D-2B/10D-3 activation boundary
+## 10D-2B1 host state와 shared operation lock
 
-10D-2B restricted host deployment transaction과 10D-3 public activation은 다음 목표 상태 전이를 별도 Issue, 계획, production 승인으로 구현·검증한다.
+production worker의 app root는 source에서 `/Users/homeserver/Server/apps/our-ledger`로 고정한다. production CLI와 environment는 root, app/state/Compose path override를 받지 않는다. test-only `synthetic_host`만 dependency injection으로 mode `0700` temp root를 사용하며 actual fixed path를 읽거나 쓰지 않는다.
+
+```text
+/Users/homeserver/Server/apps/our-ledger/
+├─ runtime-config/
+│  ├─ releases/<64-lowercase-digest-hex>/
+│  ├─ state/deployment.json
+│  ├─ pending/transaction.json
+│  └─ current -> releases/<digesthex>
+└─ operations/lock
+```
+
+managed directory는 current user mode `0700`, state/pending JSON은 `0600`이다. shared operation lock은 `operations/lock` directory의 atomic `mkdir`로 non-blocking 획득한다. symlink·unexpected entry·다른 holder·crash 뒤 stale directory는 즉시 fail closed하며 PID만 보고 지우거나 steal하지 않는다. public `backup-production.sh`는 이 lock을 획득한 뒤 non-executable `backup_core.sh`를 호출하고 future deploy transaction은 이미 lock을 보유한 상태에서 같은 core를 직접 호출한다. `--skip-lock`이나 environment bypass는 없다.
+
+runtime-config release 이름은 restricted intent의 exact `sha256:<64hex>`에서만 파생한다. artifact의 exact regular-file/directory allowlist와 `0600`/`0700`, current owner, hardlink/symlink/nonregular/unexpected entry 부재를 다시 검증한 뒤 owner-only partial tree의 file/directory fsync와 atomic directory rename으로 publish한다. 같은 digest·content는 재사용할 수 있지만 같은 digest의 다른 content는 overwrite하지 않는다.
+
+`current`는 verified `releases/<digesthex>`를 향하는 relative symlink만 허용하고 temp symlink→atomic replace→runtime-config directory fsync 순서로 갱신한다. `deployment.json`과 `transaction.json`은 `formatVersion: 1` exact schema의 비민감 application/runtime-config identity만 저장하고 temp write→file fsync→atomic replace→directory fsync를 따른다. pending이 있으면 새 stage/transaction을 시작하지 않는다. crash 뒤 pending을 보존하고 candidate 성공을 추측하지 않으며, explicit abandoned cleanup은 current/state가 recorded previous에서 전혀 움직이지 않은 경우만 허용한다.
+
+이 B1 source는 API/Web cutover, production deployment state 확정과 rollback 결정을 수행하지 않는다. actual root 생성/설치, forced-command, artifact pull/token, predeploy backup/migration/readiness/HomeOps는 B2 또는 10D-3의 별도 승인 대상이다.
+
+## 10D-2B2/10D-3 activation boundary
+
+10D-2B2 restricted host deployment transaction과 10D-3 public activation은 B1 source authority 위에서 다음 목표 상태 전이를 별도 Issue, 계획, production 승인으로 구현·검증한다.
 
 ```text
 main merge/release intent
@@ -194,14 +216,14 @@ main merge/release intent
 
 - API/Web은 같은 40자리 commit SHA의 immutable image pair여야 하며 `latest`를 사용하지 않는다.
 - runtime-config update는 exact digest로만 받으며 host가 repository branch, caller path 또는 mutable tag를 실행하지 않는다.
-- deploy와 scheduled backup은 같은 project non-blocking operation lock을 사용한다. 현재 source의 backup 전용 lock을 production shared lock으로 전환하는 설치 작업은 10D에서 exact bootstrap/worker와 함께 검증한다.
+- deploy와 scheduled backup은 B1의 같은 project non-blocking operation lock을 사용한다. actual fixed root와 bootstrap/worker 설치·dry run은 B2에서 별도 검증한다.
 - predeploy verified backup 실패 시 migration/cutover를 시작하지 않는다.
 - Flyway는 candidate API의 one-shot migration/validate로 분리하고 일반 API startup에서 임의 schema update를 사용하지 않는다.
 - readiness와 approved smoke 성공 전에는 `current`를 candidate로 확정하지 않는다.
 - image rollback과 DB restore를 분리한다. backward-incompatible migration 뒤 previous image가 호환된다고 가정하거나 production DB restore를 자동 rollback으로 사용하지 않는다.
 - `down --volumes`, broad Docker prune, automatic reverse migration과 caller가 임의 shell/Compose path/image를 넘기는 SSH를 금지한다.
 
-10D-2A에는 candidate image 내부 lifecycle과 synthetic gate만 있다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, restricted wrapper, operation lock, backup/migration/cutover worker와 Mac mini install/dry run은 10D-2B다. Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+10D-2B1에는 host state/lock/runtime-config staging source와 synthetic gate만 있다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, restricted wrapper, backup/migration/cutover worker와 Mac mini install/dry run은 10D-2B2다. Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -216,7 +238,7 @@ main merge/release intent
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1/10D-2A source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
+10C source와 10D-1/10D-2A/10D-2B1 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, host state 설치, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
 
 ## 롤백
 
