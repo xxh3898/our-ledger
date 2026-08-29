@@ -227,8 +227,9 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - runtime-config detector의 application-only `keep`, runtime source/force/bootstrap `update`, missing/non-ancestor range fail-closed
 - `main` validation의 재사용 Full CI 단일 authority, production concurrency와 default-off kill switch
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
+- publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
 - GHCR token stdin-only restricted SSH boundary와 token/secret의 command argument·artifact 비포함
-- `scratch` runtime-config artifact의 exact file allowlist, owner-only mode, symlink와 env/key/dump/state 부재
+- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2 host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
 `scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 runtime-config source만 build/extract한다. 합성 `.env.production.example`로 Compose render와 공개 script help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.

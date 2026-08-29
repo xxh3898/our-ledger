@@ -59,7 +59,7 @@ local source 검증은 다음 command다.
 ./scripts/verify-release-transport.sh
 ```
 
-이 gate는 helper/unit와 workflow source를 확인하고 `scratch` runtime-config를 `--network none`으로 build/extract해 exact file/mode/label, forbidden material 부재, script help와 Compose render를 검증한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
+이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 10D-2 설치 계약이다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
 
 ## 환경변수
 

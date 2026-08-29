@@ -30,6 +30,7 @@ if docker container inspect "$container_name" >/dev/null 2>&1 \
 fi
 runtime_parent="$(mktemp -d)"
 runtime_dir="$runtime_parent/runtime"
+runtime_archive="$runtime_parent/runtime.tar"
 image_created=false
 container_created=false
 
@@ -102,55 +103,90 @@ if [[ "$actual_revision" != "$git_head" \
 fi
 
 docker create \
+  --platform linux/arm64 \
   --name "$container_name" \
   "${cleanup_labels[@]}" \
   "$image_tag" >/dev/null
 container_created=true
-docker export "$container_name" \
-  | tar \
-      --extract \
-      --file - \
-      --directory "$runtime_parent" \
-      --no-same-owner \
-      runtime
-if [[ ! -d "$runtime_dir" ]]; then
-  printf 'Runtime config artifact extraction 결과가 없습니다.\n' >&2
-  exit 1
-fi
+docker export --output "$runtime_archive" "$container_name"
 
-python3 -B - "$runtime_dir" <<'PY'
-import os
+python3 -B - "$runtime_archive" "$runtime_dir" <<'PY'
+import shutil
 import stat
 import sys
-from pathlib import Path
+import tarfile
+from pathlib import Path, PurePosixPath
 
-root = Path(sys.argv[1])
-expected = {
+archive = Path(sys.argv[1])
+root = Path(sys.argv[2])
+expected_directories = {
+    "infra",
+    "infra/nginx",
+    "scripts",
+    "scripts/backup_tools",
+    "scripts/release_tools",
+    "scripts/status_tools",
+}
+expected_files = {
     "compose.yaml": 0o600,
-    "infra": 0o700,
-    "infra/nginx": 0o700,
     "infra/nginx/nginx.conf": 0o600,
-    "scripts": 0o700,
     "scripts/backup-production.sh": 0o700,
-    "scripts/backup_tools": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
-    "scripts/release_tools": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
-    "scripts/status_tools": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
     "scripts/status_tools/monitor_worker.py": 0o600,
     "scripts/status_tools/production_status.py": 0o600,
 }
-actual = {}
-for path in root.rglob("*"):
-    relative = path.relative_to(root).as_posix()
-    if path.is_symlink():
-        raise SystemExit("runtime config contains a symlink")
-    actual[relative] = stat.S_IMODE(path.stat().st_mode)
-if actual != expected:
-    raise SystemExit("runtime config entry allowlist or mode differs")
+actual_directories = set()
+actual_files = {}
+file_members = {}
+seen_entries = set()
+
+with tarfile.open(archive, "r") as bundle:
+    for member in bundle.getmembers():
+        member_path = PurePosixPath(member.name)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise SystemExit("runtime config contains an unsafe path")
+        if not member_path.parts or member_path.parts[0] != "runtime":
+            continue
+        if len(member_path.parts) == 1:
+            if not member.isdir():
+                raise SystemExit("runtime config root is not a directory")
+            continue
+
+        relative = PurePosixPath(*member_path.parts[1:]).as_posix()
+        if relative in seen_entries:
+            raise SystemExit("runtime config contains a duplicate entry")
+        seen_entries.add(relative)
+        if member.issym() or member.islnk():
+            raise SystemExit("runtime config contains a symlink")
+        if member.isdir():
+            actual_directories.add(relative)
+        elif member.isfile():
+            actual_files[relative] = stat.S_IMODE(member.mode)
+            file_members[relative] = member
+        else:
+            raise SystemExit("runtime config contains a non-regular entry")
+
+    if actual_directories != expected_directories:
+        raise SystemExit("runtime config directory allowlist differs")
+    if actual_files != expected_files:
+        raise SystemExit("runtime config file allowlist or mode differs")
+
+    root.mkdir(mode=0o700)
+    for relative in sorted(expected_directories, key=lambda value: value.count("/")):
+        (root / relative).mkdir(mode=0o700, parents=True, exist_ok=True)
+    for relative, expected_mode in expected_files.items():
+        source = bundle.extractfile(file_members[relative])
+        if source is None:
+            raise SystemExit("runtime config file content is unavailable")
+        target = root / relative
+        with source, target.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+        target.chmod(expected_mode)
+
 for path in root.rglob("*"):
     lowered = path.name.lower()
     if lowered in {".env", "last-success.json", "monitor-state.json"}:

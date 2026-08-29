@@ -134,9 +134,10 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - production concurrency는 `our-ledger-production`, `cancel-in-progress: false`다.
 - repository variable `OUR_LEDGER_DEPLOY_ENABLED`가 정확히 `true`일 때만 publish/deploy job이 실행된다. variable이 없거나 다른 값이면 validation 이후 종료하며 GHCR login/publish, Tailscale과 SSH step은 실행되지 않는다.
 - publish job만 `packages: write`, deployment history read 권한을 갖고 deploy job은 `packages: read`, Tailscale OIDC를 위한 `id-token: write`만 추가한다.
+- publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. 실제 Mac mini release directory의 owner와 directory mode, current/pending/state path는 10D-2 host transaction이 추출·설치 시 별도로 강제한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 

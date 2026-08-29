@@ -19,19 +19,36 @@ REVISION = "1" * 40
 API_DIGEST = "sha256:" + ("a" * 64)
 WEB_DIGEST = "sha256:" + ("b" * 64)
 RUNTIME_DIGEST = "sha256:" + ("c" * 64)
+CHECKOUT_SHA = "d23441a48e516b6c34aea4fa41551a30e30af803"
 
-RUNTIME_SOURCES = {
-    "compose.prod.yaml",
-    "infra/nginx/nginx.conf",
-    "scripts/backup-production.sh",
-    "scripts/backup_tools/backup_artifact.py",
-    "scripts/monitor-production.sh",
-    "scripts/production-status.sh",
-    "scripts/release_tools/release_contract.py",
-    "scripts/status_tools/monitor_policy.py",
-    "scripts/status_tools/monitor_worker.py",
-    "scripts/status_tools/production_status.py",
+RUNTIME_FILES = {
+    "compose.prod.yaml": ("0600", "/runtime/compose.yaml"),
+    "infra/nginx/nginx.conf": ("0600", "/runtime/infra/nginx/nginx.conf"),
+    "scripts/backup-production.sh": ("0700", "/runtime/scripts/backup-production.sh"),
+    "scripts/backup_tools/backup_artifact.py": (
+        "0600",
+        "/runtime/scripts/backup_tools/backup_artifact.py",
+    ),
+    "scripts/monitor-production.sh": ("0700", "/runtime/scripts/monitor-production.sh"),
+    "scripts/production-status.sh": ("0700", "/runtime/scripts/production-status.sh"),
+    "scripts/release_tools/release_contract.py": (
+        "0700",
+        "/runtime/scripts/release_tools/release_contract.py",
+    ),
+    "scripts/status_tools/monitor_policy.py": (
+        "0600",
+        "/runtime/scripts/status_tools/monitor_policy.py",
+    ),
+    "scripts/status_tools/monitor_worker.py": (
+        "0600",
+        "/runtime/scripts/status_tools/monitor_worker.py",
+    ),
+    "scripts/status_tools/production_status.py": (
+        "0600",
+        "/runtime/scripts/status_tools/production_status.py",
+    ),
 }
+RUNTIME_SOURCES = set(RUNTIME_FILES)
 
 
 class ReleaseContractTest(unittest.TestCase):
@@ -339,14 +356,40 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertNotIn("GHCR_TOKEN", command_build)
         self.assertNotIn("${GHCR_TOKEN}", ssh_invocation)
 
+    def test_privileged_workflow_actions_use_exact_commit_revisions(self) -> None:
+        workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+
+        for job_id in ("publish", "deploy"):
+            job = workflow_job(workflow, job_id)
+            action_refs = re.findall(
+                r"^\s+uses:\s+([^\s@]+)@([^\s#]+)",
+                job,
+                re.MULTILINE,
+            )
+
+            self.assertTrue(action_refs, job_id)
+            self.assertIn(("actions/checkout", CHECKOUT_SHA), action_refs)
+            for action, revision in action_refs:
+                with self.subTest(job=job_id, action=action):
+                    self.assertRegex(revision, r"^[0-9a-f]{40}$")
+
     def test_runtime_config_dockerfile_has_exact_secret_free_source_allowlist(self) -> None:
         dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
-        copied_sources = set(
-            re.findall(r"^COPY --chmod=[0-9]{4} (\S+) ", dockerfile, re.MULTILINE)
+        copy_entries = re.findall(
+            r"^COPY --chmod=([0-9]{4}) (\S+) (\S+)$",
+            dockerfile,
+            re.MULTILINE,
         )
 
         self.assertIn("FROM scratch", dockerfile)
-        self.assertEqual(copied_sources, RUNTIME_SOURCES)
+        self.assertCountEqual(
+            copy_entries,
+            [
+                (mode, source, destination)
+                for source, (mode, destination) in RUNTIME_FILES.items()
+            ],
+        )
+        self.assertEqual(len(copy_entries), len(RUNTIME_FILES))
         self.assertIn('org.opencontainers.image.revision="${REVISION}"', dockerfile)
         self.assertIn('org.opencontainers.image.version="${REVISION}"', dockerfile)
         self.assertIn(
@@ -356,7 +399,7 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn('io.chochiho.runtime-config.project="our-ledger"', dockerfile)
         self.assertNotRegex(dockerfile, r"(?m)^COPY\s+(?:--\S+\s+)*\.\s")
         self.assertNotRegex(dockerfile, r"(?i)\.env|private|secret|\.pem|\.key")
-        for source in copied_sources:
+        for source in RUNTIME_SOURCES:
             self.assertTrue((ROOT / source).is_file(), source)
 
     def test_detector_and_artifact_sources_stay_in_sync(self) -> None:

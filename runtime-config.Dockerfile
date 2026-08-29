@@ -7,15 +7,9 @@ LABEL org.opencontainers.image.revision="${REVISION}"
 LABEL org.opencontainers.image.version="${REVISION}"
 LABEL io.chochiho.runtime-config.project="our-ledger"
 
-# Scratch has no directory creation step. Seed each directory tree with 0700
-# before applying the final 0600 mode to non-executable files.
-COPY --chmod=0700 scripts/backup-production.sh /runtime/scripts/backup-production.sh
-COPY --chmod=0700 infra/nginx/nginx.conf /runtime/infra/nginx/nginx.conf
-COPY --chmod=0700 scripts/backup_tools/backup_artifact.py /runtime/scripts/backup_tools/backup_artifact.py
-COPY --chmod=0700 scripts/status_tools/monitor_policy.py /runtime/scripts/status_tools/monitor_policy.py
-
 COPY --chmod=0600 compose.prod.yaml /runtime/compose.yaml
 COPY --chmod=0600 infra/nginx/nginx.conf /runtime/infra/nginx/nginx.conf
+COPY --chmod=0700 scripts/backup-production.sh /runtime/scripts/backup-production.sh
 COPY --chmod=0600 scripts/backup_tools/backup_artifact.py /runtime/scripts/backup_tools/backup_artifact.py
 COPY --chmod=0700 scripts/monitor-production.sh /runtime/scripts/monitor-production.sh
 COPY --chmod=0700 scripts/production-status.sh /runtime/scripts/production-status.sh
