@@ -9,6 +9,16 @@ export PYTHONDONTWRITEBYTECODE=1
 
 cd "$ROOT_DIR"
 
+LEGACY_MONITOR_PATTERN='Uptime K[u]ma|STATUS_HEART[B]EAT_URL|/api/pu[s]h/|K[u]ma up|K[u]ma down|K[u]ma adapter'
+if git grep -n -E "$LEGACY_MONITOR_PATTERN" -- .; then
+  echo "legacy direct monitor 계약이 tracked repository에 남아 있습니다." >&2
+  exit 1
+fi
+if git grep -n -E 'urllib[.](error|parse|request)' -- scripts/status_tools/monitor_worker.py; then
+  echo "monitor worker에 direct HTTP sender가 남아 있습니다." >&2
+  exit 1
+fi
+
 python3 -B -m unittest scripts.status_tools.test_monitor_policy
 python3 -B -m unittest scripts.backup_tools.test_backup_artifact
 
@@ -67,4 +77,4 @@ if find "$ROOT_DIR/scripts" -type f -name '*.pyc' -print | grep -q .; then
   exit 1
 fi
 
-echo "Monitor policy/Kuma synthetic 검증을 통과했습니다."
+echo "Monitor policy/HomeOps synthetic 검증을 통과했습니다."

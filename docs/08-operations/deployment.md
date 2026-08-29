@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가했다. Slice 10C-2B1은 existing stack과 verified marker를 변경하지 않고 읽는 operational status command를 추가했고 10C-2B2는 그 raw snapshot의 policy/state/Kuma source harness와 future launchd template을 추가한다. 실제 image registry push, Mac mini production Compose/status/backup/monitor 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가했다. Slice 10C-2B1은 existing stack과 verified marker를 변경하지 않고 읽는 operational status command를 추가했고 10C-2B2는 그 raw snapshot의 policy/state와 HomeOps reporter subprocess source harness, future launchd template을 추가한다. 실제 image registry push, Mac mini production Compose/status/backup/monitor/HomeOps reporter 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하지 않았다.
 
 ## 목표 구조
 
@@ -124,7 +124,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 
 `./scripts/verify-observability.sh`는 같은 command를 exact-HEAD disposable stack에서 검증한다. synthetic recurring success/rule failure, API unavailable/restart reset, verified marker/inventory, public actuator 차단, privacy와 resource residue 0을 확인하며 실제 production resource를 사용하지 않는다.
 
-`./scripts/verify-monitor-policy.sh`는 B1 snapshot 위의 threshold/streak, owner-only atomic state, non-blocking lock, bounded Kuma adapter와 monitor/backup plist를 pure/synthetic하게 검증한다. production status, Uptime Kuma와 LaunchAgent를 사용하지 않는다.
+`./scripts/verify-monitor-policy.sh`는 B1 snapshot 위의 threshold/streak, owner-only atomic state, non-blocking lock, HomeOps reporter subprocess와 durable `DISK_LOW` episode, monitor/backup plist를 pure/synthetic하게 검증한다. production status, 실제 HomeOps reporter/spool/API와 LaunchAgent를 사용하지 않는다.
 
 ## Future 10D release pipeline
 

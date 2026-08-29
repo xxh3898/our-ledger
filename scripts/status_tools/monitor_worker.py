@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+from dataclasses import dataclass
 import fcntl
 import json
 import os
 from pathlib import Path, PurePath
-import re
 import stat
 import subprocess
 import sys
 import tempfile
 from typing import Any, Callable
-import urllib.error
-import urllib.parse
-import urllib.request
 
 from scripts.backup_tools import backup_artifact
 from scripts.status_tools import monitor_policy
@@ -24,13 +21,11 @@ from scripts.status_tools import monitor_policy
 
 STATE_FILENAME = "monitor-state.json"
 LOCK_FILENAME = ".our-ledger-monitor.lock"
-HEARTBEAT_CONFIG_KEY = "STATUS_HEARTBEAT_URL"
 MAX_PRIVATE_FILE_BYTES = 65_536
 MAX_STATUS_BYTES = 1_048_576
-MAX_RESPONSE_BYTES = 65_536
-MAX_HEARTBEAT_URL_BYTES = 4_096
-MAX_HEARTBEAT_MESSAGE_BYTES = 512
-PUSH_PATH_PATTERN = re.compile(r"^/api/push/[A-Za-z0-9_-]+/?$")
+MAX_HOMEOPS_PAYLOAD_BYTES = 4_096
+HOMEOPS_REPORTER_FILENAME = "report-homeops-event.py"
+HOMEOPS_REPORTER_TIMEOUT_SECONDS = 5
 
 
 class ContractError(RuntimeError):
@@ -45,8 +40,15 @@ class StatusUnavailableError(ContractError):
     pass
 
 
-class DeliveryError(ContractError):
+class ReporterError(ContractError):
     pass
+
+
+@dataclass(frozen=True)
+class HomeOpsReporter:
+    path: Path
+    device: int
+    inode: int
 
 
 def require(condition: bool, message: str) -> None:
@@ -154,14 +156,14 @@ def validate_backup_directory(repo_root: Path, value: str) -> Path:
         raise ContractError("backup directory contract가 잘못됐습니다.") from error
 
 
-def validate_disjoint_directories(
-    state_directory: Path, backup_directory: Path
-) -> None:
-    require(
-        not _is_within(state_directory, backup_directory)
-        and not _is_within(backup_directory, state_directory),
-        "monitor state directory와 backup directory는 disjoint여야 합니다.",
-    )
+def validate_disjoint_paths(*authorities: Path) -> None:
+    for index, candidate in enumerate(authorities):
+        for other in authorities[index + 1:]:
+            require(
+                not _is_within(candidate, other)
+                and not _is_within(other, candidate),
+                "monitor authority path는 서로 disjoint여야 합니다.",
+            )
 
 
 def validate_state_directory_entries(state_directory: Path) -> None:
@@ -176,9 +178,53 @@ def validate_state_directory_entries(state_directory: Path) -> None:
     )
 
 
-def validate_heartbeat_config(repo_root: Path, value: str) -> Path:
-    return _canonical_external(
-        repo_root, value, "monitor heartbeat config", directory=False
+def _reporter_info(path: Path, label: str) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ContractError(f"{label} metadata를 확인할 수 없습니다.") from error
+    require(not stat.S_ISLNK(info.st_mode), f"{label}는 symlink일 수 없습니다.")
+    require(stat.S_ISREG(info.st_mode), f"{label}는 regular file이어야 합니다.")
+    require(info.st_uid == os.geteuid(), f"{label} owner가 현재 실행 사용자와 다릅니다.")
+    mode = stat.S_IMODE(info.st_mode)
+    require(mode & 0o022 == 0, f"{label}는 group/other writable일 수 없습니다.")
+    require(mode & stat.S_IXUSR != 0, f"{label}에 owner executable bit가 필요합니다.")
+    return info
+
+
+def validate_homeops_reporter(repo_root: Path, value: str) -> HomeOpsReporter:
+    candidate = _raw_path(value, "HomeOps reporter")
+    require(
+        candidate.name == HOMEOPS_REPORTER_FILENAME,
+        "HomeOps reporter identity가 잘못됐습니다.",
+    )
+    before = _reporter_info(candidate, "HomeOps reporter")
+    try:
+        canonical = candidate.resolve(strict=True)
+        canonical_repo = repo_root.resolve(strict=True)
+    except OSError as error:
+        raise ContractError("HomeOps reporter path를 canonicalize할 수 없습니다.") from error
+    require(
+        canonical.name == HOMEOPS_REPORTER_FILENAME,
+        "HomeOps reporter canonical identity가 잘못됐습니다.",
+    )
+    require(
+        not _is_within(canonical, canonical_repo),
+        "HomeOps reporter는 repository 밖에 있어야 합니다.",
+    )
+    after = _reporter_info(canonical, "HomeOps reporter")
+    require(
+        (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino),
+        "HomeOps reporter가 resolve 중 교체됐습니다.",
+    )
+    return HomeOpsReporter(canonical, after.st_dev, after.st_ino)
+
+
+def _revalidate_homeops_reporter(reporter: HomeOpsReporter) -> None:
+    info = _reporter_info(reporter.path, "HomeOps reporter")
+    require(
+        (info.st_dev, info.st_ino) == (reporter.device, reporter.inode),
+        "HomeOps reporter가 validation 이후 교체됐습니다.",
     )
 
 
@@ -344,133 +390,112 @@ class MonitorLock:
                 self.descriptor = None
 
 
-def validate_heartbeat_url(value: str) -> str:
-    require(bool(value), "heartbeat URL이 비어 있습니다.")
-    require(
-        len(value.encode("utf-8")) <= MAX_HEARTBEAT_URL_BYTES,
-        "heartbeat URL size가 제한을 초과했습니다.",
-    )
-    require(not _has_control(value) and not any(character.isspace() for character in value), "heartbeat URL 형식이 잘못됐습니다.")
+def _homeops_payload_bytes(payload: dict[str, Any]) -> bytes:
     try:
-        parsed = urllib.parse.urlsplit(value)
-        port = parsed.port
-    except ValueError as error:
-        raise ContractError("heartbeat URL 형식이 잘못됐습니다.") from error
-    require(parsed.scheme in {"http", "https"}, "heartbeat URL scheme이 잘못됐습니다.")
-    require(parsed.hostname is not None and bool(parsed.hostname), "heartbeat URL host가 없습니다.")
-    require(parsed.username is None and parsed.password is None, "heartbeat URL에 user info를 사용할 수 없습니다.")
-    require(not parsed.fragment, "heartbeat URL에 fragment를 사용할 수 없습니다.")
-    require(bool(PUSH_PATH_PATTERN.fullmatch(parsed.path)), "heartbeat URL path가 잘못됐습니다.")
-    if parsed.scheme == "http":
+        validated = monitor_policy.validate_homeops_disk_signal(payload)
+    except monitor_policy.ContractError as error:
+        raise ContractError("HomeOps signal payload contract가 잘못됐습니다.") from error
+    content = (
+        json.dumps(validated, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+        + "\n"
+    ).encode("utf-8")
+    require(
+        len(content) <= MAX_HOMEOPS_PAYLOAD_BYTES,
+        "HomeOps signal payload size가 제한을 초과했습니다.",
+    )
+    return content
+
+
+def send_homeops_signal(reporter: HomeOpsReporter, payload: dict[str, Any]) -> None:
+    content = _homeops_payload_bytes(payload)
+    try:
+        _revalidate_homeops_reporter(reporter)
+        result = subprocess.run(
+            [str(reporter.path), "signal"],
+            input=content,
+            check=False,
+            shell=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=HOMEOPS_REPORTER_TIMEOUT_SECONDS,
+        )
+    except (ContractError, OSError, subprocess.SubprocessError) as error:
+        raise ReporterError("HomeOps reporter가 signal을 수락하지 못했습니다.") from error
+    if result.returncode != 0:
+        raise ReporterError("HomeOps reporter가 signal을 수락하지 못했습니다.")
+
+
+def _homeops_signal(
+    *, episode_key: str, status: str, observed_at: str, used_percent: int | float
+) -> dict[str, Any]:
+    available_percent = round(100.0 - float(used_percent), 2)
+    payload = {
+        "eventKey": f"{episode_key}:{'alert' if status == 'ALERT' else 'recovered'}",
+        "episodeKey": episode_key,
+        "project": monitor_policy.HOMEOPS_PROJECT,
+        "signalType": "DISK_LOW",
+        "status": status,
+        "observedAt": observed_at,
+        "availablePercent": available_percent,
+        "thresholdPercent": monitor_policy.HOMEOPS_DISK_THRESHOLD_PERCENT,
+    }
+    return monitor_policy.validate_homeops_disk_signal(payload)
+
+
+def prepare_homeops_disk_transition(
+    snapshot: dict[str, Any], state: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    validated_snapshot = monitor_policy.validate_snapshot(snapshot)
+    next_state = monitor_policy.validate_state(state)
+    disk_state = next_state["homeOpsDisk"]
+    require(
+        disk_state["pendingSignal"] is None,
+        "새 HomeOps transition 전에 pending signal이 없어야 합니다.",
+    )
+    filesystem = validated_snapshot["filesystem"]
+    if filesystem["state"] != "AVAILABLE":
+        return next_state, None
+
+    used_percent = filesystem["usedPercent"]
+    active_episode = disk_state["activeEpisodeKey"]
+    payload: dict[str, Any] | None = None
+    if used_percent >= 80 and active_episode is None:
+        sequence = disk_state["episodeSequence"]
         require(
-            parsed.hostname in {"127.0.0.1", "localhost", "::1"},
-            "HTTP heartbeat URL은 loopback만 허용합니다.",
+            sequence < monitor_policy.MAX_EPISODE_SEQUENCE,
+            "HomeOps disk episode sequence가 제한을 초과했습니다.",
         )
-    if port is not None:
-        require(1 <= port <= 65535, "heartbeat URL port가 잘못됐습니다.")
-    try:
-        query = urllib.parse.parse_qsl(
-            parsed.query,
-            keep_blank_values=True,
-            strict_parsing=False,
-            max_num_fields=16,
+        sequence += 1
+        episode_key = f"{monitor_policy.HOMEOPS_PROJECT}:disk-low:{sequence}"
+        disk_state["episodeSequence"] = sequence
+        payload = _homeops_signal(
+            episode_key=episode_key,
+            status="ALERT",
+            observed_at=validated_snapshot["observedAt"],
+            used_percent=used_percent,
         )
-    except ValueError as error:
-        raise ContractError("heartbeat URL query가 잘못됐습니다.") from error
-    require(len(query) <= 16, "heartbeat URL query field가 너무 많습니다.")
-    return value
-
-
-def load_heartbeat_url(config_path: Path) -> str:
-    content = _read_private_file(config_path, "monitor heartbeat config")
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise ContractError("monitor heartbeat config encoding이 잘못됐습니다.") from error
-    lines = text.splitlines()
-    require(len(lines) == 1, "monitor heartbeat config는 exact key 하나만 허용합니다.")
-    prefix = f"{HEARTBEAT_CONFIG_KEY}="
-    require(lines[0].startswith(prefix), "monitor heartbeat config key가 잘못됐습니다.")
-    require(lines[0].count("=") >= 1, "monitor heartbeat config 형식이 잘못됐습니다.")
-    return validate_heartbeat_url(lines[0][len(prefix):])
-
-
-def heartbeat_message(result: dict[str, Any]) -> str:
-    status = result.get("status")
-    require(status in monitor_policy.SEVERITIES, "policy result status가 잘못됐습니다.")
-    signals = result.get("signals")
-    require(isinstance(signals, list), "policy result signals가 잘못됐습니다.")
-    parts: list[str] = []
-    for signal in signals:
-        require(isinstance(signal, dict), "policy signal이 잘못됐습니다.")
-        code = signal.get("code")
-        target = signal.get("target")
-        require(code in monitor_policy.SIGNAL_CODES, "policy signal code가 잘못됐습니다.")
-        require(target is None or target in monitor_policy.SERVICE_TARGETS, "policy signal target이 잘못됐습니다.")
-        parts.append(code if target is None else f"{code}:{target}")
-    message = "OK" if not parts else f"{status} " + ",".join(parts)
-    require(
-        len(message.encode("utf-8")) <= MAX_HEARTBEAT_MESSAGE_BYTES,
-        "heartbeat message size가 제한을 초과했습니다.",
-    )
-    return message
-
-
-def _delivery_url(base_url: str, result: dict[str, Any]) -> str:
-    validate_heartbeat_url(base_url)
-    parsed = urllib.parse.urlsplit(base_url)
-    query = [
-        (key, value)
-        for key, value in urllib.parse.parse_qsl(
-            parsed.query, keep_blank_values=True, max_num_fields=16
+    elif used_percent < 80 and active_episode is not None:
+        payload = _homeops_signal(
+            episode_key=active_episode,
+            status="RECOVERED",
+            observed_at=validated_snapshot["observedAt"],
+            used_percent=used_percent,
         )
-        if key not in {"status", "msg", "ping"}
-    ]
-    query.extend([
-        ("status", "down" if result["status"] == "CRITICAL" else "up"),
-        ("msg", heartbeat_message(result)),
-        ("ping", ""),
-    ])
-    delivery_url = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
-    require(
-        len(delivery_url.encode("utf-8")) <= MAX_HEARTBEAT_URL_BYTES,
-        "heartbeat delivery URL size가 제한을 초과했습니다.",
-    )
-    return delivery_url
+    disk_state["pendingSignal"] = payload
+    return monitor_policy.validate_state(next_state), payload
 
 
-class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-
-    def redirect_request(
-        self,
-        request: urllib.request.Request,
-        file_pointer: Any,
-        code: int,
-        message: str,
-        headers: Any,
-        new_url: str,
-    ) -> None:
-        return None
-
-
-def send_heartbeat(base_url: str, result: dict[str, Any]) -> None:
-    try:
-        request = urllib.request.Request(
-            _delivery_url(base_url, result),
-            headers={"User-Agent": "our-ledger-monitor/1"},
-            method="GET",
-        )
-        opener = urllib.request.build_opener(NoRedirectHandler())
-        with opener.open(request, timeout=5) as response:
-            status = response.getcode()
-            body = response.read(MAX_RESPONSE_BYTES + 1)
-        require(200 <= status < 300, "heartbeat response status가 success가 아닙니다.")
-        require(len(body) <= MAX_RESPONSE_BYTES, "heartbeat response size가 제한을 초과했습니다.")
-    except urllib.error.HTTPError as error:
-        error.close()
-        raise DeliveryError("Uptime Kuma heartbeat delivery에 실패했습니다.") from error
-    except (ContractError, OSError, ValueError, urllib.error.URLError) as error:
-        raise DeliveryError("Uptime Kuma heartbeat delivery에 실패했습니다.") from error
+def finalize_homeops_pending(state: dict[str, Any]) -> dict[str, Any]:
+    next_state = monitor_policy.validate_state(state)
+    disk_state = next_state["homeOpsDisk"]
+    pending = disk_state["pendingSignal"]
+    require(pending is not None, "finalize할 HomeOps pending signal이 없습니다.")
+    if pending["status"] == "ALERT":
+        disk_state["activeEpisodeKey"] = pending["episodeKey"]
+    else:
+        disk_state["activeEpisodeKey"] = None
+    disk_state["pendingSignal"] = None
+    return monitor_policy.validate_state(next_state)
 
 
 def collect_snapshot(
@@ -508,7 +533,7 @@ def collect_snapshot(
 
 
 SnapshotProvider = Callable[[Path, str, str, str], dict[str, Any]]
-HeartbeatSender = Callable[[str, dict[str, Any]], None]
+HomeOpsSender = Callable[[HomeOpsReporter, dict[str, Any]], None]
 
 
 def _now() -> dt.datetime:
@@ -522,20 +547,36 @@ def run_monitor(
     env_file: str,
     backup_directory: str,
     state_directory_value: str,
-    heartbeat_config_value: str,
+    homeops_reporter_value: str,
     snapshot_provider: SnapshotProvider = collect_snapshot,
-    heartbeat_sender: HeartbeatSender = send_heartbeat,
+    homeops_sender: HomeOpsSender = send_homeops_signal,
     now: Callable[[], dt.datetime] = _now,
 ) -> tuple[dict[str, Any], int]:
     backup_directory_path = validate_backup_directory(repo_root, backup_directory)
     state_directory = validate_state_directory(repo_root, state_directory_value)
-    validate_disjoint_directories(state_directory, backup_directory_path)
+    homeops_reporter = validate_homeops_reporter(repo_root, homeops_reporter_value)
+    validate_disjoint_paths(
+        state_directory, backup_directory_path, homeops_reporter.path
+    )
     validate_state_directory_entries(state_directory)
-    heartbeat_config = validate_heartbeat_config(repo_root, heartbeat_config_value)
-    heartbeat_url = load_heartbeat_url(heartbeat_config)
     store = MonitorStateStore(state_directory)
 
     with MonitorLock(state_directory):
+        try:
+            previous_state = store.load()
+        except ContractError:
+            observed_at = now()
+            require(observed_at.tzinfo is not None, "monitor clock이 timezone-aware가 아닙니다.")
+            return monitor_policy.failure_result(
+                monitor_policy.format_instant(observed_at), "STATE_INVALID"
+            ), 1
+
+        pending = previous_state["homeOpsDisk"]["pendingSignal"]
+        if pending is not None:
+            homeops_sender(homeops_reporter, pending)
+            previous_state = finalize_homeops_pending(previous_state)
+            store.save(previous_state)
+
         try:
             snapshot = snapshot_provider(
                 repo_root, project_name, env_file, str(backup_directory_path)
@@ -546,16 +587,6 @@ def run_monitor(
             result = monitor_policy.failure_result(
                 monitor_policy.format_instant(observed_at), "STATUS_UNAVAILABLE"
             )
-            heartbeat_sender(heartbeat_url, result)
-            return result, 1
-
-        try:
-            previous_state = store.load()
-        except ContractError:
-            result = monitor_policy.failure_result(
-                snapshot["observedAt"], "STATE_INVALID"
-            )
-            heartbeat_sender(heartbeat_url, result)
             return result, 1
 
         try:
@@ -564,11 +595,13 @@ def run_monitor(
             result = monitor_policy.failure_result(
                 snapshot["observedAt"], "STATUS_UNAVAILABLE"
             )
-            heartbeat_sender(heartbeat_url, result)
             return result, 1
 
+        next_state, pending = prepare_homeops_disk_transition(snapshot, next_state)
         store.save(next_state)
-        heartbeat_sender(heartbeat_url, result)
+        if pending is not None:
+            homeops_sender(homeops_reporter, pending)
+            store.save(finalize_homeops_pending(next_state))
         return result, 0
 
 
@@ -580,7 +613,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--env-file", required=True)
     result.add_argument("--backup-dir", required=True)
     result.add_argument("--state-dir", required=True)
-    result.add_argument("--heartbeat-config", required=True)
+    result.add_argument("--homeops-reporter", required=True)
     return result
 
 
@@ -594,15 +627,15 @@ def main() -> None:
             env_file=args.env_file,
             backup_directory=args.backup_dir,
             state_directory_value=args.state_dir,
-            heartbeat_config_value=args.heartbeat_config,
+            homeops_reporter_value=args.homeops_reporter,
         )
         print(json.dumps(result, ensure_ascii=True, sort_keys=True))
         raise SystemExit(exit_code)
     except LockBusyError as error:
         print("monitor 실행이 이미 진행 중입니다.", file=sys.stderr)
         raise SystemExit(75) from error
-    except DeliveryError as error:
-        print("Uptime Kuma heartbeat delivery에 실패했습니다.", file=sys.stderr)
+    except ReporterError as error:
+        print("HomeOps reporter가 signal을 수락하지 못했습니다.", file=sys.stderr)
         raise SystemExit(1) from error
     except (ContractError, OSError, ValueError) as error:
         print("monitor worker contract를 실행할 수 없습니다.", file=sys.stderr)

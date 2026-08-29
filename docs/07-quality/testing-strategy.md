@@ -212,12 +212,13 @@ Monitor/Alert Policy Harness는 추가로 다음을 검증한다.
 - backup 7시간 exact boundary, marker failure, invalid/incomplete/foreign inventory 의미
 - filesystem 80/90 exact boundary와 unavailable
 - result/signal/state exact allowlist와 raw snapshot/secret/PII/financial/path 비노출
-- external state/config canonical path와 mode, atomic state replace, corruption preservation, non-blocking lock
-- local synthetic HTTP server의 Kuma up/warn/down, redirect 거부, response size와 network failure, secret URL 비노출
+- external state/backup/reporter canonical path와 mode, pairwise disjoint, atomic state replace, corruption preservation, non-blocking lock
+- synthetic `report-homeops-event.py signal`의 exact JSON stdin, `shell=False`, bounded timeout/output, nonzero failure와 secret/origin argument·environment 부재
+- `DISK_LOW` ALERT/RECOVERED episode, durable pending save/clear, same-key retry와 unsupported local signal non-delivery
 - recent4+daily7 KST retention matrix와 symlink/invalid/future/incomplete/foreign fail-safe, tree byte-identical
 - monitor 60초, backup `:35` 네 시각, fixed external bootstrap, `KeepAlive` 부재의 plist parse/lint
 
-`scripts/verify-monitor-policy.sh`는 Python pure/unit와 local loopback HTTP, plist parser만 사용하고 Docker, actual status/backup/Uptime Kuma/LaunchAgent를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `monitor-policy` job에서 실행한다.
+`scripts/verify-monitor-policy.sh`는 Python pure/unit, synthetic external reporter와 plist parser만 사용하고 Docker, actual status/backup/HomeOps reporter·spool·API/LaunchAgent를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `monitor-policy` job에서 실행한다.
 
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
@@ -400,4 +401,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime, backup/restore, observability, monitor-policy/Kuma smoke를 검증한다.
+`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다.

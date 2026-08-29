@@ -14,9 +14,9 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2B1은 existing production-like runtime과 10C-2A verified backup marker를 변경하지 않고 읽는 operational status harness를 구현했다. `production-status.sh`가 Web/API/PostgreSQL, loopback Nginx, process-local recurring scheduler, backup freshness/inventory와 backup filesystem을 canonical JSON object 하나로 결합한다. Slice 10C-2B2는 이 raw snapshot을 변경하지 않고 `monitor_policy.py` pure evaluator, owner-only 최소 state와 Uptime Kuma push worker를 별도 계층으로 추가한다.
+Slice 10C-2B1은 existing production-like runtime과 10C-2A verified backup marker를 변경하지 않고 읽는 operational status harness를 구현했다. `production-status.sh`가 Web/API/PostgreSQL, loopback Nginx, process-local recurring scheduler, backup freshness/inventory와 backup filesystem을 canonical JSON object 하나로 결합한다. Slice 10C-2B2는 이 raw snapshot을 변경하지 않고 `monitor_policy.py` pure evaluator, owner-only 최소 state와 HomeOps reporter subprocess worker를 별도 계층으로 추가한다.
 
-실제 Mac mini production에서 status/monitor command를 실행하거나 LaunchAgent, Uptime Kuma monitor/email을 활성화하지 않았다. B2는 확정 policy와 synthetic local/Hosted gate, 설치하지 않는 plist example까지만 제공한다. external state/config/bootstrap 생성과 실제 activation은 10D의 별도 운영 승인 대상이다.
+실제 Mac mini production에서 status/monitor command 또는 HomeOps reporter/spool/API를 실행하거나 LaunchAgent와 notification을 활성화하지 않았다. B2는 확정 policy와 synthetic local/Hosted gate, 설치하지 않는 plist example까지만 제공한다. external state/reporter/bootstrap 생성과 실제 activation은 10D의 별도 운영 승인 대상이다.
 
 ## Recurring process-local signal
 
@@ -147,15 +147,15 @@ backup `markerState`는 `VALID`, `MISSING`, `INVALID`, `UNAVAILABLE`이다. `las
 
 ## Minimal monitor state
 
-state는 repository/DB가 아니라 operator가 10D에서 준비할 repository 밖 dedicated directory에 둔다. directory는 현재 사용자 소유 mode `0700`, `monitor-state.json`과 persistent lock file은 `0600`, final path는 symlink가 아니어야 한다. canonical state directory와 backup directory는 서로 같거나 어느 한쪽의 하위일 수 없으며 반드시 disjoint해야 한다. worker는 이 관계와 state directory의 exact entry allowlist를 lock 생성 전에 검증하고, 위반 시 lock/state/temp file을 만들지 않은 채 fail closed한다.
+state는 repository/DB가 아니라 operator가 10D에서 준비할 repository 밖 dedicated directory에 둔다. directory는 현재 사용자 소유 mode `0700`, `monitor-state.json`과 persistent lock file은 `0600`, final path는 symlink가 아니어야 한다. canonical state directory, backup directory와 HomeOps reporter file은 pairwise로 같거나 어느 한쪽의 하위일 수 없으며 반드시 disjoint해야 한다. worker는 이 관계와 state directory의 exact entry allowlist를 lock 생성 전에 검증하고, 위반 시 lock/state/temp file, snapshot 또는 reporter 호출 없이 fail closed한다.
 
-저장 field는 format version, `lastObservedAt`, safe target별 service failure streak, origin streak, 마지막으로 처리한 recurring poll completion timestamp, rule failure streak와 `lastOverallStatus`뿐이다. raw snapshot, container ID, artifact filename/path/hash, heartbeat URL, 사용자/Household/Member/Recurring/Account/Category ID, email, memo와 amount는 저장하지 않는다.
+state `formatVersion`은 2다. 저장 field는 `lastObservedAt`, safe target별 service failure streak, origin streak, 마지막으로 처리한 recurring poll completion timestamp, rule failure streak, `lastOverallStatus`와 `homeOpsDisk`뿐이다. `homeOpsDisk`는 bounded episode sequence, active episode key와 exact pending `DISK_LOW` payload만 보관한다. schema가 바뀌었지만 production activation 전 source이므로 state migration은 제공하지 않으며 구버전/corrupt state를 default로 reset하지 않고 fail closed한다. raw snapshot, container ID, artifact filename/path/hash, HomeOps origin/secret/HMAC/spool, 사용자/Household/Member/Recurring/Account/Category ID, email, memo와 amount는 저장하지 않는다.
 
-state는 temp file write → file `fsync` → atomic `os.replace` → state directory `fsync` 순서로 갱신한다. monitor 동시 실행은 persistent `0600` regular lock file의 non-blocking `flock`으로 차단하고 process 종료 시 kernel lock이 해제된다. corrupt/permissive/symlink/oversized state를 0으로 reset하지 않으며 `STATE_INVALID/CRITICAL` heartbeat를 보내고 기존 bytes를 보존한다.
+state는 temp file write → file `fsync` → atomic `os.replace` → state directory `fsync` 순서로 갱신한다. monitor 동시 실행은 persistent `0600` regular lock file의 non-blocking `flock`으로 차단하고 process 종료 시 kernel lock이 해제된다. corrupt/permissive/symlink/oversized state를 0으로 reset하지 않으며 local `STATE_INVALID/CRITICAL` 결과와 nonzero exit로 fail closed하고 기존 bytes를 보존한다.
 
-## Uptime Kuma push worker
+## HomeOps reporter worker
 
-`scripts/monitor-production.sh`는 다음 external 값이 준비된 뒤 B1 status → evaluator → state atomic update → heartbeat 순서로 한 번 실행하는 source entrypoint다.
+`scripts/monitor-production.sh`는 다음 external 값이 준비된 뒤 B1 status와 evaluator를 한 번 실행하는 source entrypoint다.
 
 ```bash
 ./scripts/monitor-production.sh \
@@ -163,18 +163,20 @@ state는 temp file write → file `fsync` → atomic `os.replace` → state dire
   --env-file <absolute-owner-only-file-outside-repository> \
   --backup-dir <absolute-owner-only-directory-outside-repository> \
   --state-dir <absolute-owner-only-directory-outside-repository> \
-  --heartbeat-config <absolute-owner-only-file-outside-repository>
+  --homeops-reporter <absolute-installed-report-homeops-event.py>
 ```
 
-heartbeat config는 mode `0600` regular file이며 정확히 다음 key 하나만 허용한다.
+reporter는 absolute path, existing regular file, final leaf non-symlink, current user owner, group/other non-writable, owner executable, basename `report-homeops-event.py`여야 한다. canonical file은 repository/state/backup 밖이어야 한다. parent `runtime-config/current`가 symlink인 설치는 strict resolve 뒤 immutable canonical release file을 검증하고 그 canonical path를 실행한다. validation 시 lstat/resolve/stat과 invocation 직전 inode/mode를 재검증하지만 host-side process에서 남는 마지막 path-to-exec race까지 제거한다고 주장하지 않는다.
 
-```text
-STATUS_HEARTBEAT_URL=<secret Uptime Kuma push URL>
-```
+our-ledger는 reporter를 `[canonical_reporter, "signal"]`, `shell=False`, fixed timeout으로 호출하고 compact exact JSON bytes를 stdin으로 전달한다. stdout/stderr는 폐기해 reporter 내부 path/error/payload를 사용자 output에 복사하지 않는다. HomeOps endpoint origin, `HOMEOPS_INGESTION_SHARED_SECRET`, `.env`, `smoke.origin`, HMAC와 spool 내부 구조를 읽거나 구현하지 않는다. reporter exit 0은 event가 HomeOps local spool에 수락됐음을 뜻하고 nonzero/timeout은 generic producer failure다. network retry는 reporter와 별도 drain의 책임이므로 worker가 중복 구현하지 않는다.
 
-HTTPS 또는 loopback HTTP의 `/api/push/<token>`만 허용한다. redirect를 따르지 않고 request 5초, response 64 KiB, URL/message 크기를 제한한다. URL은 stdout/stderr/state에 출력하지 않는다. evaluator `OK/WARN`은 Kuma `up`, `CRITICAL`은 `down`이고 message는 severity와 allowlisted code/target만 포함한다. delivery 실패는 state를 되돌리거나 application/DB/backup/container를 변경하지 않고 nonzero로 종료한다. status 실패는 기존 state를 유지한 채 `STATUS_UNAVAILABLE/CRITICAL`을 전송한다.
+현재 HomeOps가 받는 signal vocabulary는 `DISK_LOW`, `HTTP_5XX_BURST`와 `ALERT`, `RECOVERED`다. 이 worker가 직접 만드는 것은 backup filesystem `DISK_LOW`뿐이다. 사용률이 80% 미만에서 80% 이상으로 진입하면 `availablePercent = 100 - usedPercent`, `thresholdPercent = 20`인 ALERT를 한 번 만들고 80~100% 동안 같은 episode를 유지한다. 90% CRITICAL 진입은 새 HomeOps event를 만들지 않는다. 사용률이 다시 80% 미만이면 같은 episode key의 RECOVERED를 만들며, 이후 재진입은 증가한 sequence의 새 episode다. filesystem `UNAVAILABLE`에는 수치를 만들지 않는다.
 
-`launchd/com.homeserver.our-ledger-monitor.plist.example`은 60초마다 repository 밖 fixed bootstrap을 호출하고 `KeepAlive`를 사용하지 않는다. 실제 bootstrap copy, heartbeat URL, state directory, LaunchAgent install/load와 Uptime Kuma monitor/email 연결은 10D에서 첫 verified production backup 뒤 별도 승인한다.
+transition ordering은 `exact pending payload state save/fsync → reporter signal 호출 → exit 0 → pending clear와 active lifecycle advance state save/fsync`다. reporter nonzero/timeout 또는 acceptance 뒤 final state save failure에서는 pending이 남고 다음 실행이 snapshot 수집 전에 같은 event key를 먼저 재시도한다. reporter가 이미 spool에 수락한 뒤 process가 종료돼 duplicate retry가 생겨도 새 episode key를 만들지 않으며 HomeOps ingestion idempotency에 같은 key를 전달한다. pending retry가 실패하면 새 snapshot과 transition을 만들지 않는다.
+
+service/origin/recurring/backup freshness, backup inventory, filesystem unavailable와 state/status unavailable은 local evaluator result에 그대로 남는다. 이를 `DISK_LOW`, `HTTP_5XX_BURST`, deployment 또는 backup lifecycle로 위장해 reporter에 전달하지 않는다.
+
+`launchd/com.homeserver.our-ledger-monitor.plist.example`은 60초마다 repository 밖 fixed bootstrap을 호출하고 `KeepAlive`를 사용하지 않는다. 실제 bootstrap copy, reporter/state directory, LaunchAgent install/load와 HomeOps monitored-service/signal activation은 10D에서 첫 verified production backup 뒤 별도 승인한다.
 
 ## Privacy와 failure semantics
 
@@ -185,20 +187,20 @@ snapshot과 error에는 다음을 포함하지 않는다.
 - email, recurring/Household/User/Member/Account/Category ID 또는 이름
 - memo, amount와 거래 내용
 - raw operations response, exception message/stack
-- absolute env/backup path, bundle/dump filename과 hash
+- absolute env/backup/state/reporter path, bundle/dump filename과 hash
 
 부분 관측이 가능하면 한 subcomponent failure 때문에 다른 안전한 결과를 버리지 않는다. 다만 project/env/path/Compose authority가 불명확하면 잘못된 stack을 관측하지 않도록 nonzero로 종료한다. unknown, missing, unreachable, invalid와 unavailable을 `UP`, `HEALTHY`, current timestamp 또는 임의 0으로 바꾸지 않는다.
 
 ## Activation 경계
 
-B2 source는 threshold, evaluator, state format, Kuma mapping과 LaunchAgent example을 확정하지만 monitor를 생성하거나 실행하지 않는다. 기본 notification authority는 Uptime Kuma push monitor와 기존 Uptime Kuma email path다. Slack, Discord webhook, Pushover, SMS, Sentry와 Prometheus/Grafana/OTel alert stack을 새로 도입하지 않는다. HomeOps Discord global switch와 ingestion도 변경하지 않는다.
+B2 source는 threshold, evaluator, state format, HomeOps reporter 경계와 LaunchAgent example을 확정하지만 monitor를 생성하거나 실행하지 않는다. HomeOps가 현재 지원하는 것은 trusted reporter의 `DISK_LOW` signal, existing monitored-service와 reporter spool/retry다. our-ledger service/origin/recurring/backup freshness policy result는 local-only다. recurring과 backup freshness의 central typed incident는 별도 HomeOps Issue/PR에서 receiver contract를 추가한 뒤 연동한다. Slack, Discord webhook, Pushover, SMS, Sentry와 Prometheus/Grafana/OTel alert stack을 새로 도입하지 않으며 HomeOps repository, ingestion 설정과 Discord/global notification switch를 변경하거나 활성 상태라고 주장하지 않는다.
 
-10D에서 exact production target, 첫 verified backup, external owner-only path/config/bootstrap, Kuma interval/grace/email route와 rollback을 확인한 뒤 설치한다. Category나 memo 같은 사용자 행동 데이터와 raw health response를 외부 분석 서비스로 보내지 않는다.
+10D에서 exact production target, 첫 verified backup, external owner-only state/reporter/bootstrap, existing monitored-service exact HTTPS target와 rollback을 확인한 뒤 설치한다. Category나 memo 같은 사용자 행동 데이터와 raw health response를 외부 분석 서비스로 보내지 않는다.
 
 ## 검증
 
 `scripts/verify-observability.sh`는 actual production resource 없이 exact-HEAD API/Web image, 고유 Compose project, 합성 DB credential과 owner-only backup artifact를 사용한다. canonical snapshot, recurring poll/occurrence, isolated rule failure, API unavailable, process restart reset, public actuator 404, HttpFetch non-200/network failure, privacy/read-only와 residue 0을 검증한다.
 
-`scripts/verify-monitor-policy.sh`는 actual production resource 없이 pure threshold boundary, 독립 streak/recovery, same-poll idempotency, state path/mode/atomic update/corruption/lock, local synthetic HTTP의 Kuma up/warn/down·redirect·size·network failure와 두 plist contract를 검증한다.
+`scripts/verify-monitor-policy.sh`는 actual production resource 없이 pure threshold boundary, 독립 streak/recovery, same-poll idempotency, state/backup/reporter path disjoint와 mode/atomic update/corruption/lock, synthetic reporter subprocess, `DISK_LOW` episode와 pending retry, unsupported signal non-delivery와 두 plist contract를 검증한다.
 
-Backend unit/integration은 process-local state concurrency, exception semantics, HealthIndicator와 readiness/liveness 독립을 고정한다. Python unit은 B1 authority/failure vocabulary와 policy/state/Kuma privacy allowlist를 고정한다. Hosted Full CI는 독립 `observability`와 `monitor-policy` job에서 같은 smoke를 exact HEAD로 실행한다.
+Backend unit/integration은 process-local state concurrency, exception semantics, HealthIndicator와 readiness/liveness 독립을 고정한다. Python unit은 B1 authority/failure vocabulary와 policy/state/HomeOps payload privacy allowlist를 고정한다. Hosted Full CI는 독립 `observability`와 `monitor-policy` job에서 같은 smoke를 exact HEAD로 실행한다.

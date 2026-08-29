@@ -3,17 +3,14 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import socket
 import stat
+import subprocess
 import tempfile
-import threading
 import unittest
 from unittest import mock
-import urllib.parse
 
 from scripts.backup_tools import backup_artifact
 from scripts.status_tools import monitor_policy
@@ -427,6 +424,11 @@ class MonitorPolicyTest(unittest.TestCase):
         with self.assertRaises(monitor_policy.ContractError):
             monitor_policy.evaluate(healthy_snapshot(), state)
 
+        legacy = monitor_policy.default_state()
+        legacy["formatVersion"] = 1
+        with self.assertRaises(monitor_policy.ContractError):
+            monitor_policy.validate_state(legacy)
+
     def test_should_build_fail_closed_result_without_raw_detail(self) -> None:
         result = monitor_policy.failure_result(
             "2026-08-29T12:00:00Z", "STATE_INVALID"
@@ -451,12 +453,14 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
         self.state_directory.mkdir(mode=0o700)
         self.backup_directory = self.root / "backups"
         self.backup_directory.mkdir(mode=0o700)
-        self.config_path = self.root / "monitor-heartbeat.conf"
-        self.config_path.write_text(
-            "STATUS_HEARTBEAT_URL=https://monitor.invalid/api/push/test-token\n",
+        self.reporter_path = self.root / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        self.reporter_path.write_text(
+            "#!/usr/bin/python3\n"
+            "import sys\n"
+            "raise SystemExit(0 if sys.argv == [sys.argv[0], 'signal'] else 2)\n",
             encoding="utf-8",
         )
-        self.config_path.chmod(0o600)
+        self.reporter_path.chmod(0o700)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -654,9 +658,9 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
                         env_file="/synthetic/env",
                         backup_directory=str(backup_directory),
                         state_directory_value=str(state_directory),
-                        heartbeat_config_value=str(self.config_path),
+                        homeops_reporter_value=str(self.reporter_path),
                         snapshot_provider=provider,
-                        heartbeat_sender=sender,
+                        homeops_sender=sender,
                     )
 
                 provider.assert_not_called()
@@ -686,9 +690,9 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
                 env_file="/synthetic/env",
                 backup_directory=str(self.backup_directory),
                 state_directory_value=str(self.state_directory),
-                heartbeat_config_value=str(self.config_path),
+                homeops_reporter_value=str(self.reporter_path),
                 snapshot_provider=provider,
-                heartbeat_sender=sender,
+                homeops_sender=sender,
             )
 
         provider.assert_not_called()
@@ -711,91 +715,85 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
         self.assertTrue(lock_path.is_file())
         self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
 
-    def test_should_load_only_exact_owner_only_heartbeat_config(self) -> None:
-        validated = monitor_worker.validate_heartbeat_config(
-            self.repo_root, str(self.config_path)
+    def test_should_validate_external_executable_homeops_reporter(self) -> None:
+        authority = monitor_worker.validate_homeops_reporter(
+            self.repo_root, str(self.reporter_path)
         )
-        url = monitor_worker.load_heartbeat_url(validated)
-        self.assertTrue(url.startswith("https://"))
+        self.assertEqual(authority.path, self.reporter_path.resolve())
 
-        self.config_path.write_text(
-            "STATUS_HEARTBEAT_URL=https://monitor.invalid/api/push/one\n"
-            "EXTRA=value\n",
-            encoding="utf-8",
-        )
-        with self.assertRaises(monitor_worker.ContractError):
-            monitor_worker.load_heartbeat_url(validated)
+        invalid_cases: list[tuple[str, Path]] = []
+        wrong_name = self.root / "reporter.py"
+        wrong_name.write_text("#!/bin/sh\n", encoding="utf-8")
+        wrong_name.chmod(0o700)
+        invalid_cases.append(("identity", wrong_name))
 
-        self.config_path.write_text(
-            "STATUS_HEARTBEAT_URL=https://monitor.invalid/api/push/one\n",
-            encoding="utf-8",
-        )
-        self.config_path.chmod(0o644)
-        with self.assertRaises(monitor_worker.ContractError):
-            monitor_worker.validate_heartbeat_config(
-                self.repo_root, str(self.config_path)
-            )
+        inside = self.repo_root / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        inside.write_text("#!/bin/sh\n", encoding="utf-8")
+        inside.chmod(0o700)
+        invalid_cases.append(("repository", inside))
 
-        self.config_path.chmod(0o600)
-        config_target = self.root / "config-target"
-        config_target.write_text(
-            "STATUS_HEARTBEAT_URL=https://monitor.invalid/api/push/target\n",
-            encoding="utf-8",
-        )
-        config_target.chmod(0o600)
-        config_link = self.root / "config-link"
-        config_link.symlink_to(config_target)
-        with self.assertRaises(monitor_worker.ContractError):
-            monitor_worker.validate_heartbeat_config(
-                self.repo_root, str(config_link)
-            )
+        permissive = self.root / "permissive" / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        permissive.parent.mkdir(mode=0o700)
+        permissive.write_text("#!/bin/sh\n", encoding="utf-8")
+        permissive.chmod(0o720)
+        invalid_cases.append(("group-write", permissive))
 
-    def test_should_accept_https_or_loopback_http_push_url_only(self) -> None:
-        accepted = (
-            "https://monitor.example/api/push/token-1",
-            "http://127.0.0.1:3001/api/push/token_2?status=up&msg=OK&ping=",
-            "http://localhost:3001/api/push/token",
-        )
-        for value in accepted:
-            self.assertEqual(monitor_worker.validate_heartbeat_url(value), value)
+        not_executable = self.root / "not-executable" / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        not_executable.parent.mkdir(mode=0o700)
+        not_executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        not_executable.chmod(0o600)
+        invalid_cases.append(("not-executable", not_executable))
 
-        rejected = (
-            "http://monitor.example/api/push/token",
-            "https://user:password@monitor.example/api/push/token",
-            "https://monitor.example/not-push/token",
-            "https://monitor.example/api/push/token#fragment",
-            "file:///api/push/token",
-        )
-        for value in rejected:
-            with self.subTest(value=value):
+        symlink = self.root / "symlink" / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        symlink.parent.mkdir(mode=0o700)
+        symlink.symlink_to(self.reporter_path)
+        invalid_cases.append(("leaf-symlink", symlink))
+
+        directory = self.root / "directory" / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        directory.mkdir(mode=0o700, parents=True)
+        invalid_cases.append(("not-regular", directory))
+
+        for label, path in invalid_cases:
+            with self.subTest(label=label):
                 with self.assertRaises(monitor_worker.ContractError):
-                    monitor_worker.validate_heartbeat_url(value)
+                    monitor_worker.validate_homeops_reporter(
+                        self.repo_root, str(path)
+                    )
 
-    def test_should_update_state_before_delivery(self) -> None:
-        deliveries: list[dict] = []
+        provider = mock.Mock(return_value=healthy_snapshot())
+        sender = mock.Mock()
+        with self.assertRaises(monitor_worker.ContractError):
+            monitor_worker.run_monitor(
+                repo_root=self.repo_root,
+                project_name="our-ledger",
+                env_file="/synthetic/env",
+                backup_directory=str(self.backup_directory),
+                state_directory_value=str(self.state_directory),
+                homeops_reporter_value=str(permissive),
+                snapshot_provider=provider,
+                homeops_sender=sender,
+            )
+        provider.assert_not_called()
+        sender.assert_not_called()
+        self.assertFalse(os.path.lexists(self.state_directory / monitor_worker.LOCK_FILENAME))
+        self.assertFalse(os.path.lexists(self.state_directory / monitor_worker.STATE_FILENAME))
 
-        def provider(_repo: Path, _project: str, _env: str, _backup: str) -> dict:
-            return healthy_snapshot()
-
-        def sender(_url: str, result: dict) -> None:
-            stored = monitor_worker.MonitorStateStore(self.state_directory).load()
-            self.assertEqual(stored["lastObservedAt"], result["observedAt"])
-            deliveries.append(result)
-
+    def test_should_not_call_reporter_without_supported_disk_transition(self) -> None:
+        sender = mock.Mock()
         result, exit_code = monitor_worker.run_monitor(
             repo_root=self.repo_root,
             project_name="our-ledger",
             env_file="/synthetic/env",
             backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
-            heartbeat_config_value=str(self.config_path),
-            snapshot_provider=provider,
-            heartbeat_sender=sender,
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: healthy_snapshot(),
+            homeops_sender=sender,
         )
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(result["status"], "OK")
-        self.assertEqual(deliveries, [result])
+        sender.assert_not_called()
 
     def test_should_preserve_state_when_status_is_unavailable(self) -> None:
         store = monitor_worker.MonitorStateStore(self.state_directory)
@@ -803,7 +801,7 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
         previous["lastObservedAt"] = "2026-08-29T11:59:00Z"
         store.save(previous)
         before = store.path.read_bytes()
-        delivered: list[dict] = []
+        sender = mock.Mock()
 
         def unavailable(_repo: Path, _project: str, _env: str, _backup: str) -> dict:
             raise monitor_worker.StatusUnavailableError("synthetic")
@@ -814,15 +812,15 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
             env_file="/synthetic/env",
             backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
-            heartbeat_config_value=str(self.config_path),
+            homeops_reporter_value=str(self.reporter_path),
             snapshot_provider=unavailable,
-            heartbeat_sender=lambda _url, value: delivered.append(value),
+            homeops_sender=sender,
             now=lambda: OBSERVED,
         )
 
         self.assertEqual(exit_code, 1)
         self.assertEqual(result["signals"][0]["code"], "STATUS_UNAVAILABLE")
-        self.assertEqual(delivered, [result])
+        sender.assert_not_called()
         self.assertEqual(store.path.read_bytes(), before)
 
     def test_should_report_corrupt_state_as_critical_without_overwrite(self) -> None:
@@ -830,7 +828,8 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
         corrupt = b"not-json\n"
         store.path.write_bytes(corrupt)
         store.path.chmod(0o600)
-        delivered: list[dict] = []
+        provider = mock.Mock(return_value=healthy_snapshot())
+        sender = mock.Mock()
 
         result, exit_code = monitor_worker.run_monitor(
             repo_root=self.repo_root,
@@ -838,144 +837,473 @@ class MonitorStateAndWorkerTest(unittest.TestCase):
             env_file="/synthetic/env",
             backup_directory=str(self.backup_directory),
             state_directory_value=str(self.state_directory),
-            heartbeat_config_value=str(self.config_path),
-            snapshot_provider=lambda *_args: healthy_snapshot(),
-            heartbeat_sender=lambda _url, value: delivered.append(value),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=provider,
+            homeops_sender=sender,
+            now=lambda: OBSERVED,
         )
 
         self.assertEqual(exit_code, 1)
         self.assertEqual(result["signals"][0]["code"], "STATE_INVALID")
-        self.assertEqual(delivered, [result])
+        provider.assert_not_called()
+        sender.assert_not_called()
         self.assertEqual(store.path.read_bytes(), corrupt)
 
-    def test_should_keep_state_when_delivery_fails_after_update(self) -> None:
-        def failed_delivery(_url: str, _result: dict) -> None:
-            self.assertTrue(
-                (self.state_directory / monitor_worker.STATE_FILENAME).is_file()
-            )
-            raise monitor_worker.DeliveryError("synthetic")
+    def test_should_reject_legacy_state_without_reset_or_external_calls(self) -> None:
+        legacy = monitor_policy.default_state()
+        legacy["formatVersion"] = 1
+        content = (json.dumps(legacy, sort_keys=True) + "\n").encode("utf-8")
+        state_path = self.state_directory / monitor_worker.STATE_FILENAME
+        state_path.write_bytes(content)
+        state_path.chmod(0o600)
+        provider = mock.Mock(return_value=healthy_snapshot())
+        sender = mock.Mock()
 
-        with self.assertRaises(monitor_worker.DeliveryError):
+        result, exit_code = monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=provider,
+            homeops_sender=sender,
+            now=lambda: OBSERVED,
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(result["signals"][0]["code"], "STATE_INVALID")
+        provider.assert_not_called()
+        sender.assert_not_called()
+        self.assertEqual(state_path.read_bytes(), content)
+
+
+    def test_should_deliver_disk_alert_and_recovery_once_per_episode(self) -> None:
+        deliveries: list[dict] = []
+
+        def sender(_reporter: monitor_worker.HomeOpsReporter, payload: dict) -> None:
+            stored = monitor_worker.MonitorStateStore(self.state_directory).load()
+            self.assertEqual(stored["homeOpsDisk"]["pendingSignal"], payload)
+            deliveries.append(copy.deepcopy(payload))
+
+        def run(snapshot: dict) -> tuple[dict, int]:
+            return monitor_worker.run_monitor(
+                repo_root=self.repo_root,
+                project_name="our-ledger",
+                env_file="/synthetic/env",
+                backup_directory=str(self.backup_directory),
+                state_directory_value=str(self.state_directory),
+                homeops_reporter_value=str(self.reporter_path),
+                snapshot_provider=lambda *_args: snapshot,
+                homeops_sender=sender,
+            )
+
+        below = healthy_snapshot()
+        below["filesystem"]["usedPercent"] = 79.9
+        run(below)
+        self.assertEqual(deliveries, [])
+
+        entered = advance(healthy_snapshot(), 60)
+        entered["filesystem"]["usedPercent"] = 80.0
+        warning, exit_code = run(entered)
+        self.assertEqual((warning["status"], exit_code), ("WARN", 0))
+        self.assertEqual(deliveries[0], {
+            "eventKey": "our-ledger:disk-low:1:alert",
+            "episodeKey": "our-ledger:disk-low:1",
+            "project": "our-ledger",
+            "signalType": "DISK_LOW",
+            "status": "ALERT",
+            "observedAt": "2026-08-29T12:01:00Z",
+            "availablePercent": 20.0,
+            "thresholdPercent": 20,
+        })
+
+        for seconds, used_percent in ((120, 85.0), (180, 90.0)):
+            active = advance(healthy_snapshot(), seconds)
+            active["filesystem"]["usedPercent"] = used_percent
+            run(active)
+        self.assertEqual(len(deliveries), 1)
+
+        recovered = advance(healthy_snapshot(), 240)
+        recovered["filesystem"]["usedPercent"] = 79.9
+        run(recovered)
+        self.assertEqual(deliveries[1]["status"], "RECOVERED")
+        self.assertEqual(deliveries[1]["episodeKey"], deliveries[0]["episodeKey"])
+        self.assertEqual(deliveries[1]["availablePercent"], 20.1)
+
+        reentered = advance(healthy_snapshot(), 300)
+        reentered["filesystem"]["usedPercent"] = 80.0
+        run(reentered)
+        self.assertEqual(deliveries[2]["status"], "ALERT")
+        self.assertEqual(deliveries[2]["episodeKey"], "our-ledger:disk-low:2")
+        state = monitor_worker.MonitorStateStore(self.state_directory).load()
+        self.assertEqual(state["homeOpsDisk"], {
+            "episodeSequence": 2,
+            "activeEpisodeKey": "our-ledger:disk-low:2",
+            "pendingSignal": None,
+        })
+
+    def test_should_not_map_unavailable_or_unsupported_local_signals(self) -> None:
+        sender = mock.Mock()
+
+        recurring = healthy_snapshot()
+        recurring["recurring"]["lastPollCompletedAt"] = instant(
+            OBSERVED - dt.timedelta(seconds=301)
+        )
+        result, _ = monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: recurring,
+            homeops_sender=sender,
+        )
+        self.assertIn(("RECURRING_STALE", None, "CRITICAL"), signal_codes(result))
+
+        backup = advance(healthy_snapshot(), 60)
+        backup["backup"]["ageSeconds"] = 7 * 60 * 60
+        result, _ = monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: backup,
+            homeops_sender=sender,
+        )
+        self.assertIn(("BACKUP_STALE", None, "CRITICAL"), signal_codes(result))
+
+        unavailable = advance(healthy_snapshot(), 120)
+        unavailable["filesystem"] = {
+            "state": "UNAVAILABLE",
+            "capacityBytes": None,
+            "availableBytes": None,
+            "usedPercent": None,
+        }
+        result, _ = monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: unavailable,
+            homeops_sender=sender,
+        )
+        self.assertIn(("FILESYSTEM_UNAVAILABLE", None, "CRITICAL"), signal_codes(result))
+
+        first_failure = advance(healthy_snapshot(), 180)
+        first_failure["services"]["web"]["health"] = "UNHEALTHY"
+        first_failure["origin"] = {"reachable": True, "healthzStatus": 503}
+        monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: first_failure,
+            homeops_sender=sender,
+        )
+        second_failure = advance(first_failure, 60)
+        result, _ = monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: second_failure,
+            homeops_sender=sender,
+        )
+        self.assertIn(("SERVICE_DOWN", "web", "CRITICAL"), signal_codes(result))
+        self.assertIn(("ORIGIN_DOWN", None, "CRITICAL"), signal_codes(result))
+        sender.assert_not_called()
+
+    def test_should_persist_and_retry_same_pending_alert_before_snapshot(self) -> None:
+        snapshot = healthy_snapshot()
+        snapshot["filesystem"]["usedPercent"] = 80.0
+
+        def fail_after_pending(
+            _reporter: monitor_worker.HomeOpsReporter, payload: dict
+        ) -> None:
+            stored = monitor_worker.MonitorStateStore(self.state_directory).load()
+            self.assertEqual(stored["homeOpsDisk"]["pendingSignal"], payload)
+            raise monitor_worker.ReporterError("synthetic")
+
+        with self.assertRaises(monitor_worker.ReporterError):
             monitor_worker.run_monitor(
                 repo_root=self.repo_root,
                 project_name="our-ledger",
                 env_file="/synthetic/env",
                 backup_directory=str(self.backup_directory),
                 state_directory_value=str(self.state_directory),
-                heartbeat_config_value=str(self.config_path),
-                snapshot_provider=lambda *_args: healthy_snapshot(),
-                heartbeat_sender=failed_delivery,
+                homeops_reporter_value=str(self.reporter_path),
+                snapshot_provider=lambda *_args: snapshot,
+                homeops_sender=fail_after_pending,
             )
-        stored = monitor_worker.MonitorStateStore(self.state_directory).load()
-        self.assertEqual(stored["lastObservedAt"], "2026-08-29T12:00:00Z")
+        pending = monitor_worker.MonitorStateStore(self.state_directory).load()["homeOpsDisk"]
+        self.assertIsNone(pending["activeEpisodeKey"])
+        event_key = pending["pendingSignal"]["eventKey"]
 
+        order: list[str] = []
+        payloads: list[dict] = []
+        provider = mock.Mock(side_effect=lambda *_args: (
+            order.append("snapshot") or advance(snapshot, 60)
+        ))
 
-class KumaHandler(BaseHTTPRequestHandler):
-    response_code = 200
-    response_body = b"ok"
-    redirect_location: str | None = None
-    requests: list[str] = []
+        def accept(_reporter: monitor_worker.HomeOpsReporter, payload: dict) -> None:
+            order.append("reporter")
+            payloads.append(copy.deepcopy(payload))
 
-    def do_GET(self) -> None:
-        type(self).requests.append(self.path)
-        self.send_response(type(self).response_code)
-        if type(self).redirect_location is not None:
-            self.send_header("Location", type(self).redirect_location)
-        self.end_headers()
-        self.wfile.write(type(self).response_body)
-
-    def log_message(self, format: str, *args: object) -> None:
-        return
-
-
-class KumaAdapterTest(unittest.TestCase):
-
-    def setUp(self) -> None:
-        KumaHandler.response_code = 200
-        KumaHandler.response_body = b"ok"
-        KumaHandler.redirect_location = None
-        KumaHandler.requests = []
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), KumaHandler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.base_url = (
-            f"http://127.0.0.1:{self.server.server_port}/api/push/test-token"
+        monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=provider,
+            homeops_sender=accept,
         )
+        self.assertEqual(order, ["reporter", "snapshot"])
+        self.assertEqual(payloads[0]["eventKey"], event_key)
+        state = monitor_worker.MonitorStateStore(self.state_directory).load()["homeOpsDisk"]
+        self.assertEqual(state["activeEpisodeKey"], "our-ledger:disk-low:1")
+        self.assertIsNone(state["pendingSignal"])
 
-    def tearDown(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=2)
+    def test_should_retry_same_key_when_final_state_save_fails_after_acceptance(self) -> None:
+        snapshot = healthy_snapshot()
+        snapshot["filesystem"]["usedPercent"] = 80.0
+        real_save = monitor_worker.MonitorStateStore.save
+        save_calls = 0
+        accepted: list[dict] = []
 
-    def test_should_map_ok_warn_and_critical_to_up_up_down(self) -> None:
-        ok, _ = monitor_policy.evaluate(healthy_snapshot())
-        warning_snapshot = healthy_snapshot()
-        warning_snapshot["services"]["web"]["state"] = "EXITED"
-        warning, _ = monitor_policy.evaluate(warning_snapshot)
-        critical = monitor_policy.failure_result(
-            "2026-08-29T12:00:00Z", "STATUS_UNAVAILABLE"
-        )
-
-        for result in (ok, warning, critical):
-            monitor_worker.send_heartbeat(self.base_url, result)
-
-        queries = [
-            urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
-            for path in KumaHandler.requests
-        ]
-        self.assertEqual([query["status"][0] for query in queries], ["up", "up", "down"])
-        self.assertEqual(queries[0]["msg"][0], "OK")
-        self.assertIn("SERVICE_PENDING:web", queries[1]["msg"][0])
-        self.assertIn("STATUS_UNAVAILABLE", queries[2]["msg"][0])
-
-    def test_should_reject_redirect_without_following_secret_url(self) -> None:
-        KumaHandler.response_code = 302
-        KumaHandler.redirect_location = f"http://127.0.0.1:{self.server.server_port}/redirect-target"
-        result, _ = monitor_policy.evaluate(healthy_snapshot())
-
-        with self.assertRaises(monitor_worker.DeliveryError) as raised:
-            monitor_worker.send_heartbeat(self.base_url, result)
-
-        self.assertEqual(len(KumaHandler.requests), 1)
-        self.assertNotIn("test-token", str(raised.exception))
-
-    def test_should_reject_oversized_response(self) -> None:
-        KumaHandler.response_body = b"x" * (monitor_worker.MAX_RESPONSE_BYTES + 1)
-        result, _ = monitor_policy.evaluate(healthy_snapshot())
-
-        with self.assertRaises(monitor_worker.DeliveryError):
-            monitor_worker.send_heartbeat(self.base_url, result)
-
-    def test_should_apply_bounded_timeout_and_hide_secret_on_timeout(self) -> None:
-        result, _ = monitor_policy.evaluate(healthy_snapshot())
-        secret_url = self.base_url.replace("test-token", "private-token")
-        opener = mock.Mock()
-        opener.open.side_effect = TimeoutError("synthetic timeout")
+        def flaky_save(store: monitor_worker.MonitorStateStore, state: dict) -> None:
+            nonlocal save_calls
+            save_calls += 1
+            if save_calls == 2:
+                raise OSError("synthetic final save failure")
+            real_save(store, state)
 
         with mock.patch.object(
-            monitor_worker.urllib.request,
-            "build_opener",
-            return_value=opener,
+            monitor_worker.MonitorStateStore, "save", autospec=True, side_effect=flaky_save
         ):
-            with self.assertRaises(monitor_worker.DeliveryError) as raised:
-                monitor_worker.send_heartbeat(secret_url, result)
+            with self.assertRaises(OSError):
+                monitor_worker.run_monitor(
+                    repo_root=self.repo_root,
+                    project_name="our-ledger",
+                    env_file="/synthetic/env",
+                    backup_directory=str(self.backup_directory),
+                    state_directory_value=str(self.state_directory),
+                    homeops_reporter_value=str(self.reporter_path),
+                    snapshot_provider=lambda *_args: snapshot,
+                    homeops_sender=lambda _reporter, payload: accepted.append(copy.deepcopy(payload)),
+                )
 
-        opener.open.assert_called_once()
-        self.assertEqual(opener.open.call_args.kwargs["timeout"], 5)
-        self.assertNotIn("private-token", str(raised.exception))
+        stored = monitor_worker.MonitorStateStore(self.state_directory).load()
+        pending_key = stored["homeOpsDisk"]["pendingSignal"]["eventKey"]
+        self.assertEqual(accepted[0]["eventKey"], pending_key)
+        retried: list[dict] = []
+        monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: advance(snapshot, 60),
+            homeops_sender=lambda _reporter, payload: retried.append(copy.deepcopy(payload)),
+        )
+        self.assertEqual(retried[0]["eventKey"], pending_key)
+        self.assertEqual(len(retried), 1)
 
-    def test_should_report_network_failure_without_secret_url(self) -> None:
-        probe = socket.socket()
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-        probe.close()
-        result, _ = monitor_policy.evaluate(healthy_snapshot())
-        secret_url = f"http://127.0.0.1:{port}/api/push/private-token"
+    def test_should_apply_same_pending_rule_to_recovery(self) -> None:
+        alert = healthy_snapshot()
+        alert["filesystem"]["usedPercent"] = 80.0
+        monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: alert,
+            homeops_sender=lambda *_args: None,
+        )
+        recovery = advance(healthy_snapshot(), 60)
+        recovery["filesystem"]["usedPercent"] = 79.9
 
-        with self.assertRaises(monitor_worker.DeliveryError) as raised:
-            monitor_worker.send_heartbeat(secret_url, result)
+        def reject_recovery(*_args: object) -> None:
+            raise monitor_worker.ReporterError("synthetic")
 
-        self.assertNotIn("private-token", str(raised.exception))
+        with self.assertRaises(monitor_worker.ReporterError):
+            monitor_worker.run_monitor(
+                repo_root=self.repo_root,
+                project_name="our-ledger",
+                env_file="/synthetic/env",
+                backup_directory=str(self.backup_directory),
+                state_directory_value=str(self.state_directory),
+                homeops_reporter_value=str(self.reporter_path),
+                snapshot_provider=lambda *_args: recovery,
+                homeops_sender=reject_recovery,
+            )
+        stored = monitor_worker.MonitorStateStore(self.state_directory).load()["homeOpsDisk"]
+        self.assertEqual(stored["activeEpisodeKey"], "our-ledger:disk-low:1")
+        self.assertEqual(stored["pendingSignal"]["status"], "RECOVERED")
+        event_key = stored["pendingSignal"]["eventKey"]
+
+        retried: list[dict] = []
+        monitor_worker.run_monitor(
+            repo_root=self.repo_root,
+            project_name="our-ledger",
+            env_file="/synthetic/env",
+            backup_directory=str(self.backup_directory),
+            state_directory_value=str(self.state_directory),
+            homeops_reporter_value=str(self.reporter_path),
+            snapshot_provider=lambda *_args: advance(recovery, 60),
+            homeops_sender=lambda _reporter, payload: retried.append(copy.deepcopy(payload)),
+        )
+        self.assertEqual(retried[0]["eventKey"], event_key)
+        final = monitor_worker.MonitorStateStore(self.state_directory).load()["homeOpsDisk"]
+        self.assertIsNone(final["activeEpisodeKey"])
+        self.assertIsNone(final["pendingSignal"])
+
+    def test_should_reject_reporter_overlap_before_lock_without_backup_mutation(self) -> None:
+        cases: list[tuple[str, Path, Path, Path]] = []
+
+        backup = self.root / "reporter-backup"
+        self.create_valid_backup(backup)
+        reporter_in_backup = backup / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        reporter_in_backup.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        reporter_in_backup.chmod(0o700)
+        cases.append(("backup-descendant", backup, self.state_directory, reporter_in_backup))
+
+        state = self.root / "reporter-state"
+        state.mkdir(mode=0o700)
+        reporter_in_state = state / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        reporter_in_state.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        reporter_in_state.chmod(0o700)
+        cases.append(("state-descendant", self.backup_directory, state, reporter_in_state))
+
+        for label, backup_directory, state_directory, reporter in cases:
+            with self.subTest(label=label):
+                before = self.tree_fingerprint(backup_directory)
+                provider = mock.Mock(return_value=healthy_snapshot())
+                sender = mock.Mock()
+                with self.assertRaises(monitor_worker.ContractError):
+                    monitor_worker.run_monitor(
+                        repo_root=self.repo_root,
+                        project_name="our-ledger",
+                        env_file="/synthetic/env",
+                        backup_directory=str(backup_directory),
+                        state_directory_value=str(state_directory),
+                        homeops_reporter_value=str(reporter),
+                        snapshot_provider=provider,
+                        homeops_sender=sender,
+                    )
+                provider.assert_not_called()
+                sender.assert_not_called()
+                self.assertEqual(self.tree_fingerprint(backup_directory), before)
+                self.assertFalse(os.path.lexists(state_directory / monitor_worker.LOCK_FILENAME))
+                self.assertFalse(os.path.lexists(state_directory / monitor_worker.STATE_FILENAME))
+                self.assertEqual(list(state_directory.glob(".monitor-state.*")), [])
+
+
+class HomeOpsReporterBoundaryTest(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="our-ledger-homeops-reporter-test.")
+        self.root = Path(self.temporary.name)
+        self.repo_root = self.root / "repo"
+        self.repo_root.mkdir(mode=0o700)
+        self.reporter_path = self.root / monitor_worker.HOMEOPS_REPORTER_FILENAME
+        self.payload = {
+            "eventKey": "our-ledger:disk-low:1:alert",
+            "episodeKey": "our-ledger:disk-low:1",
+            "project": "our-ledger",
+            "signalType": "DISK_LOW",
+            "status": "ALERT",
+            "observedAt": "2026-08-29T12:00:00Z",
+            "availablePercent": 20.0,
+            "thresholdPercent": 20,
+        }
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def write_reporter(self, source: str) -> monitor_worker.HomeOpsReporter:
+        self.reporter_path.write_text(source, encoding="utf-8")
+        self.reporter_path.chmod(0o700)
+        return monitor_worker.validate_homeops_reporter(
+            self.repo_root, str(self.reporter_path)
+        )
+
+    def test_should_expose_homeops_reporter_cli_authority(self) -> None:
+        self.assertIn("--homeops-reporter", monitor_worker.parser().format_help())
+
+    def test_should_execute_exact_reporter_signal_with_exact_json_stdin(self) -> None:
+        args_path = self.root / "args.json"
+        payload_path = self.root / "payload.json"
+        authority = self.write_reporter(
+            "#!/usr/bin/python3\n"
+            "import pathlib\n"
+            "import sys\n"
+            f"pathlib.Path({str(args_path)!r}).write_text(__import__('json').dumps(sys.argv[1:]), encoding='utf-8')\n"
+            f"pathlib.Path({str(payload_path)!r}).write_bytes(sys.stdin.buffer.read())\n"
+        )
+
+        monitor_worker.send_homeops_signal(authority, self.payload)
+
+        self.assertEqual(json.loads(args_path.read_text(encoding="utf-8")), ["signal"])
+        self.assertEqual(
+            payload_path.read_bytes(), monitor_worker._homeops_payload_bytes(self.payload)
+        )
+
+    def test_should_use_shell_false_bounded_timeout_and_suppressed_output(self) -> None:
+        authority = self.write_reporter("#!/bin/sh\nexit 0\n")
+        completed = subprocess.CompletedProcess([], 0)
+        with mock.patch.object(
+            monitor_worker.subprocess, "run", return_value=completed
+        ) as run:
+            monitor_worker.send_homeops_signal(authority, self.payload)
+
+        self.assertEqual(run.call_args.args[0], [str(authority.path), "signal"])
+        self.assertEqual(
+            run.call_args.kwargs["input"], monitor_worker._homeops_payload_bytes(self.payload)
+        )
+        self.assertIs(run.call_args.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertIs(run.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertFalse(run.call_args.kwargs["shell"])
+        self.assertNotIn("env", run.call_args.kwargs)
+        self.assertEqual(
+            run.call_args.kwargs["timeout"], monitor_worker.HOMEOPS_REPORTER_TIMEOUT_SECONDS
+        )
+
+    def test_should_fail_generically_on_nonzero_timeout_or_replaced_reporter(self) -> None:
+        authority = self.write_reporter("#!/bin/sh\nexit 0\n")
+        failures = (
+            mock.Mock(return_value=subprocess.CompletedProcess([], 7)),
+            mock.Mock(side_effect=subprocess.TimeoutExpired([str(authority.path), "signal"], 5)),
+        )
+        for runner in failures:
+            with self.subTest(side_effect=type(runner.side_effect).__name__):
+                with mock.patch.object(monitor_worker.subprocess, "run", runner):
+                    with self.assertRaises(monitor_worker.ReporterError) as raised:
+                        monitor_worker.send_homeops_signal(authority, self.payload)
+                message = str(raised.exception)
+                self.assertNotIn(str(authority.path), message)
+                self.assertNotIn(self.payload["eventKey"], message)
+
+        retired = self.root / "retired-reporter.py"
+        self.reporter_path.rename(retired)
+        self.reporter_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.reporter_path.chmod(0o700)
+        with self.assertRaises(monitor_worker.ReporterError):
+            monitor_worker.send_homeops_signal(authority, self.payload)
 
 
 if __name__ == "__main__":

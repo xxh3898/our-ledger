@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import decimal
 import json
 import re
 import sys
@@ -10,7 +11,7 @@ from typing import Any
 
 
 FORMAT_VERSION = 1
-STATE_FORMAT_VERSION = 1
+STATE_FORMAT_VERSION = 2
 SERVICE_TARGETS = ("web", "api", "postgres", "recurring")
 COMPOSE_SERVICES = SERVICE_TARGETS[:3]
 SEVERITIES = ("OK", "WARN", "CRITICAL")
@@ -71,15 +72,37 @@ STATE_KEYS = frozenset({
     "lastRecurringPollCompletedAtSeen",
     "recurringRuleFailureStreak",
     "lastOverallStatus",
+    "homeOpsDisk",
+})
+HOMEOPS_DISK_STATE_KEYS = frozenset({
+    "episodeSequence",
+    "activeEpisodeKey",
+    "pendingSignal",
+})
+HOMEOPS_DISK_SIGNAL_KEYS = frozenset({
+    "eventKey",
+    "episodeKey",
+    "project",
+    "signalType",
+    "status",
+    "observedAt",
+    "availablePercent",
+    "thresholdPercent",
 })
 INSTANT_PATTERN = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
     r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,9})?Z$"
 )
 MAX_STREAK = 1_000_000
+MAX_EPISODE_SEQUENCE = 1_000_000
 RECURRING_GRACE_SECONDS = 5 * 60
 RECURRING_STALE_SECONDS = 5 * 60
 BACKUP_STALE_SECONDS = 7 * 60 * 60
+HOMEOPS_PROJECT = "our-ledger"
+HOMEOPS_DISK_THRESHOLD_PERCENT = 20
+HOMEOPS_DISK_EPISODE_PATTERN = re.compile(
+    r"^our-ledger:disk-low:([1-9][0-9]{0,6})$"
+)
 
 
 class ContractError(RuntimeError):
@@ -132,7 +155,60 @@ def default_state() -> dict[str, Any]:
         "lastRecurringPollCompletedAtSeen": None,
         "recurringRuleFailureStreak": 0,
         "lastOverallStatus": "OK",
+        "homeOpsDisk": {
+            "episodeSequence": 0,
+            "activeEpisodeKey": None,
+            "pendingSignal": None,
+        },
     }
+
+
+def _episode_sequence(value: Any, label: str, *, nullable: bool = False) -> int | None:
+    if nullable and value is None:
+        return None
+    require(type(value) is str, f"{label} 형식이 잘못됐습니다.")
+    matched = HOMEOPS_DISK_EPISODE_PATTERN.fullmatch(value)
+    require(matched is not None, f"{label} 형식이 잘못됐습니다.")
+    sequence = int(matched.group(1))
+    require(sequence <= MAX_EPISODE_SEQUENCE, f"{label} sequence가 제한을 초과했습니다.")
+    return sequence
+
+
+def _percent(value: Any, label: str) -> int | float:
+    require(
+        not isinstance(value, bool) and isinstance(value, (int, float)),
+        f"{label} type이 잘못됐습니다.",
+    )
+    number = decimal.Decimal(str(value))
+    require(
+        number.is_finite()
+        and decimal.Decimal("0") <= number <= decimal.Decimal("100")
+        and number.as_tuple().exponent >= -2,
+        f"{label} 값이 잘못됐습니다.",
+    )
+    return value
+
+
+def validate_homeops_disk_signal(value: Any) -> dict[str, Any]:
+    signal = _exact_object(value, HOMEOPS_DISK_SIGNAL_KEYS, "HomeOps disk signal")
+    require(signal["project"] == HOMEOPS_PROJECT, "HomeOps signal project가 잘못됐습니다.")
+    require(signal["signalType"] == "DISK_LOW", "HomeOps signalType이 잘못됐습니다.")
+    require(signal["status"] in {"ALERT", "RECOVERED"}, "HomeOps signal status가 잘못됐습니다.")
+    parse_instant(signal["observedAt"], "HomeOps observedAt")
+    sequence = _episode_sequence(signal["episodeKey"], "HomeOps episodeKey")
+    assert sequence is not None
+    suffix = "alert" if signal["status"] == "ALERT" else "recovered"
+    require(
+        signal["eventKey"] == f"{signal['episodeKey']}:{suffix}",
+        "HomeOps eventKey가 lifecycle과 일치하지 않습니다.",
+    )
+    _percent(signal["availablePercent"], "HomeOps availablePercent")
+    require(
+        type(signal["thresholdPercent"]) is int
+        and signal["thresholdPercent"] == HOMEOPS_DISK_THRESHOLD_PERCENT,
+        "HomeOps thresholdPercent가 잘못됐습니다.",
+    )
+    return json.loads(json.dumps(signal))
 
 
 def validate_state(value: Any) -> dict[str, Any]:
@@ -160,6 +236,42 @@ def validate_state(value: Any) -> dict[str, Any]:
         state["lastOverallStatus"] in SEVERITIES,
         "lastOverallStatus가 잘못됐습니다.",
     )
+    homeops = _exact_object(
+        state["homeOpsDisk"], HOMEOPS_DISK_STATE_KEYS, "homeOpsDisk"
+    )
+    sequence = homeops["episodeSequence"]
+    require(
+        type(sequence) is int and 0 <= sequence <= MAX_EPISODE_SEQUENCE,
+        "homeOpsDisk episodeSequence가 잘못됐습니다.",
+    )
+    active_sequence = _episode_sequence(
+        homeops["activeEpisodeKey"], "homeOpsDisk activeEpisodeKey", nullable=True
+    )
+    require(
+        active_sequence is None or active_sequence <= sequence,
+        "homeOpsDisk active episode가 sequence보다 미래입니다.",
+    )
+    pending = homeops["pendingSignal"]
+    if pending is not None:
+        pending = validate_homeops_disk_signal(pending)
+        pending_sequence = _episode_sequence(
+            pending["episodeKey"], "HomeOps pending episodeKey"
+        )
+        assert pending_sequence is not None
+        require(
+            pending_sequence == sequence,
+            "HomeOps pending episode가 current sequence와 다릅니다.",
+        )
+        if pending["status"] == "ALERT":
+            require(
+                active_sequence is None,
+                "pending ALERT 전에 active episode가 없어야 합니다.",
+            )
+        else:
+            require(
+                homeops["activeEpisodeKey"] == pending["episodeKey"],
+                "pending RECOVERED는 active episode와 일치해야 합니다.",
+            )
     return json.loads(json.dumps(state))
 
 

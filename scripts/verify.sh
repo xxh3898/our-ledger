@@ -30,7 +30,7 @@ printf '\n[8/10] Production runtime 검사\n'
 printf '\n[9/10] Observability/status 검사\n'
 "$ROOT_DIR/scripts/verify-observability.sh"
 
-printf '\n[10/10] Monitor policy/Kuma 검사\n'
+printf '\n[10/10] Monitor policy/HomeOps 검사\n'
 "$ROOT_DIR/scripts/verify-monitor-policy.sh"
 
 printf '\n전체 검증을 통과했습니다.\n'

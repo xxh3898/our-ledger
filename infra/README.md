@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C-1의 immutable production origin, Slice 10C-2A의 backup/restore source gate, Slice 10C-2B1의 operational status와 10C-2B2 monitor policy harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host one-shot custom backup, isolated restore drill, privacy-safe read-only status와 policy/state/Kuma synthetic harness까지다. 실제 Mac mini deploy/status/backup/restore/monitor, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C-1의 immutable production origin, Slice 10C-2A의 backup/restore source gate, Slice 10C-2B1의 operational status와 10C-2B2 monitor policy harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host one-shot custom backup, isolated restore drill, privacy-safe read-only status와 policy/state/HomeOps reporter synthetic harness까지다. 실제 Mac mini deploy/status/backup/restore/monitor/HomeOps reporter, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -117,7 +117,7 @@ snapshot에는 service state/health/restart count, loopback `/healthz` status, �
 
 ## Monitor policy source harness
 
-다음 command는 B1 status를 실행하고 repository 밖 minimal state를 atomic하게 갱신한 뒤 owner-only config의 Uptime Kuma push URL에 privacy-safe result를 전달한다. source가 준비됐다는 사실은 actual production 실행, URL 설치, monitor/email 또는 LaunchAgent 활성화 승인이 아니다.
+다음 command는 B1 status를 실행하고 repository 밖 minimal state를 atomic하게 갱신하며, 지원되는 filesystem `DISK_LOW` transition만 검증한 HomeOps reporter subprocess에 전달한다. source가 준비됐다는 사실은 actual production 실행, reporter/spool/API 호출, notification 또는 LaunchAgent 활성화 승인이 아니다.
 
 ```bash
 ./scripts/monitor-production.sh \
@@ -125,12 +125,12 @@ snapshot에는 service state/health/restart count, loopback `/healthz` status, �
   --env-file /absolute/path/outside/repository/production.env \
   --backup-dir /absolute/dedicated/our-ledger-backups \
   --state-dir /absolute/dedicated/our-ledger-monitor-state \
-  --heartbeat-config /absolute/path/outside/repository/monitor-heartbeat.conf
+  --homeops-reporter /absolute/installed/report-homeops-event.py
 ```
 
-state directory는 current owner mode `0700`, heartbeat config는 `0600`이어야 하고 둘 다 repository 밖 canonical path여야 한다. config는 `STATUS_HEARTBEAT_URL` exact key 하나만 허용한다. state에는 failure streak/timestamp/status만 저장하며 heartbeat URL, raw status, path, container/artifact identity와 사용자·금융 데이터를 저장하지 않는다.
+state directory는 current owner mode `0700`, reporter는 current owner의 group/other non-writable regular non-symlink executable이어야 하고 repository/state/backup과 canonical하게 disjoint해야 한다. reporter identity는 `report-homeops-event.py`로 고정한다. state formatVersion 2에는 failure streak/timestamp/status와 `DISK_LOW` episode sequence, active key, exact pending payload만 저장하며 HomeOps origin/secret/HMAC/spool, raw status, path, container/artifact identity와 사용자·금융 데이터를 저장하지 않는다. production activation 전이므로 이전 state migration은 없고 구버전/corrupt state는 fail closed한다.
 
-worker는 persistent owner-only file의 non-blocking `flock`으로 동시 실행을 거부한다. `OK/WARN`은 Kuma `up`, `CRITICAL`은 `down`으로 보내고 redirect를 따르지 않는다. status/state/delivery failure는 application container, DB와 backup을 변경하지 않는다. 실제 운영 bootstrap은 `launchd/com.homeserver.our-ledger-monitor.plist.example`의 fixed external path에 10D에서 별도 설치한다.
+worker는 persistent owner-only file의 non-blocking `flock`으로 동시 실행을 거부한다. disk 80% 진입/회복만 `DISK_LOW` ALERT/RECOVERED로 보내고 active episode 중 90% 진입은 중복 event를 만들지 않는다. pending은 reporter보다 먼저 durable save하고 exit 0 뒤 clear하며 실패·timeout·acceptance 뒤 state save failure는 다음 실행에서 같은 key로 먼저 재시도한다. service/origin/recurring/backup freshness와 filesystem unavailable은 local result에만 남는다. 실제 운영 bootstrap은 `launchd/com.homeserver.our-ledger-monitor.plist.example`의 fixed external path에 10D에서 별도 설치한다.
 
 ## Production one-shot backup
 
@@ -215,10 +215,10 @@ Operational status smoke는 별도 entrypoint다.
 
 이 smoke는 exact-HEAD API/Web image와 고유 Compose project, 합성 credential/backup/financial fixture만 사용한다. recurring poll success와 isolated rule failure, API unavailable, process 재시작 후 not-yet-run reset, public actuator 404, status JSON privacy/read-only 경계와 container/network/volume/image/temp residue 0을 검증한다.
 
-Monitor policy/Kuma smoke는 별도 entrypoint다.
+Monitor policy/HomeOps smoke는 별도 entrypoint다.
 
 ```bash
 ./scripts/verify-monitor-policy.sh
 ```
 
-이 smoke는 pure evaluator, external state contract, local loopback Kuma server, retention matrix와 plist parse/lint만 사용한다. actual production status/backup, Uptime Kuma와 LaunchAgent를 사용하거나 host state를 설치하지 않는다.
+이 smoke는 pure evaluator, external state/backup/reporter contract, synthetic reporter subprocess, durable pending/episode, retention matrix와 plist parse/lint만 사용한다. actual production status/backup/HomeOps reporter·spool·API와 LaunchAgent를 사용하거나 host state를 설치하지 않는다.

@@ -11,9 +11,9 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite heartbeat 계약을 확정한다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다.
 
-실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 heartbeat도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
+실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
 ## 목표
 
@@ -100,7 +100,7 @@ verified local snapshot
 → final regular-file + SHA-256 재검증
 ```
 
-raw PostgreSQL dump를 iCloud에 직접 복사하지 않는다. private age identity는 repository나 Mac mini plaintext file에 두지 않는다. iCloud-stage heartbeat grace는 8시간이고 local verified backup grace는 7시간이다. recipient/key/iCloud path, ciphertext worker와 heartbeat 설치는 10D에서 별도 승인한다.
+raw PostgreSQL dump를 iCloud에 직접 복사하지 않는다. private age identity는 repository나 Mac mini plaintext file에 두지 않는다. iCloud-stage freshness grace는 8시간이고 local verified backup grace는 7시간이다. HomeOps의 현재 signal contract에는 backup freshness type이 없으므로 다른 lifecycle로 위장해 보내지 않는다. recipient/key/iCloud path, ciphertext worker와 central typed freshness 연동은 10D 및 별도 HomeOps extension에서 승인한다.
 
 ## Restore Drill
 
