@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 10C-2B1 — Operational Status Harness
-- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL backup/restore와 privacy-safe read-only status snapshot
+- 단계: Slice 10C-2B2 — Monitor/Alert Policy Harness
+- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL backup/restore, privacy-safe read-only status snapshot과 비활성 monitor policy/Kuma harness
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -39,9 +39,9 @@
 
 현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니다.
 
-Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다. Slice 10C-2B1은 Web/API/PostgreSQL, Nginx origin, recurring scheduler, verified backup marker와 backup filesystem을 한 번에 읽는 canonical JSON status command를 추가한다.
+Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다. Slice 10C-2B1은 Web/API/PostgreSQL, Nginx origin, recurring scheduler, verified backup marker와 backup filesystem을 한 번에 읽는 canonical JSON status command를 추가했다. Slice 10C-2B2는 이 raw snapshot을 service 2회, recurring 5분/3 poll, backup 7시간, disk 80/90% 정책으로 평가하고 owner-only atomic state와 Uptime Kuma push mapping을 synthetic하게 검증한다.
 
-이 source gate는 실제 production status/backup을 실행하거나 monitor·alert, schedule·retention·외부복제·production restore를 활성화하지 않는다. Cloudflare/Tunnel, production secret/User/DB와 deploy도 별도 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
+이 source gate는 실제 production status/backup을 실행하거나 Uptime Kuma monitor·email, LaunchAgent, `:35` schedule, retention 삭제, age/iCloud 외부복제와 production restore를 활성화하지 않는다. Cloudflare/Tunnel, production secret/User/DB와 deploy도 별도 10D 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
 
 ## 기술 기준
 
@@ -93,6 +93,7 @@ our-ledger/
 ├─ backend/             # Spring Boot API, Flyway, Gradle Wrapper
 ├─ frontend/            # React/TypeScript/Vite, npm lockfile
 ├─ infra/               # immutable image와 non-root Nginx production 자산
+├─ launchd/             # 설치하지 않는 monitor/backup LaunchAgent example
 ├─ docs/                # 제품·domain·data·quality 계약
 ├─ scripts/             # local/CI 검증 진입점
 ├─ compose.dev.yaml     # local 개발 전용

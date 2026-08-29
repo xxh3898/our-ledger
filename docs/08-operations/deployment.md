@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - AGENTS.md
@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가한다. Slice 10C-2B1은 existing stack과 verified marker를 변경하지 않고 읽는 operational status command를 추가한다. 실제 image registry push, Mac mini production Compose/status/backup 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention·외부복제, production restore와 monitor/alert는 실행하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가했다. Slice 10C-2B1은 existing stack과 verified marker를 변경하지 않고 읽는 operational status command를 추가했고 10C-2B2는 그 raw snapshot의 policy/state/Kuma source harness와 future launchd template을 추가한다. 실제 image registry push, Mac mini production Compose/status/backup/monitor 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하지 않았다.
 
 ## 목표 구조
 
@@ -124,6 +124,41 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 
 `./scripts/verify-observability.sh`는 같은 command를 exact-HEAD disposable stack에서 검증한다. synthetic recurring success/rule failure, API unavailable/restart reset, verified marker/inventory, public actuator 차단, privacy와 resource residue 0을 확인하며 실제 production resource를 사용하지 않는다.
 
+`./scripts/verify-monitor-policy.sh`는 B1 snapshot 위의 threshold/streak, owner-only atomic state, non-blocking lock, bounded Kuma adapter와 monitor/backup plist를 pure/synthetic하게 검증한다. production status, Uptime Kuma와 LaunchAgent를 사용하지 않는다.
+
+## Future 10D release pipeline
+
+실제 10D activation은 Guess Pokémon/Cubing Hub 계열의 다음 상태 전이를 따른다.
+
+```text
+main merge/release intent
+→ full validation
+→ API/Web linux/arm64 exact commit SHA image publish
+→ image digest/revision validation
+→ Tailscale OIDC
+→ restricted SSH command
+→ project operation lock
+→ current runtime identity check
+→ predeploy verified backup
+→ future migration이 있으면 one-shot Flyway + validate
+→ same-SHA API/Web cutover
+→ Compose readiness
+→ Cloudflare Access를 우회하지 않는 approved smoke
+→ current/previous state 확정
+→ failure 시 compatible previous image pair rollback
+```
+
+- API/Web은 같은 40자리 commit SHA의 immutable image pair여야 하며 `latest`를 사용하지 않는다.
+- repository kill switch가 명시적으로 활성화되지 않으면 publish/deploy를 건너뛴다.
+- deploy와 scheduled backup은 같은 project non-blocking operation lock을 사용한다. 현재 source의 backup 전용 lock을 production shared lock으로 전환하는 설치 작업은 10D에서 exact bootstrap/worker와 함께 검증한다.
+- predeploy verified backup 실패 시 migration/cutover를 시작하지 않는다.
+- Flyway는 candidate API의 one-shot migration/validate로 분리하고 일반 API startup에서 임의 schema update를 사용하지 않는다.
+- readiness와 approved smoke 성공 전에는 `current`를 candidate로 확정하지 않는다.
+- image rollback과 DB restore를 분리한다. backward-incompatible migration 뒤 previous image가 호환된다고 가정하거나 production DB restore를 자동 rollback으로 사용하지 않는다.
+- `down --volumes`, broad Docker prune, automatic reverse migration과 caller가 임의 shell/Compose path/image를 넘기는 SSH를 금지한다.
+
+실제 `.github/workflows/deploy.yml`, GHCR package, Tailscale credential, restricted SSH wrapper와 operation lock 설치는 이번 source에 없으며 10D의 별도 production 승인 대상이다.
+
 ## 배포 Gate
 
 에이전트는 production deploy와 Cloudflare Access/Tunnel 설정 변경을 수행하지 않는다. 사용자가 다음을 확인한 뒤 명시적으로 실행한다.
@@ -137,7 +172,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - `cloudflared` Access 검증 설정
 - health check
 
-10C-1/10C-2A/10C-2B1 source/CI 통과는 위 production deploy, status 실행 또는 production backup/restore/monitor Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다.
+10C-1/10C-2A/10C-2B1/10C-2B2 source/CI 통과는 위 production deploy, status/monitor 실행 또는 production backup/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다.
 
 ## 롤백
 

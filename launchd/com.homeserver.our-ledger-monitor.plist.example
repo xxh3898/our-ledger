@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.homeserver.our-ledger.monitor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/homeserver/Server/scripts/monitor/monitor-our-ledger-bootstrap.sh</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/homeserver/Library/Logs/our-ledger-monitor.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/homeserver/Library/Logs/our-ledger-monitor.err.log</string>
+</dict>
+</plist>

@@ -33,11 +33,18 @@ required_paths=(
   "scripts/backup_tools/state-fingerprint.sql"
   "scripts/backup_tools/test_backup_artifact.py"
   "scripts/production-status.sh"
+  "scripts/monitor-production.sh"
   "scripts/status_tools/production_status.py"
+  "scripts/status_tools/monitor_policy.py"
+  "scripts/status_tools/monitor_worker.py"
   "scripts/status_tools/test_production_status.py"
+  "scripts/status_tools/test_monitor_policy.py"
   "scripts/verify-backup-restore.sh"
+  "scripts/verify-monitor-policy.sh"
   "scripts/verify-observability.sh"
   "scripts/verify-production-runtime.sh"
+  "launchd/com.homeserver.our-ledger-monitor.plist.example"
+  "launchd/com.homeserver.our-ledger-backup.plist.example"
 )
 
 for path in "${required_paths[@]}"; do

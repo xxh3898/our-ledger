@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.4
+version: 0.5
 last_updated: 2026-08-29
 related:
   - 06-security/privacy-model.md
@@ -50,7 +50,9 @@ Account, Category, Category Group은 거래가 연결되면 archive한다. archi
 - 검증된 dump, checksum, metadata는 owner-only atomic bundle 하나로 취급한다. `last-success.json`은 dump 내용을 복제하지 않고 최신 성공 시각·schema·size·hash·파일명만 가리킨다.
 - metadata와 marker에는 email, memo, Category/Account 내용, DB password, token/cookie와 resolved Compose config를 넣지 않는다.
 - strict inventory는 valid/invalid/incomplete/foreign artifact를 분류만 하며 삭제하지 않는다.
-- 실제 보관 일·주·월 개수, 외부 암호화 복제 위치와 backup 파기는 RPO/RTO·저장공간·개인정보 정책을 확인하는 10D 운영 결정 전까지 미확정이다.
+- accepted dry-run plan은 latest verified bundle 4개와 지난 7 KST calendar day마다 06:00 이후 첫 verified bundle 1개를 중복 없이 `keep`으로 분류한다. 나머지 verified bundle만 `pruneCandidates`이며 invalid/future, incomplete, foreign과 symlink는 삭제 후보에서 제외한다.
+- `retention-plan` helper는 deterministic JSON만 출력하고 artifact, marker와 backup directory를 변경하지 않는다. `pruneCandidates`는 최소 7일 운영 관찰, age ciphertext remote decrypt, isolated restore drill과 별도 production deletion 승인 전에는 삭제하지 않는다.
+- future offsite는 verified local snapshot을 tar stream으로 age public recipient에 암호화하고 local ciphertext와 iCloud `.partial`/final SHA-256을 검증한 뒤에만 성공으로 인정한다. raw dump를 외부에 직접 복사하지 않고 private age identity를 repository나 Mac mini plaintext file에 두지 않는다.
 
 ## 실제 삭제
 
