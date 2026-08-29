@@ -68,3 +68,13 @@ jobs:
 
       - name: Observability/status 검증
         run: ./scripts/verify-observability.sh
+
+  monitor-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Monitor policy/HomeOps 검증
+        run: ./scripts/verify-monitor-policy.sh

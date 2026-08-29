@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.9
+version: 1.0
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -96,6 +96,26 @@ related:
 - disposable smoke는 exact-HEAD image, 합성 backup/DB만 사용해 recurring success/rule failure/API unavailable/restart reset/public actuator 차단과 resource residue 0을 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 독립 observability job을 통과하며 threshold/evaluator/monitor/channel은 활성화하지 않는다.
 
+### Slice 10C-2B2 Monitor/Alert Policy Harness Gate
+
+- B1 canonical raw snapshot과 policy result가 분리되고 evaluator result/state/HomeOps payload에는 raw snapshot, secret, PII, 금융 상세, container/artifact/path identity가 없다.
+- Web/API/PostgreSQL/recurring reachability는 target별 첫 failure를 `WARN`, 두 번째 연속 failure부터 `CRITICAL`로 평가하고 정상 observation에서 해당 streak만 reset한다.
+- origin failure도 1회 `WARN`, 2회 `CRITICAL`이며 다른 service streak와 독립적이다.
+- recurring poll 0은 process age 5분 미만 `STARTING/WARN`, 5분 이상 `CRITICAL`이고 completed poll age 5분 초과와 top-level failure를 `CRITICAL`로 평가한다.
+- 같은 recurring completed poll은 rule failure streak를 중복 증가시키지 않고 새 failed poll 1~2회 `WARN`, 3회부터 `CRITICAL`, 새 clean poll에서 reset한다.
+- verified local backup age 7시간 이상과 marker missing/invalid/unavailable은 `CRITICAL`, invalid/incomplete inventory는 `WARN`, foreign-only inventory는 status를 올리지 않는다.
+- filesystem은 80% 이상 `WARN`, 90% 이상 또는 unavailable `CRITICAL`의 exact boundary를 지킨다.
+- monitor state는 repository 밖 current-user owner mode `0700` directory와 `0600` state/lock file만 사용하고 temp fsync/atomic replace/directory fsync를 지킨다. state/backup/reporter canonical path는 pairwise disjoint다.
+- corrupt/symlink/permissive/oversized state는 0으로 reset하지 않고 `STATE_INVALID/CRITICAL`로 fail closed하며 기존 bytes를 보존한다.
+- concurrent monitor invocation은 non-blocking kernel lock으로 한 실행만 허용한다.
+- HomeOps reporter는 repository/state/backup 밖 canonical regular non-symlink executable, current owner, group/other non-writable, exact `report-homeops-event.py` identity를 요구하고 validation failure를 lock/provider/reporter 호출 전에 거부한다.
+- filesystem 사용률이 80% 미만에서 80% 이상으로 진입할 때 `DISK_LOW/ALERT`를 한 번 만들고 active episode 중 90% 진입은 새 event를 만들지 않는다. 80% 미만 회복은 같은 episode의 `RECOVERED`, 재진입은 새 episode key를 사용한다.
+- pending payload는 reporter 호출 전에 atomic/fsync state에 저장하고 reporter exit 0 뒤에만 clear한다. nonzero/timeout/final state save failure는 같은 event key를 snapshot보다 먼저 재시도하며 shell, direct HTTP, HomeOps secret/origin/HMAC/spool 구현을 사용하지 않는다.
+- service/origin/recurring/backup freshness/filesystem unavailable local signal은 evaluator result에 유지하되 HomeOps의 다른 signal type이나 lifecycle로 위장해 전달하지 않는다.
+- retention dry-run plan은 latest verified 4개와 지난 7 KST day의 06:00 이후 첫 verified bundle을 keep하고 symlink/invalid/future/incomplete/foreign을 prune 후보에서 제외하며 어떤 artifact도 삭제하지 않는다.
+- monitor plist는 60초, backup plist는 `00:35/06:35/12:35/18:35`, repository 밖 fixed bootstrap과 `KeepAlive` 부재를 고정하며 실제 install/load를 실행하지 않는다.
+- Hosted Full CI가 PR exact HEAD에서 독립 `monitor-policy` job을 통과하고 actual production HomeOps reporter/spool/API, notification, LaunchAgent/backup/offsite를 활성화하지 않는다.
+
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
@@ -106,9 +126,9 @@ related:
 - DB 포트 직접 공개 없음
 - 자동 backup 성공 확인
 - 별도 환경에서 restore drill 1회 성공
-- health check와 uptime monitor 확인
+- health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production status/backup/restore와 uptime monitor는 10C-2B1 완료 기준이 아니다. 10C-2B1은 raw read-only interface와 합성 disposable 검증까지만 제공하며 실제 threshold/channel, schedule·retention·외부복제·production restore는 후속 운영 Gate에서 별도 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production status/backup/restore/HomeOps reporter와 LaunchAgent는 10C-2B2 완료 기준이 아니다. 10C-2B2는 raw read-only interface와 확정 policy/state/reporter source의 합성 검증까지만 제공하며 actual monitored-service 등록, central typed incident, notification, schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 

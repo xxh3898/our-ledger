@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.5
+version: 0.6
 last_updated: 2026-08-29
 related:
   - 03-data/data-retention.md
@@ -11,9 +11,9 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다.
 
-실제 Mac mini production backup/restore는 실행하지 않았고 schedule, retention 삭제, 외부 destination/암호화 복제도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
+실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
 ## 목표
 
@@ -66,7 +66,41 @@ backup window 전후 successful Flyway version이 같고 failed migration count�
 
 ## 보관기간
 
-정확한 일·주·월 보관 개수는 production gate에서 저장공간, RPO/RTO, 외부복제와 파기 정책을 기준으로 확정한다. 10C-2A inventory helper는 strict valid/invalid/incomplete/foreign artifact를 분류만 하고 삭제하지 않는다. 자동 prune는 확정 전 실행 보류 항목이다.
+accepted dry-run policy는 다음과 같다.
+
+- recent: 최신 verified snapshot 4개
+- daily: 지난 7 KST calendar day마다 06:00 이후 첫 verified snapshot 1개
+- recent/daily 중복 제거
+- 나머지 verified snapshot만 `pruneCandidates`
+- invalid/future, incomplete, foreign과 symlink는 삭제 후보에서 제외
+
+`backup_artifact.py retention-plan`은 strict inventory에서 deterministic JSON의 `keep`, `pruneCandidates`, `invalidIgnored`, `incompleteIgnored`, `foreignIgnored`만 계산한다. artifact, marker와 backup directory를 쓰거나 삭제하지 않는다.
+
+```bash
+python3 scripts/backup_tools/backup_artifact.py retention-plan \
+  --backup-dir <absolute-dedicated-owner-only-directory>
+```
+
+최소 7일 운영 관찰, offsite decrypt 성공, isolated restore drill 성공과 별도 production deletion 승인 전에는 `pruneCandidates`를 삭제하지 않는다. `rm -rf` 기반 prune와 이름/age만 본 삭제는 허용하지 않는다.
+
+## Future schedule과 offsite
+
+`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. 실제 bootstrap 설치, LaunchAgent load와 scheduled backup 실행은 10D 작업이다.
+
+future offsite는 다음 순서를 따른다.
+
+```text
+verified local snapshot
+→ tar stream
+→ age public recipient encryption
+→ owner-only local ciphertext staging
+→ SHA-256 검증
+→ project-specific iCloud .partial
+→ final rename
+→ final regular-file + SHA-256 재검증
+```
+
+raw PostgreSQL dump를 iCloud에 직접 복사하지 않는다. private age identity는 repository나 Mac mini plaintext file에 두지 않는다. iCloud-stage freshness grace는 8시간이고 local verified backup grace는 7시간이다. HomeOps의 현재 signal contract에는 backup freshness type이 없으므로 다른 lifecycle로 위장해 보내지 않는다. recipient/key/iCloud path, ciphertext worker와 central typed freshness 연동은 10D 및 별도 HomeOps extension에서 승인한다.
 
 ## Restore Drill
 

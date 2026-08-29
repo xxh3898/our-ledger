@@ -18,6 +18,10 @@ from typing import Any
 
 FORMAT_VERSION = 1
 PRODUCT_PREFIX = "our-ledger_production"
+RETENTION_RECENT_COUNT = 4
+RETENTION_DAILY_DAYS = 7
+RETENTION_DAILY_START = dt.time(6, 0)
+KST = dt.timezone(dt.timedelta(hours=9))
 STEM_PATTERN = re.compile(
     rf"^(?P<prefix>{PRODUCT_PREFIX})_"
     r"(?P<timestamp>[0-9]{8}T[0-9]{6}Z)_"
@@ -600,6 +604,63 @@ def inventory(backup_directory: Path) -> dict[str, Any]:
     }
 
 
+def retention_plan(
+    backup_directory: Path,
+    *,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    observed_at = now or dt.datetime.now(dt.timezone.utc)
+    require(
+        isinstance(observed_at, dt.datetime) and observed_at.tzinfo is not None,
+        "retention plan 시각은 timezone-aware datetime이어야 합니다.",
+    )
+    observed_at = observed_at.astimezone(dt.timezone.utc).replace(microsecond=0)
+    current_inventory = inventory(backup_directory)
+    valid: list[tuple[dt.datetime, str]] = []
+    future_ignored: list[str] = []
+    for item in current_inventory["valid"]:
+        created_at = parse_created_at(item["createdAt"])
+        name = item["bundleDirectory"]
+        if created_at > observed_at:
+            future_ignored.append(name)
+        else:
+            valid.append((created_at, name))
+
+    valid.sort(reverse=True)
+    keep = {name for _, name in valid[:RETENTION_RECENT_COUNT]}
+    today = observed_at.astimezone(KST).date()
+    for offset in range(1, RETENTION_DAILY_DAYS + 1):
+        target_date = today - dt.timedelta(days=offset)
+        eligible = [
+            (created_at, name)
+            for created_at, name in valid
+            if created_at.astimezone(KST).date() == target_date
+            and created_at.astimezone(KST).time() >= RETENTION_DAILY_START
+        ]
+        if eligible:
+            keep.add(min(eligible)[1])
+
+    return {
+        "formatVersion": FORMAT_VERSION,
+        "generatedAt": observed_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "mode": "dry-run",
+        "policy": {
+            "recent": RETENTION_RECENT_COUNT,
+            "dailyDays": RETENTION_DAILY_DAYS,
+            "dailyAtOrAfterKst": "06:00",
+        },
+        "keep": sorted(keep),
+        "pruneCandidates": sorted(
+            name for _, name in valid if name not in keep
+        ),
+        "invalidIgnored": sorted(
+            set(current_inventory["invalid"]) | set(future_ignored)
+        ),
+        "incompleteIgnored": sorted(current_inventory["incomplete"]),
+        "foreignIgnored": sorted(current_inventory["foreign"]),
+    }
+
+
 def check_postgres_container(
     payload: Any,
     project_name: str,
@@ -683,6 +744,10 @@ def _parser() -> argparse.ArgumentParser:
     inventory_parser = subparsers.add_parser("inventory")
     inventory_parser.add_argument("--backup-dir", required=True)
 
+    retention_parser = subparsers.add_parser("retention-plan")
+    retention_parser.add_argument("--backup-dir", required=True)
+    retention_parser.add_argument("--now")
+
     container = subparsers.add_parser("check-container")
     container.add_argument("--project-name", required=True)
     container.add_argument("--compose-file", required=True)
@@ -734,6 +799,23 @@ def main() -> None:
         print(
             json.dumps(
                 inventory(Path(args.backup_dir).resolve()),
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    elif args.command == "retention-plan":
+        plan_now = (
+            parse_created_at(args.now)
+            if args.now is not None
+            else dt.datetime.now(dt.timezone.utc)
+        )
+        print(
+            json.dumps(
+                retention_plan(
+                    Path(args.backup_dir).resolve(),
+                    now=plan_now,
+                ),
                 ensure_ascii=True,
                 indent=2,
                 sort_keys=True,

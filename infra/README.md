@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C-1의 immutable production origin, Slice 10C-2A의 backup/restore source gate와 Slice 10C-2B1의 operational status harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host one-shot custom backup, isolated restore drill과 privacy-safe read-only status snapshot까지다. 실제 Mac mini deploy/status/backup/restore, Cloudflare Tunnel/Access 설정, production secret/User/DB, schedule·retention·외부복제와 monitor/alert activation은 포함하지 않는다.
+Slice 10C-1의 immutable production origin, Slice 10C-2A의 backup/restore source gate, Slice 10C-2B1의 operational status와 10C-2B2 monitor policy harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host one-shot custom backup, isolated restore drill, privacy-safe read-only status와 policy/state/HomeOps reporter synthetic harness까지다. 실제 Mac mini deploy/status/backup/restore/monitor/HomeOps reporter, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -19,7 +19,7 @@ infra/
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
-backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 status command는 `scripts/production-status.sh`, restore 검증 진입점은 `scripts/verify-backup-restore.sh`다. production Compose에 backup/status service나 host backup bind mount를 추가하지 않는다.
+backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. restore와 policy 검증 진입점은 `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`다. production Compose에 backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -115,6 +115,23 @@ env file은 Git 밖 owner-only `0600`, backup directory는 Git 밖 owner-only `0
 
 snapshot에는 service state/health/restart count, loopback `/healthz` status, 비식별 recurring scheduler raw signal, verified `last-success.json` freshness와 inventory count, backup filesystem capacity/available/used percent만 포함한다. missing/stopped/unhealthy/unreachable/invalid 상태를 success로 바꾸지 않는다. 정확한 JSON과 process-local 의미는 [`docs/08-operations/observability.md`](../docs/08-operations/observability.md)를 따른다.
 
+## Monitor policy source harness
+
+다음 command는 B1 status를 실행하고 repository 밖 minimal state를 atomic하게 갱신하며, 지원되는 filesystem `DISK_LOW` transition만 검증한 HomeOps reporter subprocess에 전달한다. source가 준비됐다는 사실은 actual production 실행, reporter/spool/API 호출, notification 또는 LaunchAgent 활성화 승인이 아니다.
+
+```bash
+./scripts/monitor-production.sh \
+  --project-name our-ledger-production \
+  --env-file /absolute/path/outside/repository/production.env \
+  --backup-dir /absolute/dedicated/our-ledger-backups \
+  --state-dir /absolute/dedicated/our-ledger-monitor-state \
+  --homeops-reporter /absolute/installed/report-homeops-event.py
+```
+
+state directory는 current owner mode `0700`, reporter는 current owner의 group/other non-writable regular non-symlink executable이어야 하고 repository/state/backup과 canonical하게 disjoint해야 한다. reporter identity는 `report-homeops-event.py`로 고정한다. state formatVersion 2에는 failure streak/timestamp/status와 `DISK_LOW` episode sequence, active key, exact pending payload만 저장하며 HomeOps origin/secret/HMAC/spool, raw status, path, container/artifact identity와 사용자·금융 데이터를 저장하지 않는다. production activation 전이므로 이전 state migration은 없고 구버전/corrupt state는 fail closed한다.
+
+worker는 persistent owner-only file의 non-blocking `flock`으로 동시 실행을 거부한다. disk 80% 진입/회복만 `DISK_LOW` ALERT/RECOVERED로 보내고 active episode 중 90% 진입은 중복 event를 만들지 않는다. pending은 reporter보다 먼저 durable save하고 exit 0 뒤 clear하며 실패·timeout·acceptance 뒤 state save failure는 다음 실행에서 같은 key로 먼저 재시도한다. service/origin/recurring/backup freshness와 filesystem unavailable은 local result에만 남는다. 실제 운영 bootstrap은 `launchd/com.homeserver.our-ledger-monitor.plist.example`의 fixed external path에 10D에서 별도 설치한다.
+
 ## Production one-shot backup
 
 다음 command는 실제 production DB를 online logical read하고 지정한 host directory에 전체 재무 backup을 쓴다. source code가 준비됐다는 사실은 실행 승인이나 schedule 활성화를 의미하지 않는다. 실제 실행 전 exact project/env/directory, disk, 최신 정상 backup, 장애 대응 담당자와 restore Gate를 별도로 확인한다.
@@ -149,7 +166,14 @@ python3 scripts/backup_tools/backup_artifact.py inventory \
   --backup-dir /absolute/dedicated/our-ledger-backups
 ```
 
-보관 개수, 자동 prune, schedule, 외부 destination/암호화 복제와 production restore는 10D 승인 전까지 활성화하지 않는다.
+retention dry-run plan은 latest verified 4개와 지난 7 KST day의 06:00 이후 첫 verified bundle을 keep으로 분류한다.
+
+```bash
+python3 scripts/backup_tools/backup_artifact.py retention-plan \
+  --backup-dir /absolute/dedicated/our-ledger-backups
+```
+
+`pruneCandidates`를 포함해 어떤 artifact도 삭제하지 않는다. backup plist example은 `00:35/06:35/12:35/18:35` fixed external bootstrap과 `KeepAlive` 부재만 고정한다. 실제 prune, schedule, age/iCloud destination/암호화 복제와 production restore는 10D 승인 전까지 활성화하지 않는다.
 
 ## 중지와 rollback
 
@@ -190,3 +214,11 @@ Operational status smoke는 별도 entrypoint다.
 ```
 
 이 smoke는 exact-HEAD API/Web image와 고유 Compose project, 합성 credential/backup/financial fixture만 사용한다. recurring poll success와 isolated rule failure, API unavailable, process 재시작 후 not-yet-run reset, public actuator 404, status JSON privacy/read-only 경계와 container/network/volume/image/temp residue 0을 검증한다.
+
+Monitor policy/HomeOps smoke는 별도 entrypoint다.
+
+```bash
+./scripts/verify-monitor-policy.sh
+```
+
+이 smoke는 pure evaluator, external state/backup/reporter contract, synthetic reporter subprocess, durable pending/episode, retention matrix와 plist parse/lint만 사용한다. actual production status/backup/HomeOps reporter·spool·API와 LaunchAgent를 사용하거나 host state를 설치하지 않는다.

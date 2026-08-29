@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -90,6 +92,33 @@ class BackupArtifactTest(unittest.TestCase):
             f"{stem}.backup",
         )
         return dump.parent, stem
+
+    def commit_bundle_at(self, created_at: str) -> Path:
+        staging, stem = self.stage_bundle(created_at=created_at)
+        dump = contract.commit_bundle(
+            self.backup_directory,
+            staging,
+            f"{stem}.backup",
+        )
+        return dump.parent
+
+    def tree_fingerprint(self) -> dict[str, tuple]:
+        result: dict[str, tuple] = {}
+        for path in sorted(self.backup_directory.rglob("*")):
+            relative = str(path.relative_to(self.backup_directory))
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if path.is_symlink():
+                result[relative] = ("symlink", mode, os.readlink(path))
+            elif path.is_file():
+                result[relative] = (
+                    "file",
+                    mode,
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+            else:
+                result[relative] = ("directory", mode)
+        return result
 
     def copied_bundle(self, bundle: Path, label: str) -> Path:
         parent = self.root / label
@@ -372,6 +401,81 @@ class BackupArtifactTest(unittest.TestCase):
         self.assertTrue(incomplete.exists())
         self.assertTrue(invalid.exists())
         self.assertTrue(foreign.exists())
+
+    def test_should_plan_recent_four_and_daily_seven_without_mutation(self) -> None:
+        now = dt.datetime(2026, 8, 29, 12, 0, tzinfo=dt.timezone.utc)
+
+        def created_at(value: dt.datetime) -> str:
+            return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        recent = [
+            self.commit_bundle_at(created_at(now - dt.timedelta(seconds=offset)))
+            for offset in (1, 2, 3, 4)
+        ]
+        daily_keep: list[Path] = []
+        expected_prune: list[Path] = []
+        today = now.astimezone(contract.KST).date()
+        for offset in range(1, 9):
+            target_date = today - dt.timedelta(days=offset)
+            before = dt.datetime.combine(
+                target_date, dt.time(5, 55), tzinfo=contract.KST
+            )
+            first = dt.datetime.combine(
+                target_date, dt.time(6, 0), tzinfo=contract.KST
+            )
+            later = dt.datetime.combine(
+                target_date, dt.time(12, 0), tzinfo=contract.KST
+            )
+            before_bundle = self.commit_bundle_at(created_at(before))
+            first_bundle = self.commit_bundle_at(created_at(first))
+            later_bundle = self.commit_bundle_at(created_at(later))
+            if offset <= 7:
+                daily_keep.append(first_bundle)
+                expected_prune.extend([before_bundle, later_bundle])
+            else:
+                expected_prune.extend([before_bundle, first_bundle, later_bundle])
+
+        future = self.commit_bundle_at(created_at(now + dt.timedelta(days=1)))
+        incomplete = self.backup_directory / ".retention-fixture.partial"
+        incomplete.mkdir(mode=0o700)
+        invalid = self.backup_directory / (
+            "our-ledger_production_20260701T000000Z_v8_aaaaaaaaaaaa.backup"
+        )
+        invalid.mkdir(mode=0o700)
+        foreign = self.backup_directory / "retention-notes.txt"
+        foreign.write_text("ignored\n", encoding="utf-8")
+        foreign.chmod(0o600)
+        symlink = self.backup_directory / (
+            "our-ledger_production_20260702T000000Z_v8_bbbbbbbbbbbb.backup"
+        )
+        symlink.symlink_to(recent[0], target_is_directory=True)
+
+        before = self.tree_fingerprint()
+        plan = contract.retention_plan(self.backup_directory, now=now)
+        after = self.tree_fingerprint()
+
+        self.assertEqual(plan["formatVersion"], 1)
+        self.assertEqual(plan["mode"], "dry-run")
+        self.assertEqual(plan["policy"], {
+            "recent": 4,
+            "dailyDays": 7,
+            "dailyAtOrAfterKst": "06:00",
+        })
+        self.assertEqual(plan["generatedAt"], "2026-08-29T12:00:00Z")
+        self.assertEqual(len(plan["keep"]), 11)
+        self.assertTrue({bundle.name for bundle in recent} <= set(plan["keep"]))
+        self.assertTrue({bundle.name for bundle in daily_keep} <= set(plan["keep"]))
+        self.assertTrue(
+            {bundle.name for bundle in expected_prune}
+            <= set(plan["pruneCandidates"])
+        )
+        self.assertTrue(set(plan["keep"]).isdisjoint(plan["pruneCandidates"]))
+        self.assertIn(future.name, plan["invalidIgnored"])
+        self.assertIn(invalid.name, plan["invalidIgnored"])
+        self.assertIn(symlink.name, plan["invalidIgnored"])
+        self.assertIn(incomplete.name, plan["incompleteIgnored"])
+        self.assertIn(foreign.name, plan["foreignIgnored"])
+        self.assertEqual(before, after)
 
     def test_should_cleanup_only_strict_direct_partial_directory(self) -> None:
         staging, _ = self.stage_bundle()
