@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.0
+version: 1.1
 last_updated: 2026-08-29
 related:
   - 01-product/feature-matrix.md
@@ -26,8 +26,9 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 8. Marriage Goal | Goal/Account 연결, 달성률·예상일 | 결혼자금 추적 가능 |
 | 9. Assets | 자산·부채·순자산·월 추이 | 재무 상태 확인 가능 |
 | 10A. CSV Export | 기간 지정 원장 CSV, spreadsheet 안전성 | Settings에서 검산·이동용 CSV 다운로드 |
-| 10B. PWA Installability | manifest, service worker, production icon | 모바일 홈 화면 설치 가능 |
-| 10C. Production Runtime Harness | Compose, Nginx, backup/restore, observability | 실제 secret 없는 운영 harness 검증 |
+| 10C-1. Immutable Runtime Harness | multi-stage image, Nginx, production profile/Compose, smoke | 실제 secret 없는 production origin 검증 |
+| 10C-2. Runtime Lifecycle | backup/restore, observability, 운영 runbook | 복구·감시 lifecycle 검증 |
+| 10B. PWA Installability | manifest, service worker, production icon | 최종 이름·icon 결정 뒤 모바일 홈 화면 설치 가능 |
 | 10D. Production Activation | Cloudflare, secret, bootstrap, deploy, restore drill | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Slice 3 구현 경계
@@ -87,11 +88,12 @@ Frontend는 기존 Assets 하단 destination을 활성화하고 actual Member/�
 Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 한 승인으로 묶지 않는다.
 
 - **10A CSV Export**: current Household의 유효 Transaction과 canonical Entry를 Household timezone 기간으로 읽어 한국어 CSV attachment를 생성한다. 별도 persistence, migration, background job, server temp file은 만들지 않는다.
-- **10B PWA Installability**: 앱 이름·production icon을 확정한 뒤 manifest와 service worker 설치 계약을 검증한다.
-- **10C Production Runtime Harness**: 실제 credential 없이 Compose/Nginx/backup/restore/observability 구조와 rollback을 검증한다.
+- **10B PWA Installability**: 최종 한글 앱 이름·production icon 결정 전까지 보류한다. 결정 뒤 manifest와 service worker 설치 계약을 별도 검증한다.
+- **10C-1 Immutable Runtime Harness**: digest-pinned multi-stage image, non-root same-origin Nginx, production Spring profile, image-only Compose를 합성 설정과 disposable PostgreSQL로 검증한다. Web만 loopback에 publish하고 API/DB host port, source mount, local identity를 금지한다.
+- **10C-2 Runtime Lifecycle**: `pg_dump` backup, 외부 보관, restore drill, monitor/alert와 운영 runbook을 별도 구현·검증한다.
 - **10D Production Activation**: 실제 Cloudflare/도메인/secret/User bootstrap/deploy/restore drill을 별도 운영 Gate로 승인한다.
 
-10A 완료는 production readiness, backup 완료, PWA 설치 가능 또는 운영 시작을 의미하지 않는다.
+10C-1 완료는 immutable origin harness와 local/Hosted smoke 통과만 의미한다. PWA 설치 가능, backup/restore·observability 완료, production activation 또는 deploy 완료를 의미하지 않는다.
 
 ## Release Gate
 

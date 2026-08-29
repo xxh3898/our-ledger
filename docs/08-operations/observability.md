@@ -1,13 +1,17 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-27
+version: 0.3
+last_updated: 2026-08-29
 related:
   - 06-security/privacy-model.md
   - ADR-008
 ---
 
 # 관측성
+
+## 현재 상태
+
+Slice 10C-1은 container healthcheck와 stdout/stderr log 경계만 제공한다. Uptime Kuma 연결, metrics exporter/dashboard, backup·scheduler alert, 실제 임계치와 알림 채널은 Slice 10C-2/10D 범위이며 아직 활성화하지 않았다.
 
 ## 목표
 
@@ -20,6 +24,8 @@ related:
 - Cloudflare 외부 경로
 - PostgreSQL container health
 - Uptime Kuma 등 기존 홈서버 도구 활용
+
+현재 public Nginx `/healthz`는 Nginx process/static 응답만 나타내며 API/DB detail을 노출하지 않는다. API readiness와 PostgreSQL health는 internal Compose dependency와 disposable smoke에서 확인한다. production 외부 monitor가 actuator를 직접 우회 호출하지 않게 한다.
 
 ## 로그
 

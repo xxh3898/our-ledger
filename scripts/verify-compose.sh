@@ -60,4 +60,41 @@ docker compose \
   -f "$ROOT_DIR/compose.verify.yaml" \
   config --quiet
 
+required_production_environment=(
+  OUR_LEDGER_WEB_IMAGE
+  OUR_LEDGER_API_IMAGE
+  OUR_LEDGER_ORIGIN_PORT
+  POSTGRES_DB
+  POSTGRES_USER
+  POSTGRES_PASSWORD
+  CLOUDFLARE_ACCESS_ISSUER
+  CLOUDFLARE_ACCESS_JWK_SET_URI
+  CLOUDFLARE_ACCESS_AUDIENCE
+)
+
+without_production_environment=(env)
+for variable_name in "${required_production_environment[@]}"; do
+  without_production_environment+=("-u" "$variable_name")
+done
+
+if "${without_production_environment[@]}" \
+  docker compose \
+  --env-file /dev/null \
+  -f "$ROOT_DIR/compose.prod.yaml" \
+  config --quiet >/dev/null 2>&1; then
+  echo "필수 환경변수 없이 production Compose가 render됐습니다." >&2
+  exit 1
+fi
+
+docker compose \
+  --env-file "$ROOT_DIR/.env.production.example" \
+  -f "$ROOT_DIR/compose.prod.yaml" \
+  config --quiet
+
+docker compose \
+  --env-file "$ROOT_DIR/.env.production.example" \
+  -f "$ROOT_DIR/compose.prod.yaml" \
+  config --format json \
+  | python3 "$ROOT_DIR/scripts/check-production-compose.py"
+
 echo "Docker Compose 검증을 통과했습니다."
