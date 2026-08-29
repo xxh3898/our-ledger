@@ -1,0 +1,21 @@
+FROM scratch
+
+ARG REVISION
+
+LABEL org.opencontainers.image.source="https://github.com/xxh3898/our-ledger"
+LABEL org.opencontainers.image.revision="${REVISION}"
+LABEL org.opencontainers.image.version="${REVISION}"
+LABEL io.chochiho.runtime-config.project="our-ledger"
+
+COPY --chmod=0600 compose.prod.yaml /runtime/compose.yaml
+COPY --chmod=0600 infra/nginx/nginx.conf /runtime/infra/nginx/nginx.conf
+COPY --chmod=0700 scripts/backup-production.sh /runtime/scripts/backup-production.sh
+COPY --chmod=0600 scripts/backup_tools/backup_artifact.py /runtime/scripts/backup_tools/backup_artifact.py
+COPY --chmod=0700 scripts/monitor-production.sh /runtime/scripts/monitor-production.sh
+COPY --chmod=0700 scripts/production-status.sh /runtime/scripts/production-status.sh
+COPY --chmod=0700 scripts/release_tools/release_contract.py /runtime/scripts/release_tools/release_contract.py
+COPY --chmod=0600 scripts/status_tools/monitor_policy.py /runtime/scripts/status_tools/monitor_policy.py
+COPY --chmod=0600 scripts/status_tools/monitor_worker.py /runtime/scripts/status_tools/monitor_worker.py
+COPY --chmod=0600 scripts/status_tools/production_status.py /runtime/scripts/status_tools/production_status.py
+
+CMD ["/runtime/compose.yaml"]
