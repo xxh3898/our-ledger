@@ -28,11 +28,13 @@ Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreS
 - filename은 고정 product/environment prefix, UTC second, successful Flyway version과 random collision suffix만 사용한다.
 - `umask 077`, owner-only env/directory/file과 strict absolute path confinement를 요구한다.
 - final 공개 전 nonzero, `PGDMP` magic, `pg_restore --list`, byte size, SHA-256과 metadata consistency를 확인한다.
+- shell redirection이 만든 owner-only regular `.dump`를 staging directory `dir_fd`와 `lstat`/`fstat`로 재검증하고 해당 file descriptor에 `fsync`한 뒤에만 archive 검증과 publish를 계속한다.
+- backup 전후 한 statement로 읽은 Flyway failed migration count가 모두 0이고 latest successful version이 동일할 때만 pre-check version을 filename/metadata에 사용한다.
 - secret과 backup 파일은 Git, log, GitHub Actions artifact에 저장하지 않는다.
 
 ### Atomic artifact
 
-세 개 파일을 하나의 owner-only partial directory 안에 만들고 file/directory fsync 뒤 directory 자체를 final `.backup` 이름으로 rename한다.
+세 개 파일을 하나의 owner-only partial directory 안에 만든다. `pg_dump` file descriptor, metadata/checksum file과 partial directory를 순서대로 fsync한 뒤 directory 자체를 final `.backup` 이름으로 rename한다.
 
 ```text
 our-ledger_production_20260829T031500Z_v8_a1b2c3d4e5f6.backup/
@@ -54,7 +56,9 @@ metadata field는 `formatVersion`, `createdAt`, `schemaVersion`, `sizeBytes`, `s
   --backup-dir <absolute-dedicated-owner-only-directory>
 ```
 
-command는 exact repository `compose.prod.yaml`, project/config/image label, PostgreSQL running/healthy, project-scoped volume/internal network와 Flyway successful version을 확인한다. stdout에는 final artifact path, UTC timestamp와 schema version만 출력한다. failure는 nonzero exit다.
+command는 exact repository `compose.prod.yaml`, project/config/image label, PostgreSQL running/healthy, project-scoped volume/internal network를 확인한다. `pg_dump → dump fsync → pg_restore --list → Flyway post-check → sidecar/hash → partial directory fsync → final rename → backup directory fsync → last-success atomic replace → backup directory fsync` 순서로 publish한다. stdout에는 final artifact path, UTC timestamp와 schema version만 출력한다. failure는 nonzero exit다.
+
+backup window 전후 successful Flyway version이 같고 failed migration count가 모두 0인 경우에만 artifact를 publish한다. version 변화나 failed row를 감지하면 sidecar/final bundle을 만들지 않고 partial을 폐기하며 기존 `last-success.json`을 유지한다. 이 gate는 migration과 backup의 mutual exclusion을 제공하지 않고, overlap이 관측된 archive를 성공으로 인정하지 않는 fail-closed 경계다.
 
 동일 backup directory의 concurrent 실행은 lock directory로 차단한다. stale lock은 실행 중인 backup과 partial/final/marker 상태 확인 없이 자동 제거하지 않는다.
 
@@ -76,7 +80,7 @@ command는 exact repository `compose.prod.yaml`, project/config/image label, Pos
 8. restored DB에 production API image를 연결해 Flyway/JPA validate/readiness를 통과하고 state가 변하지 않는지 확인한다.
 9. success/failure 뒤 source/target/failure container/network/volume과 unique image tag residue 0을 확인한다.
 
-missing/unsafe path, missing project/service, stopped/unhealthy DB, collision/lock, injected pg_dump failure, zero/truncated/corrupt archive, checksum/metadata mismatch와 restore target failure를 성공으로 처리하지 않는다. backup 성공 로그만으로 복구 가능성을 주장하지 않는다.
+missing/unsafe path, missing project/service, stopped/unhealthy DB, collision/lock, injected pg_dump/dump fsync failure, Flyway version change/post-check failed migration, zero/truncated/corrupt archive, checksum/metadata mismatch와 restore target failure를 성공으로 처리하지 않는다. backup 성공 로그만으로 복구 가능성을 주장하지 않는다.
 
 ### Production restore Gate
 

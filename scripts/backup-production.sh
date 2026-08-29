@@ -154,29 +154,38 @@ case "$postgres_server_version" in
   *) fail "PostgreSQL server가 18.6이 아닙니다." ;;
 esac
 
-failed_migration_count="$("${compose[@]}" exec -T postgres sh -ceu '
+read_flyway_state() {
+  "${compose[@]}" exec -T postgres sh -ceu '
   exec psql -X \
     --username "$POSTGRES_USER" \
     --dbname "$POSTGRES_DB" \
     --tuples-only \
     --no-align \
+    --field-separator "|" \
     --set ON_ERROR_STOP=1 \
-    --command "SELECT COUNT(*) FROM flyway_schema_history WHERE NOT success"
-')"
-[[ "$failed_migration_count" == "0" ]] \
-  || fail "실패한 Flyway migration이 있어 backup을 만들 수 없습니다."
+    --command "
+      SELECT
+        COUNT(*) FILTER (WHERE NOT success),
+        (SELECT version
+           FROM flyway_schema_history
+          WHERE success
+          ORDER BY installed_rank DESC
+          LIMIT 1)
+        FROM flyway_schema_history
+    "
+'
+}
 
-schema_version="$("${compose[@]}" exec -T postgres sh -ceu '
-  exec psql -X \
-    --username "$POSTGRES_USER" \
-    --dbname "$POSTGRES_DB" \
-    --tuples-only \
-    --no-align \
-    --set ON_ERROR_STOP=1 \
-    --command "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1"
-')"
-[[ "$schema_version" =~ ^[1-9][0-9]*([.][0-9]+)*$ ]] \
-  || fail "successful Flyway schema version을 확인할 수 없습니다."
+flyway_state_pattern='^([0-9]+)[|]([1-9][0-9]*([.][0-9]+)*)$'
+if ! pre_flyway_state="$(read_flyway_state)"; then
+  fail "backup 전 Flyway state를 확인할 수 없습니다."
+fi
+[[ "$pre_flyway_state" =~ $flyway_state_pattern ]] \
+  || fail "backup 전 Flyway state 형식이 잘못됐습니다."
+pre_failed_migration_count="${BASH_REMATCH[1]}"
+schema_version="${BASH_REMATCH[2]}"
+[[ "$pre_failed_migration_count" == "0" ]] \
+  || fail "실패한 Flyway migration이 있어 backup을 만들 수 없습니다."
 
 created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 stem="$(python3 "$ARTIFACT_HELPER" new-stem \
@@ -206,11 +215,28 @@ if ! "${compose[@]}" exec -T postgres sh -ceu '
 fi
 chmod 600 "$dump_path"
 
+python3 "$ARTIFACT_HELPER" fsync-dump \
+  --backup-dir "$backup_dir" \
+  --staging-dir "$staging_dir" \
+  --dump-filename "$dump_filename"
+
 if ! "${compose[@]}" exec -T postgres sh -ceu '
   exec pg_restore --list
 ' < "$dump_path" >/dev/null; then
   fail "pg_restore가 partial custom archive 목록을 읽지 못했습니다."
 fi
+
+if ! post_flyway_state="$(read_flyway_state)"; then
+  fail "backup 후 Flyway state를 확인할 수 없습니다."
+fi
+[[ "$post_flyway_state" =~ $flyway_state_pattern ]] \
+  || fail "backup 후 Flyway state 형식이 잘못됐습니다."
+post_failed_migration_count="${BASH_REMATCH[1]}"
+post_schema_version="${BASH_REMATCH[2]}"
+[[ "$post_failed_migration_count" == "0" ]] \
+  || fail "backup window 중 실패한 Flyway migration이 감지됐습니다."
+[[ "$post_schema_version" == "$schema_version" ]] \
+  || fail "backup window 중 Flyway schema version 변경이 감지됐습니다."
 
 python3 "$ARTIFACT_HELPER" write-sidecars \
   --backup-dir "$backup_dir" \

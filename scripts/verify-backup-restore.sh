@@ -44,9 +44,14 @@ env_file="$runtime_temp_dir/production.env"
 backup_dir="$runtime_temp_dir/backups"
 failure_backup_dir="$runtime_temp_dir/failure-backups"
 fault_bin_dir="$runtime_temp_dir/fault-bin"
+fault_python_dir="$runtime_temp_dir/fault-python"
 cleanup_complete=false
 
-mkdir -m 700 "$backup_dir" "$failure_backup_dir" "$fault_bin_dir"
+mkdir -m 700 \
+  "$backup_dir" \
+  "$failure_backup_dir" \
+  "$fault_bin_dir" \
+  "$fault_python_dir"
 {
   printf 'OUR_LEDGER_WEB_IMAGE=%s\n' "$unused_web_image"
   printf 'OUR_LEDGER_API_IMAGE=%s\n' "$api_image"
@@ -157,6 +162,17 @@ import pathlib
 import sys
 print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
 ' "$1"
+}
+
+assert_failed_backup_preserved_state() {
+  [[ "$(file_sha256 "$marker_path")" == "$marker_sha_before" ]] \
+    || fail "failed backup이 이전 last-success marker를 변경했습니다."
+  [[ "$(bundle_count)" == "$bundle_count_before" ]] \
+    || fail "failed backup이 final bundle 수를 변경했습니다."
+  if find "$backup_dir" -mindepth 1 -maxdepth 1 -name '*.partial' -print -quit \
+    | grep -q .; then
+    fail "failed backup 뒤 partial artifact가 남았습니다."
+  fi
 }
 
 compose_fingerprint() {
@@ -324,32 +340,89 @@ fault_docker="$fault_bin_dir/docker"
 {
   printf '%s\n' '#!/usr/bin/env bash'
   printf '%s\n' 'set -euo pipefail'
+  printf '%s\n' 'fault_mode="${OUR_LEDGER_FAULT_MODE:-}"'
   printf '%s\n' 'for argument in "$@"; do'
   printf '%s\n' '  case "$argument" in'
-  printf '%s\n' '    *"exec pg_dump"*"--format=custom"*) exit 73 ;;'
+  printf '%s\n' '    *"exec pg_dump"*"--format=custom"*)'
+  printf '%s\n' '      [[ "$fault_mode" == "pg-dump" ]] && exit 73'
+  printf '%s\n' '      ;;'
+  printf '%s\n' '    *"COUNT(*) FILTER (WHERE NOT success)"*"flyway_schema_history"*)'
+  printf '%s\n' '      case "$fault_mode" in'
+  printf '%s\n' '        schema-version-change|post-failed-migration)'
+  printf '%s\n' '          if [[ ! -e "$OUR_LEDGER_FAULT_STATE_FILE" ]]; then'
+  printf '%s\n' '            printf "%s\n" pre > "$OUR_LEDGER_FAULT_STATE_FILE"'
+  printf '%s\n' '            exec "$OUR_LEDGER_REAL_DOCKER" "$@"'
+  printf '%s\n' '          fi'
+  printf '%s\n' '          if [[ "$fault_mode" == "schema-version-change" ]]; then'
+  printf '%s\n' '            printf "%s\n" "0|9"'
+  printf '%s\n' '          else'
+  printf '%s\n' '            printf "%s\n" "1|8"'
+  printf '%s\n' '          fi'
+  printf '%s\n' '          exit 0'
+  printf '%s\n' '          ;;'
+  printf '%s\n' '      esac'
+  printf '%s\n' '      ;;'
   printf '%s\n' '  esac'
   printf '%s\n' 'done'
   printf '%s\n' 'exec "$OUR_LEDGER_REAL_DOCKER" "$@"'
 } > "$fault_docker"
 chmod 700 "$fault_docker"
 
+{
+  printf '%s\n' 'import os'
+  printf '%s\n' 'import sys'
+  printf '%s\n' 'if os.environ.get("OUR_LEDGER_FAULT_MODE") == "dump-fsync" and "fsync-dump" in sys.argv:'
+  printf '%s\n' '    def fail_fsync(_descriptor):'
+  printf '%s\n' '        raise OSError("synthetic dump fsync failure")'
+  printf '%s\n' '    os.fsync = fail_fsync'
+} > "$fault_python_dir/sitecustomize.py"
+chmod 600 "$fault_python_dir/sitecustomize.py"
+
 expect_failure "pg_dump command" \
   env \
     PATH="$fault_bin_dir:$PATH" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
+    OUR_LEDGER_FAULT_MODE=pg-dump \
     "$BACKUP_COMMAND" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
 
-[[ "$(file_sha256 "$marker_path")" == "$marker_sha_before" ]] \
-  || fail "failed backup이 이전 last-success marker를 변경했습니다."
-[[ "$(bundle_count)" == "$bundle_count_before" ]] \
-  || fail "failed backup이 final bundle 수를 변경했습니다."
-if find "$backup_dir" -mindepth 1 -maxdepth 1 -name '*.partial' -print -quit \
-  | grep -q .; then
-  fail "failed backup 뒤 partial artifact가 남았습니다."
-fi
+assert_failed_backup_preserved_state
+
+expect_failure "dump fsync" \
+  env \
+    PYTHONPATH="$fault_python_dir" \
+    OUR_LEDGER_FAULT_MODE=dump-fsync \
+    "$BACKUP_COMMAND" \
+      --project-name "$source_project" \
+      --env-file "$env_file" \
+      --backup-dir "$backup_dir"
+assert_failed_backup_preserved_state
+
+expect_failure "Flyway schema version overlap" \
+  env \
+    PATH="$fault_bin_dir:$PATH" \
+    OUR_LEDGER_REAL_DOCKER="$real_docker" \
+    OUR_LEDGER_FAULT_MODE=schema-version-change \
+    OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/schema-version-state" \
+    "$BACKUP_COMMAND" \
+      --project-name "$source_project" \
+      --env-file "$env_file" \
+      --backup-dir "$backup_dir"
+assert_failed_backup_preserved_state
+
+expect_failure "post-check failed Flyway migration" \
+  env \
+    PATH="$fault_bin_dir:$PATH" \
+    OUR_LEDGER_REAL_DOCKER="$real_docker" \
+    OUR_LEDGER_FAULT_MODE=post-failed-migration \
+    OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/post-failed-state" \
+    "$BACKUP_COMMAND" \
+      --project-name "$source_project" \
+      --env-file "$env_file" \
+      --backup-dir "$backup_dir"
+assert_failed_backup_preserved_state
 
 printf '\n[backup/restore 6/11] corrupt/checksum/metadata rejection\n'
 corruption_root="$runtime_temp_dir/corruption"

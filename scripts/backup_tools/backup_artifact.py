@@ -78,8 +78,9 @@ def _is_within(candidate: Path, parent: Path) -> bool:
     return candidate == parent or parent in candidate.parents
 
 
-def _require_owner_only(item: Path, label: str, *, directory: bool) -> os.stat_result:
-    info = item.stat()
+def _require_owner_only_info(
+    info: os.stat_result, label: str, *, directory: bool
+) -> os.stat_result:
     if directory:
         require(stat.S_ISDIR(info.st_mode), f"{label}는 directory여야 합니다.")
         require(info.st_mode & stat.S_IWUSR, f"{label}에 owner write 권한이 필요합니다.")
@@ -93,6 +94,10 @@ def _require_owner_only(item: Path, label: str, *, directory: bool) -> os.stat_r
         f"{label}는 group/other 권한이 없어야 합니다.",
     )
     return info
+
+
+def _require_owner_only(item: Path, label: str, *, directory: bool) -> os.stat_result:
+    return _require_owner_only_info(item.stat(), label, directory=directory)
 
 
 def _fsync_directory(directory: Path) -> None:
@@ -230,6 +235,77 @@ def _validate_staging_directory(backup_directory: Path, staging_directory: Path)
     _require_owner_only(staging_directory, "staging directory", directory=True)
 
 
+def _dump_stem_for_staging(staging_directory: Path, dump_filename: str) -> str:
+    require(bool(dump_filename), "dump filename이 비어 있습니다.")
+    require(not _has_control(dump_filename), "dump filename에 control 문자를 사용할 수 없습니다.")
+    require(
+        PurePath(dump_filename).parts == (dump_filename,),
+        "dump는 staging directory의 direct child여야 합니다.",
+    )
+    require(dump_filename.endswith(".dump"), "dump filename 확장자가 잘못됐습니다.")
+    stem = dump_filename.removesuffix(".dump")
+    parse_stem(stem)
+    require(
+        staging_directory.name == f".our-ledger_backup_{stem}.partial",
+        "staging directory와 expected dump filename이 다릅니다.",
+    )
+    return stem
+
+
+def fsync_dump_file(
+    backup_directory: Path,
+    staging_directory: Path,
+    dump_filename: str,
+) -> os.stat_result:
+    _validate_staging_directory(backup_directory, staging_directory)
+    _dump_stem_for_staging(staging_directory, dump_filename)
+
+    directory_descriptor = -1
+    dump_descriptor = -1
+    try:
+        directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        directory_flags |= getattr(os, "O_DIRECTORY", 0)
+        directory_descriptor = os.open(staging_directory, directory_flags)
+        directory_info = os.fstat(directory_descriptor)
+        _require_owner_only_info(
+            directory_info, "staging directory", directory=True
+        )
+
+        before_open = os.stat(
+            dump_filename,
+            dir_fd=directory_descriptor,
+            follow_symlinks=False,
+        )
+        _require_owner_only_info(before_open, "partial dump", directory=False)
+
+        dump_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        dump_flags |= getattr(os, "O_NOFOLLOW", 0)
+        dump_descriptor = os.open(
+            dump_filename,
+            dump_flags,
+            dir_fd=directory_descriptor,
+        )
+        after_open = os.fstat(dump_descriptor)
+        _require_owner_only_info(after_open, "partial dump", directory=False)
+        require(
+            (before_open.st_dev, before_open.st_ino)
+            == (after_open.st_dev, after_open.st_ino),
+            "partial dump가 fsync open 중 교체됐습니다.",
+        )
+        require(after_open.st_size > 0, "partial dump가 비어 있습니다.")
+        os.fsync(dump_descriptor)
+        return after_open
+    except ContractError:
+        raise
+    except OSError as error:
+        raise ContractError("partial dump file을 fsync할 수 없습니다.") from error
+    finally:
+        if dump_descriptor >= 0:
+            os.close(dump_descriptor)
+        if directory_descriptor >= 0:
+            os.close(directory_descriptor)
+
+
 def write_sidecars(
     backup_directory: Path,
     staging_directory: Path,
@@ -240,8 +316,7 @@ def write_sidecars(
     postgres_server_version: str,
 ) -> dict[str, Any]:
     _validate_staging_directory(backup_directory, staging_directory)
-    require(dump_filename.endswith(".dump"), "dump filename 확장자가 잘못됐습니다.")
-    stem = dump_filename.removesuffix(".dump")
+    stem = _dump_stem_for_staging(staging_directory, dump_filename)
     matched = parse_stem(stem)
     parsed_created_at = parse_created_at(created_at)
     schema_version = validate_schema_version(schema_version)
@@ -569,6 +644,11 @@ def _parser() -> argparse.ArgumentParser:
     new_stem.add_argument("--created-at", required=True)
     new_stem.add_argument("--schema-version", required=True)
 
+    fsync_dump = subparsers.add_parser("fsync-dump")
+    fsync_dump.add_argument("--backup-dir", required=True)
+    fsync_dump.add_argument("--staging-dir", required=True)
+    fsync_dump.add_argument("--dump-filename", required=True)
+
     write = subparsers.add_parser("write-sidecars")
     write.add_argument("--backup-dir", required=True)
     write.add_argument("--staging-dir", required=True)
@@ -609,6 +689,12 @@ def main() -> None:
         print(validate_backup_directory(args.repo_root, args.path))
     elif args.command == "new-stem":
         print(create_stem(args.created_at, args.schema_version))
+    elif args.command == "fsync-dump":
+        fsync_dump_file(
+            Path(args.backup_dir).resolve(),
+            Path(args.staging_dir).resolve(),
+            args.dump_filename,
+        )
     elif args.command == "write-sidecars":
         write_sidecars(
             Path(args.backup_dir).resolve(),

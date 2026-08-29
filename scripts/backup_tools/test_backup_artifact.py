@@ -9,8 +9,12 @@ import shutil
 import stat
 import tempfile
 import unittest
+from unittest import mock
 
-import backup_artifact as contract
+try:
+    from . import backup_artifact as contract
+except ImportError:
+    import backup_artifact as contract
 
 
 CREATED_AT = "2026-08-29T03:15:00Z"
@@ -35,6 +39,21 @@ class BackupArtifactTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.root)
 
+    def stage_dump(
+        self,
+        *,
+        dump_content: bytes = b"PGDMPsynthetic-custom-archive",
+        created_at: str = CREATED_AT,
+        schema_version: str = SCHEMA_VERSION,
+    ) -> tuple[Path, str, Path]:
+        stem = contract.create_stem(created_at, schema_version)
+        staging = self.backup_directory / f".our-ledger_backup_{stem}.partial"
+        staging.mkdir(mode=0o700)
+        dump = staging / f"{stem}.dump"
+        dump.write_bytes(dump_content)
+        dump.chmod(0o600)
+        return staging, stem, dump
+
     def stage_bundle(
         self,
         *,
@@ -42,12 +61,16 @@ class BackupArtifactTest(unittest.TestCase):
         created_at: str = CREATED_AT,
         schema_version: str = SCHEMA_VERSION,
     ) -> tuple[Path, str]:
-        stem = contract.create_stem(created_at, schema_version)
-        staging = self.backup_directory / f".our-ledger_backup_{stem}.partial"
-        staging.mkdir(mode=0o700)
-        dump = staging / f"{stem}.dump"
-        dump.write_bytes(dump_content)
-        dump.chmod(0o600)
+        staging, stem, dump = self.stage_dump(
+            dump_content=dump_content,
+            created_at=created_at,
+            schema_version=schema_version,
+        )
+        contract.fsync_dump_file(
+            self.backup_directory,
+            staging,
+            dump.name,
+        )
         contract.write_sidecars(
             self.backup_directory,
             staging,
@@ -161,6 +184,99 @@ class BackupArtifactTest(unittest.TestCase):
         self.assertTrue(inventory["lastSuccessValid"])
         self.assertEqual(inventory["valid"][0]["bundleDirectory"], bundle.name)
         self.assertTrue(inventory["valid"][0]["isLatest"])
+
+    def test_should_fsync_valid_dump_before_bundle_commit(self) -> None:
+        staging, stem, dump = self.stage_dump()
+        real_fsync = os.fsync
+        fsync_descriptors: list[int] = []
+
+        def tracked_fsync(descriptor: int) -> None:
+            fsync_descriptors.append(descriptor)
+            real_fsync(descriptor)
+
+        with mock.patch.object(contract.os, "fsync", side_effect=tracked_fsync):
+            info = contract.fsync_dump_file(
+                self.backup_directory,
+                staging,
+                dump.name,
+            )
+
+        self.assertEqual(len(fsync_descriptors), 1)
+        self.assertEqual(
+            (info.st_dev, info.st_ino),
+            (dump.stat().st_dev, dump.stat().st_ino),
+        )
+        contract.write_sidecars(
+            self.backup_directory,
+            staging,
+            dump.name,
+            CREATED_AT,
+            SCHEMA_VERSION,
+            PG_DUMP_VERSION,
+            SERVER_VERSION,
+        )
+        final_dump = contract.commit_bundle(
+            self.backup_directory,
+            staging,
+            f"{stem}.backup",
+        )
+        self.assertTrue(final_dump.is_file())
+
+    def test_should_fail_closed_when_dump_fsync_fails(self) -> None:
+        self.commit_valid_bundle()
+        marker_path = self.backup_directory / "last-success.json"
+        previous_marker = marker_path.read_bytes()
+        previous_bundles = sorted(self.backup_directory.glob("*.backup"))
+        staging, _, dump = self.stage_dump(created_at="2026-08-29T03:18:00Z")
+
+        with mock.patch.object(
+            contract.os,
+            "fsync",
+            side_effect=OSError("synthetic fsync failure"),
+        ):
+            with self.assertRaises(contract.ContractError):
+                contract.fsync_dump_file(
+                    self.backup_directory,
+                    staging,
+                    dump.name,
+                )
+
+        self.assertEqual(
+            sorted(self.backup_directory.glob("*.backup")), previous_bundles
+        )
+        self.assertEqual(marker_path.read_bytes(), previous_marker)
+        self.assertEqual(list(staging.glob("*.json")), [])
+        self.assertEqual(list(staging.glob("*.sha256")), [])
+        contract.cleanup_staging(self.backup_directory, staging)
+        self.assertFalse(staging.exists())
+
+    def test_should_reject_symlink_and_non_regular_dump_before_fsync(self) -> None:
+        symlink_staging, _, symlink_dump = self.stage_dump(
+            created_at="2026-08-29T03:19:00Z"
+        )
+        symlink_target = self.root / "outside.dump"
+        symlink_target.write_bytes(b"PGDMPoutside")
+        symlink_target.chmod(0o600)
+        symlink_dump.unlink()
+        symlink_dump.symlink_to(symlink_target)
+        with self.assertRaises(contract.ContractError):
+            contract.fsync_dump_file(
+                self.backup_directory,
+                symlink_staging,
+                symlink_dump.name,
+            )
+
+        directory_staging, _, directory_dump = self.stage_dump(
+            created_at="2026-08-29T03:20:00Z"
+        )
+        directory_dump.unlink()
+        directory_dump.mkdir(mode=0o700)
+        with self.assertRaises(contract.ContractError):
+            contract.fsync_dump_file(
+                self.backup_directory,
+                directory_staging,
+                directory_dump.name,
+            )
 
     def test_should_preserve_previous_marker_and_bundle_on_collision(self) -> None:
         previous_bundle, _ = self.commit_valid_bundle()
