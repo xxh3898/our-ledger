@@ -3,9 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yaml"
+FIXTURE_SQL="$ROOT_DIR/scripts/backup_tools/fixture.sql"
+STATE_SQL="$ROOT_DIR/scripts/backup_tools/state-fingerprint.sql"
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose를 사용할 수 없습니다." >&2
+if ! command -v docker >/dev/null 2>&1 \
+  || ! docker compose version >/dev/null 2>&1 \
+  || ! command -v python3 >/dev/null 2>&1; then
+  echo "Docker Compose와 Python 3을 사용할 수 없습니다." >&2
   exit 1
 fi
 
@@ -66,6 +70,107 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
+run_bounded() {
+  local log_path="$1"
+  shift
+  python3 - "$log_path" "$@" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+log_path = Path(sys.argv[1])
+try:
+    with log_path.open("wb") as output:
+        completed = subprocess.run(
+            sys.argv[2:],
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            timeout=240,
+            check=False,
+        )
+except subprocess.TimeoutExpired:
+    raise SystemExit(124)
+raise SystemExit(completed.returncode)
+PY
+}
+
+assert_log_safe() {
+  local log_path="$1"
+  local forbidden
+  for forbidden in \
+    "$runtime_password" \
+    "$CLOUDFLARE_ACCESS_AUDIENCE" \
+    "candidate-migration@example.test"; do
+    if grep -Fq -- "$forbidden" "$log_path"; then
+      echo "migration 검증 log에 credential/PII sentinel이 노출됐습니다." >&2
+      exit 1
+    fi
+  done
+}
+
+expect_bounded_failure() {
+  local label="$1"
+  local log_path="$2"
+  local failure_status
+  shift 2
+  if run_bounded "$log_path" "$@"; then
+    echo "$label failure path가 성공으로 처리됐습니다." >&2
+    exit 1
+  else
+    failure_status=$?
+  fi
+  if [[ "$failure_status" == "124" ]]; then
+    echo "$label failure path가 deterministic nonzero 대신 timeout됐습니다." >&2
+    exit 1
+  fi
+  assert_log_safe "$log_path"
+}
+
+run_candidate_migration() {
+  local log_path="$1"
+  shift
+  run_bounded "$log_path" \
+    "${compose[@]}" run --rm --no-deps "$@" api-migration
+  assert_log_safe "$log_path"
+  if [[ "$(grep -Fxc 'migration-validation: success' "$log_path")" != "1" ]]; then
+    echo "candidate migration success marker가 정확히 한 번 기록되지 않았습니다." >&2
+    exit 1
+  fi
+  if grep -Fq 'Tomcat started' "$log_path"; then
+    echo "candidate migration process가 HTTP server를 시작했습니다." >&2
+    exit 1
+  fi
+  if grep -Fq 'jdbc:postgresql://' "$log_path"; then
+    echo "candidate migration success output에 connection URL이 노출됐습니다." >&2
+    exit 1
+  fi
+}
+
+postgres_query() {
+  local database_name="$1"
+  local sql="$2"
+  "${compose[@]}" exec -T postgres \
+    psql --username "$POSTGRES_USER" --dbname "$database_name" \
+      --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$sql"
+}
+
+create_database() {
+  local database_name="$1"
+  "${compose[@]}" exec -T postgres \
+    createdb --username "$POSTGRES_USER" "$database_name"
+}
+
+fixture_fingerprint() {
+  "${compose[@]}" exec -T postgres sh -ceu '
+    exec psql -X \
+      --username "$POSTGRES_USER" \
+      --dbname "$POSTGRES_DB" \
+      --tuples-only \
+      --no-align \
+      --set ON_ERROR_STOP=1
+  ' < "$STATE_SQL"
+}
+
 required_environment=(
   OUR_LEDGER_WEB_IMAGE
   OUR_LEDGER_API_IMAGE
@@ -83,7 +188,7 @@ for variable_name in "${required_environment[@]}"; do
   without_required_environment+=("-u" "$variable_name")
 done
 
-printf '\n[production 1/9] required environment fail-closed\n'
+printf '\n[production 1/13] required environment fail-closed\n'
 if "${without_required_environment[@]}" \
   docker compose --project-name "$project_name" --env-file /dev/null -f "$COMPOSE_FILE" \
   config --quiet >/dev/null 2>&1; then
@@ -122,14 +227,14 @@ export CLOUDFLARE_ACCESS_JWK_SET_URI=https://runtime.cloudflareaccess.example/cd
 export CLOUDFLARE_ACCESS_AUDIENCE=runtime-audience
 export OUR_LEDGER_EXPECTED_COMPOSE_PROJECT="$project_name"
 
-"${compose[@]}" config --format json \
+"${compose[@]}" --profile migration config --format json \
   | python3 "$ROOT_DIR/scripts/check-production-compose.py"
 
-printf '\n[production 2/9] clean immutable image build\n'
+printf '\n[production 2/13] clean immutable image build\n'
 docker build --progress plain --no-cache --pull --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
 docker build --progress plain --no-cache --pull --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
 
-printf '\n[production 3/9] runtime image contents and Nginx config\n'
+printf '\n[production 3/13] runtime image contents and Nginx config\n'
 docker create --name "$api_image_probe" "$api_image" >/dev/null
 docker export "$api_image_probe" | tar -tf - > "$runtime_temp_dir/api-image-contents.txt"
 docker rm "$api_image_probe" >/dev/null
@@ -217,7 +322,153 @@ if [[ "$api_history" == *"$runtime_password"* || "$web_history" == *"$runtime_pa
   exit 1
 fi
 
-printf '\n[production 4/9] disposable production stack startup\n'
+printf '\n[production 4/13] normal production startup cannot mutate a clean schema\n'
+"${compose[@]}" up --detach --wait --wait-timeout 120 postgres
+
+expect_bounded_failure \
+  "normal production clean-schema startup" \
+  "$runtime_temp_dir/normal-clean-schema.log" \
+  "${compose[@]}" run --rm --no-deps api
+expect_bounded_failure \
+  "normal production Flyway override" \
+  "$runtime_temp_dir/normal-flyway-override.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env SPRING_FLYWAY_ENABLED=true \
+    api
+
+clean_public_table_count="$(postgres_query "$POSTGRES_DB" \
+  "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public'")"
+if [[ "$clean_public_table_count" != "0" ]]; then
+  echo "normal production startup이 clean schema를 변경했습니다." >&2
+  exit 1
+fi
+
+printf '\n[production 5/13] one-shot candidate migration and JPA validation\n'
+run_candidate_migration "$runtime_temp_dir/migration-clean.log"
+
+flyway_versions="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success")"
+if [[ "$flyway_versions" != "1,2,3,4,5,6,7,8" ]]; then
+  echo "candidate migration history가 V1-V8 clean contract와 다릅니다: $flyway_versions" >&2
+  exit 1
+fi
+empty_domain_counts="$(postgres_query "$POSTGRES_DB" \
+  "SELECT (SELECT COUNT(*) FROM users) || ':' || (SELECT COUNT(*) FROM households)")"
+if [[ "$empty_domain_counts" != "0:0" ]]; then
+  echo "candidate migration이 bootstrap data를 생성했습니다." >&2
+  exit 1
+fi
+if [[ -n "$(docker ps --all --quiet \
+  --filter "label=com.docker.compose.project=$project_name" \
+  --filter "label=com.docker.compose.service=api-migration")" ]]; then
+  echo "one-shot candidate migration container가 남았습니다." >&2
+  exit 1
+fi
+
+printf '\n[production 6/13] migration failure matrix\n'
+corrupt_database=our_ledger_runtime_corrupt
+damaged_database=our_ledger_runtime_damaged
+create_database "$corrupt_database"
+create_database "$damaged_database"
+
+run_candidate_migration \
+  "$runtime_temp_dir/migration-corrupt-seed.log" \
+  --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$corrupt_database"
+postgres_query "$corrupt_database" \
+  "UPDATE flyway_schema_history SET success = false WHERE version = '8'" >/dev/null
+expect_bounded_failure \
+  "failed Flyway history" \
+  "$runtime_temp_dir/migration-corrupt.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$corrupt_database" \
+    api-migration
+
+run_candidate_migration \
+  "$runtime_temp_dir/migration-damaged-seed.log" \
+  --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$damaged_database"
+postgres_query "$damaged_database" "ALTER TABLE users DROP COLUMN status" >/dev/null
+expect_bounded_failure \
+  "JPA schema validation" \
+  "$runtime_temp_dir/migration-damaged.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$damaged_database" \
+    api-migration
+
+expect_bounded_failure \
+  "unreachable database" \
+  "$runtime_temp_dir/migration-unreachable.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:1/$POSTGRES_DB" \
+    api-migration
+
+schema_authority_before="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
+expect_bounded_failure \
+  "migration without production profile" \
+  "$runtime_temp_dir/migration-profile.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env SPRING_PROFILES_ACTIVE=migration \
+    api-migration
+expect_bounded_failure \
+  "migration with reversed profile authority" \
+  "$runtime_temp_dir/migration-profile-order.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env SPRING_PROFILES_ACTIVE=migration,production \
+    api-migration
+expect_bounded_failure \
+  "migration with bootstrap enabled" \
+  "$runtime_temp_dir/migration-bootstrap.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env OUR_LEDGER_BOOTSTRAP_ENABLED=true \
+    api-migration
+expect_bounded_failure \
+  "migration with recurring scheduler enabled" \
+  "$runtime_temp_dir/migration-scheduler.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env OUR_LEDGER_RECURRING_SCHEDULER_ENABLED=true \
+    api-migration
+expect_bounded_failure \
+  "migration with Flyway disabled" \
+  "$runtime_temp_dir/migration-flyway-disabled.log" \
+  "${compose[@]}" run --rm --no-deps \
+    --env SPRING_FLYWAY_ENABLED=false \
+    api-migration
+schema_authority_after="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
+if [[ "$schema_authority_after" != "$schema_authority_before" ]]; then
+  echo "invalid migration invocation이 schema authority를 변경했습니다." >&2
+  exit 1
+fi
+
+printf '\n[production 7/13] idempotent rerun without bootstrap or scheduling\n'
+"${compose[@]}" exec -T postgres sh -ceu '
+  exec psql -X \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --set ON_ERROR_STOP=1
+' < "$FIXTURE_SQL"
+postgres_query "$POSTGRES_DB" \
+  "UPDATE recurring_transactions
+      SET active = true,
+          next_recurrence_date = DATE '2026-08-01',
+          scheduled_local_time = TIME '00:00:00'
+    WHERE id = 7001" >/dev/null
+fixture_before="$(fixture_fingerprint)"
+run_candidate_migration "$runtime_temp_dir/migration-idempotent.log"
+fixture_after="$(fixture_fingerprint)"
+if [[ "$fixture_after" != "$fixture_before" ]]; then
+  echo "candidate migration rerun이 application data 또는 schedule state를 변경했습니다." >&2
+  exit 1
+fi
+postgres_query "$POSTGRES_DB" \
+  "UPDATE recurring_transactions
+      SET active = false,
+          next_recurrence_date = NULL
+    WHERE id = 7001" >/dev/null
+
+printf '\n[production 8/13] normal production stack startup after migration\n'
+normal_schema_before="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
 "${compose[@]}" up --detach --wait --wait-timeout 240
 
 web_id="$("${compose[@]}" ps --quiet web)"
@@ -279,7 +530,7 @@ assert_header_contains() {
   fi
 }
 
-printf '\n[production 5/9] static, SPA and cache policy\n'
+printf '\n[production 9/13] static, SPA and cache policy\n'
 request_path root /
 assert_status 200 "root"
 if [[ "$(<"$runtime_temp_dir/root.body")" != *'<div id="root"></div>'* ]]; then
@@ -306,7 +557,7 @@ if [[ "$(<"$runtime_temp_dir/spa.body")" != *'<div id="root"></div>'* ]]; then
 fi
 assert_header_contains spa Cache-Control no-store
 
-printf '\n[production 6/9] same-origin API and authentication boundary\n'
+printf '\n[production 10/13] same-origin API and authentication boundary\n'
 request_path api_exact /api
 assert_status 401 "exact /api"
 assert_header_contains api_exact Content-Type application/json
@@ -333,7 +584,7 @@ if [[ "$(<"$runtime_temp_dir/forged_identity.body")" != *'AUTHENTICATION_REQUIRE
   exit 1
 fi
 
-printf '\n[production 7/9] public and internal health boundary\n'
+printf '\n[production 11/13] public and internal health boundary\n'
 request_path actuator /actuator/health
 assert_status 404 "public actuator"
 if [[ "$(<"$runtime_temp_dir/actuator.body")" == *'"status"'* ]]; then
@@ -379,12 +630,11 @@ assert "recurringScheduler" in payload["components"]
   exit 1
 fi
 
-printf '\n[production 8/9] Flyway V1-V8 and restart persistence\n'
-flyway_versions="$("${compose[@]}" exec -T postgres \
-  psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --tuples-only --no-align \
-  --command "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success")"
-if [[ "$flyway_versions" != "1,2,3,4,5,6,7,8" ]]; then
-  echo "Flyway production history가 V1-V8 clean contract와 다릅니다: $flyway_versions" >&2
+printf '\n[production 12/13] normal startup and restart schema immutability\n'
+normal_schema_after_start="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
+if [[ "$normal_schema_after_start" != "$normal_schema_before" ]]; then
+  echo "normal production startup이 Flyway history를 변경했습니다." >&2
   exit 1
 fi
 
@@ -401,15 +651,14 @@ if [[ "${api_health:-}" != "healthy" ]]; then
   exit 1
 fi
 
-flyway_versions_after_restart="$("${compose[@]}" exec -T postgres \
-  psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --tuples-only --no-align \
-  --command "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success")"
-if [[ "$flyway_versions_after_restart" != "$flyway_versions" ]]; then
+normal_schema_after_restart="$(postgres_query "$POSTGRES_DB" \
+  "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
+if [[ "$normal_schema_after_restart" != "$normal_schema_before" ]]; then
   echo "API restart 뒤 Flyway history가 변경됐습니다." >&2
   exit 1
 fi
 
-printf '\n[production 9/9] graceful stop\n'
+printf '\n[production 13/13] graceful stop\n'
 "${compose[@]}" stop --timeout 45 api
 api_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$api_id")"
 if [[ "$api_exit_code" != "0" && "$api_exit_code" != "143" ]]; then

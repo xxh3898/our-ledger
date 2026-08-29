@@ -73,6 +73,38 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 45s
 
+  api-migration:
+    profiles:
+      - migration
+    image: ${OUR_LEDGER_API_IMAGE:?set OUR_LEDGER_API_IMAGE to an exact immutable image reference}
+    cpus: 1.50
+    mem_limit: 1g
+    pids_limit: 256
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SPRING_PROFILES_ACTIVE: production,migration
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?set POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      OUR_LEDGER_BOOTSTRAP_ENABLED: "false"
+      OUR_LEDGER_RECURRING_SCHEDULER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    restart: "no"
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+
   postgres:
     image: postgres:18.6-alpine3.23@sha256:697c180dbf244d3ce4a8f4cbc0156cde840af055c1bf8b76aebe422a4822086f
     cpus: 1.00

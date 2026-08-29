@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.6
-last_updated: 2026-08-29
+version: 0.7
+last_updated: 2026-08-30
 related:
   - 06-security/privacy-model.md
   - 08-operations/backup-restore.md
@@ -199,7 +199,7 @@ B2 source는 threshold, evaluator, state format, HomeOps reporter 경계와 Laun
 
 ## 검증
 
-`scripts/verify-observability.sh`는 actual production resource 없이 exact-HEAD API/Web image, 고유 Compose project, 합성 DB credential과 owner-only backup artifact를 사용한다. canonical snapshot, recurring poll/occurrence, isolated rule failure, API unavailable, process restart reset, public actuator 404, HttpFetch non-200/network failure, privacy/read-only와 residue 0을 검증한다.
+`scripts/verify-observability.sh`는 actual production resource 없이 exact-HEAD API/Web image, 고유 Compose project, 합성 DB credential과 owner-only backup artifact를 사용한다. 동일 candidate API image의 migration one-shot이 exit 0으로 끝난 뒤 normal API를 시작하고 canonical snapshot, recurring poll/occurrence, isolated rule failure, API unavailable, process restart reset, public actuator 404, HttpFetch non-200/network failure, privacy/read-only와 residue 0을 검증한다.
 
 `scripts/verify-monitor-policy.sh`는 actual production resource 없이 pure threshold boundary, 독립 streak/recovery, same-poll idempotency, state/backup/reporter path disjoint와 mode/atomic update/corruption/lock, synthetic reporter subprocess, `DISK_LOW` episode와 pending retry, unsupported signal non-delivery와 두 plist contract를 검증한다.
 

@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C의 immutable production origin, backup/restore, operational status/monitor source와 Slice 10D-1의 immutable Release/Deploy source harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow와 secret-free runtime-config artifact까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini deploy/status/backup/restore/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness와 Slice 10D-2A candidate migration gate를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow와 secret-free runtime-config artifact까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini deploy/status/backup/migration/restore/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -17,7 +17,7 @@ infra/
    └─ nginx.conf
 ```
 
-repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
+repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. normal `api`와 profile-gated `api-migration`은 같은 `${OUR_LEDGER_API_IMAGE}`를 사용하며 production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
 repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. restore, policy와 release 검증 진입점은 `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
 
@@ -51,7 +51,7 @@ deploy-our-ledger-v1 <sha> keep <actor>
 deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
 ```
 
-GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. 이 저장소에는 해당 intent를 실행하는 Mac mini wrapper가 없으며 actual credential도 구성하지 않았다. 따라서 10D-1에서는 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. restricted wrapper, operation lock, predeploy backup/migration/cutover/readiness/rollback과 host 설치는 10D-2, public route/secret/User/schedule과 kill switch 활성화는 10D-3의 별도 승인 대상이다.
+GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. 이 저장소에는 해당 intent를 실행하는 Mac mini wrapper가 없으며 actual credential도 구성하지 않았다. 따라서 10D-1에서는 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. restricted wrapper, operation lock, predeploy backup/migration/cutover/readiness/rollback과 host 설치는 10D-2B, public route/secret/User/schedule과 kill switch 활성화는 10D-3의 별도 승인 대상이다.
 
 local source 검증은 다음 command다.
 
@@ -59,7 +59,7 @@ local source 검증은 다음 command다.
 ./scripts/verify-release-transport.sh
 ```
 
-이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 10D-2 설치 계약이다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
+이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 10D-2B 설치 계약이다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
 
 ## 환경변수
 
@@ -79,7 +79,7 @@ local source 검증은 다음 command다.
 | `OUR_LEDGER_RECURRING_INITIAL_DELAY_MS` | 아니오 | scheduler process 시작 뒤 첫 poll 지연, 기본 `0` |
 | `OUR_LEDGER_RECURRING_POLL_DELAY_MS` | 아니오 | scheduler fixed delay, 기본 `60000` |
 
-필수 변수가 없거나 빈 문자열이면 Compose interpolation 또는 application startup이 fail-closed한다. `OUR_LEDGER_BOOTSTRAP_ENABLED=false`, `OUR_LEDGER_RECURRING_SCHEDULER_ENABLED=true`, `SPRING_PROFILES_ACTIVE=production`은 Compose에서 고정한다. local identity 환경변수는 production service에 전달하지 않는다.
+필수 변수가 없거나 빈 문자열이면 Compose interpolation 또는 application startup이 fail-closed한다. normal `api`는 `OUR_LEDGER_BOOTSTRAP_ENABLED=false`, `OUR_LEDGER_RECURRING_SCHEDULER_ENABLED=true`, `SPRING_PROFILES_ACTIVE=production`과 Flyway disabled/JPA validate를 고정한다. `api-migration`은 `production,migration`, bootstrap/scheduler false, Flyway enabled/JPA validate/Web NONE을 고정하며 Cloudflare/local identity 값을 받지 않는다.
 
 ## Render와 실행 명령
 
@@ -98,6 +98,18 @@ docker compose \
   --file compose.prod.yaml \
   up --detach --wait
 ```
+
+normal `up`은 schema를 변경하지 않는다. 후속 10D-2B transaction은 current writer quiesce와 verified backup 뒤 동일 exact candidate API image로 다음 one-shot을 먼저 실행하고, exit 0일 때만 위 normal `up`으로 cutover해야 한다. 이 command shape는 source 계약이며 현재 production 실행 승인이 아니다.
+
+```bash
+docker compose \
+  --project-name our-ledger-production \
+  --env-file .env.production \
+  --file compose.prod.yaml \
+  run --rm --no-deps api-migration
+```
+
+one-shot은 host port와 장기 restart가 없고 application/database network에서 healthy existing PostgreSQL을 사용한다. Flyway/JPA 성공 뒤 `migration-validation: success`를 한 번 기록하고 exit 0, DB/history/schema/profile 설정이 잘못되면 nonzero다. 별도 migration image, host SQL checkout, mutable tag와 `migration` 단독 profile은 허용하지 않는다.
 
 `web`만 `127.0.0.1:${OUR_LEDGER_ORIGIN_PORT}`에 publish한다. API와 PostgreSQL은 host port가 없고 PostgreSQL은 internal database network에만 연결된다. `web`/`api`는 non-root, read-only root filesystem, `cap_drop: ALL`, `no-new-privileges`, tmpfs, resource/pid limit와 graceful stop을 사용한다. PostgreSQL은 official entrypoint의 volume ownership 초기화를 보존하면서 host port·bind mount를 금지하고 project-scoped volume을 사용한다.
 
@@ -119,7 +131,7 @@ docker compose \
   logs --tail=200 web api postgres
 ```
 
-검사 시 secret/JWT/cookie를 출력하지 않는다. 외부 route가 연결되기 전에는 loopback origin, Nginx `/healthz`, 내부 API readiness, PostgreSQL health, Flyway history를 확인한다. `/actuator/**`는 Nginx public origin에서 404이며 `/healthz`는 database나 API 상태를 노출하지 않는 Nginx 자체 응답이다.
+검사 시 secret/JWT/cookie를 출력하지 않는다. 외부 route가 연결되기 전에는 candidate migration exit, loopback origin, Nginx `/healthz`, 내부 API readiness, PostgreSQL health와 Flyway history를 확인한다. `/actuator/**`는 Nginx public origin에서 404이며 `/healthz`는 database나 API 상태를 노출하지 않는 Nginx 자체 응답이다.
 
 ## Read-only production status
 
@@ -216,7 +228,7 @@ docker compose \
 ./scripts/verify-production-runtime.sh
 ```
 
-smoke는 고유 Compose project, Docker가 할당한 loopback port, 합성 DB/Cloudflare 값, disposable volume을 사용한다. clean image build, config fail-closed, static/SPA/cache, API 401, forged local identity 401, actuator 차단, hardening, Flyway V1→V8, restart, graceful stop을 검사한다. `trap`은 성공·실패 시 해당 project의 container/network/volume과 검증 image tag만 제거하고 residue가 있으면 실패한다. 실제 production resource와 `/Users/homeserver/Server`는 참조하지 않는다.
+smoke는 고유 Compose project, Docker가 할당한 loopback port, 합성 DB/Cloudflare 값, disposable volume을 사용한다. clean image build, config fail-closed, unmigrated normal API의 schema mutation 없는 failure, same-image V1→V8/JPA one-shot, idempotent rerun, Flyway/JPA/DB/profile failure, HTTP/bootstrap/scheduler 부재, static/SPA/cache, API 401, forged local identity 401, actuator 차단, hardening, normal restart와 graceful stop을 검사한다. `trap`은 성공·실패 시 해당 project의 container/network/volume과 검증 image tag만 제거하고 residue가 있으면 실패한다. 실제 production resource와 `/Users/homeserver/Server`는 참조하지 않는다.
 
 Backup/Restore drill은 별도 entrypoint다.
 
@@ -224,7 +236,7 @@ Backup/Restore drill은 별도 entrypoint다.
 ./scripts/verify-backup-restore.sh
 ```
 
-이 drill은 exact-HEAD API image, 합성 non-empty fixture, 고유 source/target/failure project와 각자 다른 disposable PostgreSQL volume을 사용한다. 실제 one-shot command로 dump를 만든 뒤 empty target에 fail-fast restore하고 Flyway/data/financial state/constraint/JPA/readiness를 비교한다. dump는 owner-only temp directory에서만 사용하고 GitHub artifact로 업로드하지 않으며 성공·실패 후 exact resource residue 0을 요구한다.
+이 drill은 exact-HEAD API image, 합성 non-empty fixture, 고유 source/target/failure project와 각자 다른 disposable PostgreSQL volume을 사용한다. source에 candidate migration one-shot을 적용하고 실제 backup command로 dump를 만든 뒤 empty target에 fail-fast restore한다. restored V8에 같은 migration mode를 idempotent하게 재실행한 뒤 normal API의 Flyway-disabled JPA/readiness와 data/financial state/constraint 불변을 비교한다. dump는 owner-only temp directory에서만 사용하고 GitHub artifact로 업로드하지 않으며 성공·실패 후 exact resource residue 0을 요구한다.
 
 production secret, tunnel credential, DB dump와 backup 파일은 Git에 커밋하지 않는다.
 

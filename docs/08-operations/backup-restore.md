@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.7
-last_updated: 2026-08-29
+version: 0.8
+last_updated: 2026-08-30
 related:
   - 03-data/data-retention.md
   - 07-quality/acceptance-criteria.md
@@ -11,7 +11,7 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반할 수 있게 하지만 host 설치, backup 실행, schedule 또는 retention 삭제를 활성화하지 않는다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. host 설치, backup/migration 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
 
 실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
@@ -85,7 +85,7 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 
 ## Future schedule과 offsite
 
-`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. 10D-1은 plist를 설치하거나 실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 dry run은 10D-2, LaunchAgent load와 scheduled backup 실행은 10D-3의 별도 운영 승인이다.
+`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. 10D-1은 plist를 설치하거나 실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 dry run은 10D-2B, LaunchAgent load와 scheduled backup 실행은 10D-3의 별도 운영 승인이다.
 
 future offsite는 다음 순서를 따른다.
 
@@ -107,13 +107,13 @@ raw PostgreSQL dump를 iCloud에 직접 복사하지 않는다. private age iden
 `./scripts/verify-backup-restore.sh`는 실제 production resource 없이 다음을 검증한다.
 
 1. exact-HEAD production API image를 build한다.
-2. 고유 source Compose project/volume의 PostgreSQL에 API Flyway V1→V8을 적용한다.
+2. 고유 source Compose project/volume의 PostgreSQL에 동일 candidate API image one-shot으로 Flyway V1→V8과 JPA validate를 적용한 뒤 normal API를 시작한다.
 3. 2 User/1 Household/2 Member, ASSET/SAVINGS/CREDIT_CARD, Category, INCOME/EXPENSE/TRANSFER/REFUND, Budget/Recurring/Goal synthetic fixture를 넣는다.
 4. one-shot command로 실제 custom backup bundle을 만든다.
 5. source와 다른 고유 target project/network/volume의 empty PostgreSQL에 `pg_restore --exit-on-error --single-transaction --no-owner --no-acl`로 복구한다.
 6. Flyway versions, core table row count, Transaction/Entry/Refund lineage, Account balance와 total asset/liability/net worth를 source fingerprint와 비교한다.
 7. composite Household FK와 unique constraint가 계속 enforced되는지 확인한다.
-8. restored DB에 production API image를 연결해 Flyway/JPA validate/readiness를 통과하고 state가 변하지 않는지 확인한다.
+8. restored V8 DB에 동일 candidate migration mode를 재실행해 idempotent exit 0과 state 불변을 확인하고, normal production API의 Flyway-disabled JPA validate/readiness를 통과한다.
 9. success/failure 뒤 source/target/failure container/network/volume과 unique image tag residue 0을 확인한다.
 
 missing/unsafe path, missing project/service, stopped/unhealthy DB, collision/lock, injected pg_dump/dump fsync failure, Flyway version change/post-check failed migration, zero/truncated/corrupt archive, checksum/metadata mismatch와 restore target failure를 성공으로 처리하지 않는다. backup 성공 로그만으로 복구 가능성을 주장하지 않는다.
@@ -142,4 +142,4 @@ production DB를 drop/recreate하거나 `docker compose down --volumes`하는 co
 - CSV는 지정 기간의 미삭제 Transaction과 최소 reference/provenance만 포함하며 schema, Flyway history, 논리삭제 row, 운영 설정을 복구하지 못한다.
 - CSV 성공은 `pg_dump`, 외부 보관, retention, restore drill 성공을 의미하지 않는다.
 - 서버는 CSV history나 temp file을 backup처럼 보관하지 않는다.
-- 10C-2A source/drill과 10D-1 immutable transport source는 구현됐지만 production backup/restore 실행과 보관·외부복제 활성화는 10D-2/10D-3의 별도 운영 Gate다.
+- 10C-2A source/drill, 10D-1 immutable transport와 10D-2A candidate migration gate는 구현됐지만 production backup/migration/restore 실행과 보관·외부복제 활성화는 10D-2B/10D-3의 별도 운영 Gate다.

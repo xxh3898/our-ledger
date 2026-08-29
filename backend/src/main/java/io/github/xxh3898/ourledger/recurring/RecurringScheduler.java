@@ -1,12 +1,14 @@
 package io.github.xxh3898.ourledger.recurring;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 
 @Component
+@Profile("!migration")
 @ConditionalOnProperty(
         prefix = "our-ledger.recurring.scheduler",
         name = "enabled",

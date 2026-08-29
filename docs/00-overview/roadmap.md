@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.5
-last_updated: 2026-08-29
+version: 1.6
+last_updated: 2026-08-30
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
@@ -32,7 +32,8 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10C-2B2. Monitor/Alert Policy | threshold, evaluator, state와 HomeOps reporter 경계 | 합성 정책 검증, 실제 감시는 10D에서 활성화 |
 | 10B. PWA Installability | manifest, service worker, production icon | 최종 이름·icon 결정 뒤 모바일 홈 화면 설치 가능 |
 | 10D-1. Immutable Release/Deploy Source | Full CI 재사용, exact-SHA artifact, restricted intent | 기본 비활성 source/CI harness 검증 |
-| 10D-2. Host Bootstrap Activation | restricted wrapper, operation lock, backup/migration/cutover | 별도 승인 뒤 Mac mini 설치·dry run |
+| 10D-2A. Candidate Migration/Validation Gate | normal startup mutation 제거, same-image one-shot Flyway/JPA gate | disposable DB에서 migration/cutover 선행조건 검증 |
+| 10D-2B. Host Deployment Transaction | restricted wrapper, operation lock, backup/migration/cutover | 별도 승인 뒤 Mac mini 설치·dry run |
 | 10D-3. Public Production Activation | Cloudflare, secret, User, schedule/replication | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Slice 3 구현 경계
@@ -98,10 +99,11 @@ Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 �
 - **10C-2B1 Operational Status Harness**: exact Compose runtime, loopback Nginx health, process-local recurring scheduler raw signal, 10C-2A verified marker/inventory와 backup filesystem을 read-only canonical JSON으로 결합한다. unknown/unreachable/invalid를 success로 위장하지 않고 secret·PII·재무 상세·absolute path를 제외한다.
 - **10C-2B2 Monitor/Alert Policy**: B1 raw snapshot에 service 2회, recurring startup/stale 5분과 rule failure 3 poll, local backup 7시간, disk 80/90% 정책을 적용한다. repository 밖 owner-only 최소 state, non-blocking lock, HomeOps reporter subprocess와 `DISK_LOW` ALERT/RECOVERED episode, monitor 60초와 backup `:35` LaunchAgent example을 synthetic하게 검증한다. service/origin/recurring/backup freshness는 local-only로 유지하고 실제 reporter/LaunchAgent, backup schedule·삭제·외부복제는 10D 전까지 활성화하지 않는다.
 - **10D-1 Immutable Release/Deploy Source**: `main` exact HEAD에서 재사용 Full CI를 먼저 실행하고 명시적인 repository kill switch가 `true`일 때만 linux/arm64 API/Web/runtime-config exact-SHA artifact publish와 고정된 restricted SSH intent 전송 job이 실행되도록 source를 고정한다. runtime config change detector, secret-free scratch artifact와 local synthetic release gate까지만 포함한다.
-- **10D-2 Host Bootstrap Activation**: restricted host wrapper, project operation lock, runtime-config digest extraction, predeploy verified backup, migration/cutover/readiness/rollback worker를 Mac mini에 별도 승인으로 설치하고 production 변경 없는 dry run을 검증한다.
+- **10D-2A Candidate Migration/Validation Gate**: normal `production` startup은 Flyway를 비활성화하고 JPA validate만 수행한다. 동일 candidate API image의 profile-gated one-shot만 HTTP/bootstrap/scheduler 없이 Flyway와 JPA validate를 완료하고 명시적으로 종료한다. clean/idempotent/손상/연결·profile failure를 disposable PostgreSQL에서 검증하며 V1~V8 byte를 고정한다.
+- **10D-2B Host Deployment Transaction**: restricted host wrapper, project operation lock, runtime-config digest extraction, predeploy verified backup, 10D-2A migration/cutover/readiness/rollback worker를 Mac mini에 별도 승인으로 설치하고 production 변경 없는 dry run을 검증한다.
 - **10D-3 Public Production Activation**: actual GHCR/Tailscale/SSH credential, Cloudflare/도메인/secret/User, backup schedule·retention·외부 암호화 복제와 public smoke를 각각 승인한 뒤 운영을 시작한다.
 
-10D-1 완료는 release workflow와 immutable artifact/transport source가 local/Hosted gate에서 검증됐다는 뜻이다. kill switch, GHCR/Tailscale/SSH credential과 Mac mini wrapper가 없으므로 artifact publish, production status/backup/reporter 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
+10D-2A 완료는 same-candidate migration lifecycle이 local/Hosted disposable gate에서 검증됐다는 뜻이다. kill switch, GHCR/Tailscale/SSH credential과 Mac mini wrapper가 없으므로 artifact publish, production status/backup/migration/reporter 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
 
 ## Release Gate
 

@@ -84,6 +84,31 @@ failure_compose=(
   --file "$COMPOSE_FILE"
 )
 
+run_candidate_migration() {
+  local project_kind="$1"
+  local log_path="$2"
+  case "$project_kind" in
+    source)
+      "${source_compose[@]}" run --rm --no-deps api-migration > "$log_path" 2>&1
+      ;;
+    target)
+      "${target_compose[@]}" run --rm --no-deps api-migration > "$log_path" 2>&1
+      ;;
+    *)
+      fail "알 수 없는 candidate migration 검증 project입니다."
+      ;;
+  esac
+  if [[ "$(grep -Fxc 'migration-validation: success' "$log_path")" != "1" ]]; then
+    fail "candidate migration success marker가 정확히 한 번 기록되지 않았습니다."
+  fi
+  if grep -Fq -- "$runtime_password" "$log_path"; then
+    fail "candidate migration log에 synthetic credential이 노출됐습니다."
+  fi
+  if grep -Fq 'jdbc:postgresql://' "$log_path"; then
+    fail "candidate migration success output에 connection URL이 노출됐습니다."
+  fi
+}
+
 resource_residue() {
   local project_name="$1"
   local container_residue
@@ -237,7 +262,7 @@ expect_failure "missing Compose project/postgres service" \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"
 
-printf '\n[backup/restore 2/11] exact-HEAD API image and source startup\n'
+printf '\n[backup/restore 2/11] exact-HEAD API image, source migration and startup\n'
 docker build \
   --progress plain \
   --no-cache \
@@ -246,7 +271,9 @@ docker build \
   --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
   "$ROOT_DIR"
 
-"${source_compose[@]}" up --detach --wait --wait-timeout 240 postgres api
+"${source_compose[@]}" up --detach --wait --wait-timeout 120 postgres
+run_candidate_migration source "$runtime_temp_dir/source-migration.log"
+"${source_compose[@]}" up --detach --wait --wait-timeout 240 api
 source_postgres_id="$("${source_compose[@]}" ps --quiet postgres)"
 source_api_id="$("${source_compose[@]}" ps --quiet api)"
 [[ -n "$source_postgres_id" && -n "$source_api_id" ]] \
@@ -543,7 +570,12 @@ printf '%s' "$target_state" | python3 "$STATE_CHECKER"
     --set ON_ERROR_STOP=1
 ' < "$INTEGRITY_SQL"
 
-printf '\n[backup/restore 9/11] restored database production API readiness\n'
+printf '\n[backup/restore 9/11] restored database migration and production API readiness\n'
+target_state_before_migration="$(compose_fingerprint target)"
+run_candidate_migration target "$runtime_temp_dir/target-migration.log"
+target_state_after_migration="$(compose_fingerprint target)"
+[[ "$target_state_after_migration" == "$target_state_before_migration" ]] \
+  || fail "restored V8 database candidate migration이 Flyway/data state를 변경했습니다."
 "${target_compose[@]}" up --detach --wait --wait-timeout 240 api
 "${target_compose[@]}" exec -T api \
   java -cp /opt/healthcheck HttpHealthCheck \
