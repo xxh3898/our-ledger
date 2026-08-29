@@ -9,13 +9,14 @@ import io.github.xxh3898.ourledger.identity.User;
 import io.github.xxh3898.ourledger.identity.UserRepository;
 import io.github.xxh3898.ourledger.security.CloudflareAccessSecurityConfiguration;
 import io.github.xxh3898.ourledger.security.LocalIdentityAuthenticationFilter;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.web.FilterChainProxy;
@@ -23,6 +24,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -45,13 +48,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @ActiveProfiles("production")
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 @SpringBootTest
 class CloudflareAccessSecurityIntegrationTest {
 
     private static final String ISSUER = "https://test-team.cloudflareaccess.com";
     private static final String AUDIENCE = "test-application-audience";
     private static final String KEY_ID = "test-key";
+    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
+            DockerImageName.parse("postgres:18.6-alpine3.23")
+    ).withDatabaseName("our_ledger_security_test")
+            .withUsername("our_ledger_security_test")
+            .withPassword("local-security-test-only");
     private static final JwtFixture JWT_FIXTURE = JwtFixture.create();
     private static final TestJwkServer JWK_SERVER = new TestJwkServer(JWT_FIXTURE.publicKey());
 
@@ -73,8 +80,15 @@ class CloudflareAccessSecurityIntegrationTest {
     @Autowired
     private FilterChainProxy filterChainProxy;
 
+    @Autowired
+    private Environment environment;
+
     @DynamicPropertySource
     static void cloudflareProperties(DynamicPropertyRegistry registry) {
+        DatabaseFixture database = prepareDatabaseFixture();
+        registry.add("spring.datasource.url", database::url);
+        registry.add("spring.datasource.username", database::username);
+        registry.add("spring.datasource.password", database::password);
         JWK_SERVER.start();
         registry.add("our-ledger.auth.cloudflare.issuer", () -> ISSUER);
         registry.add("our-ledger.auth.cloudflare.jwk-set-uri", JWK_SERVER::jwkSetUri);
@@ -82,8 +96,11 @@ class CloudflareAccessSecurityIntegrationTest {
     }
 
     @AfterAll
-    static void stopJwkServer() {
+    static void stopTestResources() {
         JWK_SERVER.stop();
+        if (POSTGRES.isRunning()) {
+            POSTGRES.stop();
+        }
     }
 
     @BeforeEach
@@ -244,6 +261,44 @@ class CloudflareAccessSecurityIntegrationTest {
                 .noneMatch(LocalIdentityAuthenticationFilter.class::isInstance);
     }
 
+    @Test
+    void should_keepFlywayDisabled_when_productionSecurityContextUsesPreparedSchema() {
+        assertThat(environment.getProperty("spring.flyway.enabled"))
+                .isEqualTo("false");
+    }
+
+    private static DatabaseFixture prepareDatabaseFixture() {
+        DatabaseFixture database;
+        if ("external".equals(System.getenv("OUR_LEDGER_TEST_DATABASE"))) {
+            database = new DatabaseFixture(
+                    requiredEnvironment("SPRING_DATASOURCE_URL"),
+                    requiredEnvironment("SPRING_DATASOURCE_USERNAME"),
+                    requiredEnvironment("SPRING_DATASOURCE_PASSWORD")
+            );
+        } else {
+            POSTGRES.start();
+            database = new DatabaseFixture(
+                    POSTGRES.getJdbcUrl(),
+                    POSTGRES.getUsername(),
+                    POSTGRES.getPassword()
+            );
+        }
+
+        Flyway.configure()
+                .dataSource(database.url(), database.username(), database.password())
+                .load()
+                .migrate();
+        return database;
+    }
+
+    private static String requiredEnvironment(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("외부 test database 환경변수가 필요합니다: " + name);
+        }
+        return value;
+    }
+
     private void assertUnauthorized(String token) throws Exception {
         mockMvc.perform(authenticatedGet(token))
                 .andExpect(status().isUnauthorized())
@@ -350,6 +405,9 @@ class CloudflareAccessSecurityIntegrationTest {
                 throw new IllegalStateException("test JWT를 만들 수 없습니다.", exception);
             }
         }
+    }
+
+    private record DatabaseFixture(String url, String username, String password) {
     }
 
     private static final class TestJwkServer {
