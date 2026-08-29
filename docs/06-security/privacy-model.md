@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -68,6 +68,16 @@ CSV는 사용자 재무 데이터 이동성을 제공한다. export 요청도 �
 - 로그: CSV body와 전체 memo를 기록하지 않음
 
 사용자가 내려받은 CSV는 사용자 기기에 재무정보 파일로 남을 수 있으므로 앱은 자동 업로드·공유·장기 server copy를 만들지 않는다. CSV는 운영 backup 또는 삭제 복원 수단이 아니다.
+
+## Backup
+
+PostgreSQL backup은 논리삭제 row, email, memo, Account/Category 이름을 포함할 수 있는 전체 재무 복구 artifact다. 일반 log나 CSV보다 강한 민감정보로 취급한다.
+
+- 관리 host의 dedicated owner-only directory에만 partial/final artifact를 만들고 repository, Docker volume path와 broad/symlink path를 거부한다.
+- DB password는 existing PostgreSQL container 환경에서만 사용하고 새 command-line argument, metadata, stdout/stderr와 resolved Compose 출력에 넣지 않는다.
+- dump를 log, Git, GitHub Actions artifact로 업로드하지 않는다.
+- checksum/metadata/latest marker는 dump의 integrity와 freshness만 표현하며 email, memo, 금융 reference 내용, Cloudflare credential을 포함하지 않는다.
+- 실제 외부 destination과 encryption key/tool은 10D에서 별도 승인하며 10C-2A source gate가 암호화된 외부 copy를 대신하지 않는다.
 
 ## 운영자 접근
 

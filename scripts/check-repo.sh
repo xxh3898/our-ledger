@@ -24,6 +24,14 @@ required_paths=(
   ".github/PULL_REQUEST_TEMPLATE.md"
   ".github/ISSUE_TEMPLATE/feature.yml"
   "scripts/verify.sh"
+  "scripts/backup-production.sh"
+  "scripts/backup_tools/backup_artifact.py"
+  "scripts/backup_tools/check_fixture_state.py"
+  "scripts/backup_tools/fixture.sql"
+  "scripts/backup_tools/integrity-check.sql"
+  "scripts/backup_tools/state-fingerprint.sql"
+  "scripts/backup_tools/test_backup_artifact.py"
+  "scripts/verify-backup-restore.sh"
   "scripts/verify-production-runtime.sh"
 )
 

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-29
 related:
   - AGENTS.md
@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke만 구현한다. 실제 image registry push, Mac mini production Compose 실행, Cloudflare Access/Tunnel, secret/User/DB, backup/restore와 monitor는 실행하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A는 existing healthy PostgreSQL을 대상으로 하는 host one-shot backup source와 synthetic isolated restore gate를 추가한다. 실제 image registry push, Mac mini production Compose/backup 실행, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention·외부복제, production restore와 monitor는 실행하지 않았다.
 
 ## 목표 구조
 
@@ -68,7 +68,7 @@ originRequest:
 - `api`: shell/package manager/Gradle/source 없이 Distroless Temurin Java 25와 Spring Boot jar만 포함한 non-root runtime
 - `postgres`: PostgreSQL 18.6 official image와 project-scoped named volume
 
-`backup`과 `cloudflared` service는 10C-1 Compose에 포함하지 않는다. production DB는 internal database network에서만 접근하고 host port를 publish하지 않는다. API도 host port가 없으며 Nginx만 `127.0.0.1:${OUR_LEDGER_ORIGIN_PORT}`에 publish한다.
+`backup`과 `cloudflared` service는 production Compose에 포함하지 않는다. backup은 관리 host가 existing `postgres` service 안의 logical client를 일회성 호출하며 source/DB volume 또는 Docker socket을 application container에 mount하지 않는다. production DB는 internal database network에서만 접근하고 host port를 publish하지 않는다. API도 host port가 없으며 Nginx만 `127.0.0.1:${OUR_LEDGER_ORIGIN_PORT}`에 publish한다.
 
 Web/API image의 build stage와 runtime stage는 분리하고 base image tag와 multi-platform manifest digest를 함께 고정한다. Web/API는 read-only root filesystem, non-root user, tmpfs, `cap_drop: ALL`, `no-new-privileges`, pid/resource limit를 적용한다. PostgreSQL은 official entrypoint의 초기 volume ownership 동작을 깨뜨리지 않는 범위에서 host publish/bind mount를 금지하고 resource/health/restart/graceful-stop을 적용한다.
 
@@ -118,6 +118,8 @@ Health endpoint를 인터넷에 별도 공개하여 Access를 우회하지 않�
 
 Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke는 운영 Compose를 기동하거나 `/Users/homeserver/Server` resource를 참조하지 않는다.
 
+`./scripts/verify-backup-restore.sh`는 별도 고유 source/target/failure Compose project, 합성 credential과 disposable volume으로 actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture와 exact-HEAD production API readiness를 비교하고 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
+
 ## 배포 Gate
 
 에이전트는 production deploy와 Cloudflare Access/Tunnel 설정 변경을 수행하지 않는다. 사용자가 다음을 확인한 뒤 명시적으로 실행한다.
@@ -131,7 +133,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - `cloudflared` Access 검증 설정
 - health check
 
-10C-1 source/CI 통과는 위 production deploy Gate의 승인이 아니며 실제 public URL이나 service 상태를 변경하지 않는다.
+10C-1/10C-2A source/CI 통과는 위 production deploy 또는 production backup/restore Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다.
 
 ## 롤백
 

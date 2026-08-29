@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C-1의 immutable production origin harness를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose와 disposable smoke까지다. 실제 Mac mini deploy, Cloudflare Tunnel/Access 설정, production secret/User/DB, backup/restore와 monitor activation은 포함하지 않는다.
+Slice 10C-1의 immutable production origin과 Slice 10C-2A의 backup/restore source gate를 관리한다. 현재 구현은 image build, non-root Nginx, Spring `production` profile, `web`/`api`/`postgres` Compose, disposable runtime smoke, host one-shot custom backup과 isolated restore drill까지다. 실제 Mac mini deploy/backup/restore, Cloudflare Tunnel/Access 설정, production secret/User/DB, schedule·retention·외부복제와 monitor activation은 포함하지 않는다.
 
 ## 구조
 
@@ -17,6 +17,8 @@ infra/
 ```
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
+
+backup command와 artifact helper는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 restore 검증 진입점은 `scripts/verify-backup-restore.sh`다. production Compose에 backup service나 host backup bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -95,6 +97,42 @@ docker compose \
 
 검사 시 secret/JWT/cookie를 출력하지 않는다. 외부 route가 연결되기 전에는 loopback origin, Nginx `/healthz`, 내부 API readiness, PostgreSQL health, Flyway history를 확인한다. `/actuator/**`는 Nginx public origin에서 404이며 `/healthz`는 database나 API 상태를 노출하지 않는 Nginx 자체 응답이다.
 
+## Production one-shot backup
+
+다음 command는 실제 production DB를 online logical read하고 지정한 host directory에 전체 재무 backup을 쓴다. source code가 준비됐다는 사실은 실행 승인이나 schedule 활성화를 의미하지 않는다. 실제 실행 전 exact project/env/directory, disk, 최신 정상 backup, 장애 대응 담당자와 restore Gate를 별도로 확인한다.
+
+env file과 backup directory는 repository 밖 absolute regular path여야 하고 현재 관리 사용자 소유, group/other 권한 없음이 필요하다. directory는 미리 `0700`, env file은 `0600`으로 준비한다. `/`, repository/Workspace root, Docker/PostgreSQL data path, symlink와 `..` path는 사용할 수 없다.
+
+```bash
+./scripts/backup-production.sh \
+  --project-name our-ledger-production \
+  --env-file /absolute/path/outside/repository/production.env \
+  --backup-dir /absolute/dedicated/our-ledger-backups
+```
+
+command는 `docker compose config --quiet`만 사용하고 resolved config를 출력하지 않는다. 지정 project의 exact `compose.prod.yaml`로 시작된 running/healthy PostgreSQL 18.6, project-scoped named volume/internal network를 확인한 뒤 container 내부 `POSTGRES_USER`/`POSTGRES_DB`와 기존 password 환경을 사용한다. API/Web을 restart하거나 PostgreSQL volume을 직접 읽지 않는다.
+
+성공 artifact는 다음 구조다.
+
+```text
+our-ledger_production_<UTC>_v<schema>_<random>.backup/
+├─ our-ledger_production_<UTC>_v<schema>_<random>.dump
+├─ our-ledger_production_<UTC>_v<schema>_<random>.json
+└─ our-ledger_production_<UTC>_v<schema>_<random>.sha256
+last-success.json
+```
+
+bundle은 owner-only partial directory에서 nonzero, PostgreSQL custom magic, `pg_restore --list`, size와 SHA-256을 통과한 뒤 directory rename으로 공개된다. `last-success.json`은 verified bundle 뒤에만 atomic 교체된다. 실패는 nonzero exit이며 이전 valid bundle/marker를 덮어쓰지 않는다.
+
+동일 directory의 동시 실행은 `.our-ledger-backup.lock`으로 차단한다. process crash로 stale lock이 남으면 다른 backup process가 없고 partial/final/marker 상태를 확인하기 전 자동 삭제하지 않는다. strict inventory는 삭제 없이 상태만 출력한다.
+
+```bash
+python3 scripts/backup_tools/backup_artifact.py inventory \
+  --backup-dir /absolute/dedicated/our-ledger-backups
+```
+
+보관 개수, 자동 prune, schedule, 외부 destination/암호화 복제와 production restore는 10D 승인 전까지 활성화하지 않는다.
+
 ## 중지와 rollback
 
 일반 중지는 PostgreSQL volume을 보존한다.
@@ -116,5 +154,13 @@ docker compose \
 ```
 
 smoke는 고유 Compose project, Docker가 할당한 loopback port, 합성 DB/Cloudflare 값, disposable volume을 사용한다. clean image build, config fail-closed, static/SPA/cache, API 401, forged local identity 401, actuator 차단, hardening, Flyway V1→V8, restart, graceful stop을 검사한다. `trap`은 성공·실패 시 해당 project의 container/network/volume과 검증 image tag만 제거하고 residue가 있으면 실패한다. 실제 production resource와 `/Users/homeserver/Server`는 참조하지 않는다.
+
+Backup/Restore drill은 별도 entrypoint다.
+
+```bash
+./scripts/verify-backup-restore.sh
+```
+
+이 drill은 exact-HEAD API image, 합성 non-empty fixture, 고유 source/target/failure project와 각자 다른 disposable PostgreSQL volume을 사용한다. 실제 one-shot command로 dump를 만든 뒤 empty target에 fail-fast restore하고 Flyway/data/financial state/constraint/JPA/readiness를 비교한다. dump는 owner-only temp directory에서만 사용하고 GitHub artifact로 업로드하지 않으며 성공·실패 후 exact resource residue 0을 요구한다.
 
 production secret, tunnel credential, DB dump와 backup 파일은 Git에 커밋하지 않는다.

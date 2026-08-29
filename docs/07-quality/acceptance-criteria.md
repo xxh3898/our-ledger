@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.7
+version: 0.8
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -65,6 +65,23 @@ related:
 - disposable smoke에서 Flyway V1→V8, JPA validate, API restart 후 schema history 유지, graceful stop과 resource residue 0을 검증한다.
 - Hosted Full CI가 PR exact HEAD의 같은 runtime smoke를 통과한다.
 
+### Slice 10C-2A Backup/Restore Safety Gate
+
+- one-shot command가 absolute production Compose project, Git 밖 owner-only env file, dedicated owner-only backup directory를 요구하고 missing/relative/`..`/root/repository/Docker data/symlink/permission 오류를 fail closed한다.
+- existing `postgres` service가 pinned PostgreSQL 18.6, running/healthy, project-scoped volume/internal network인지 확인하고 API/Web restart나 DB volume direct read 없이 online logical backup을 수행한다.
+- `pg_dump` custom archive는 final 이름으로 노출되기 전에 nonzero, `PGDMP`, `pg_restore --list`, byte size와 SHA-256을 통과한다.
+- dump, metadata, checksum은 owner-only atomic bundle 하나로 commit되고 같은 final 이름을 overwrite하지 않는다.
+- `last-success.json`은 verified success 뒤에만 atomically 갱신되며 path/lock/pg_dump/integrity failure가 이전 marker와 valid bundle을 변경하지 않는다.
+- metadata와 marker에는 timestamp, Flyway version, size, hash, artifact 이름, client/server version만 있고 secret/email/memo/재무 내용을 포함하지 않는다.
+- synthetic source는 2 User/1 Household/2 Member, ASSET/SAVINGS/CREDIT_CARD, Category, INCOME/EXPENSE/TRANSFER/REFUND와 Budget/Recurring/Goal을 포함한다.
+- empty target은 source와 다른 고유 Compose project/network/volume, host DB port 없는 PostgreSQL과 synthetic credential만 사용한다.
+- restore는 checksum/metadata/archive 검증 뒤 `pg_restore --exit-on-error --single-transaction --no-owner --no-acl`로 실행하고 warning/error를 성공으로 처리하지 않는다.
+- restored target의 Flyway V1~V8, core row/Transaction/Entry/Refund lineage, Account balance·총자산·총부채·순자산이 source와 동일하다.
+- restored target의 Household composite FK/unique가 계속 enforced되고 exact-HEAD production API의 Flyway/JPA/readiness startup이 schema/data state를 바꾸지 않는다.
+- zero/truncated/corrupt, checksum/metadata mismatch, missing project/service, stopped/unhealthy PostgreSQL, injected pg_dump failure와 restore target failure를 실제 gate에서 거부한다.
+- 성공·실패 뒤 synthetic source/target/failure project의 container/network/volume과 unique API image tag residue가 0이다.
+- Hosted Full CI가 PR exact HEAD에서 별도 backup/restore job을 실제 secret과 artifact upload 없이 통과한다.
+
 ## 운영
 
 - Mac mini Docker Compose 배포 성공
@@ -77,7 +94,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 uptime monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, backup/restore와 uptime monitor는 10C-1 완료 기준이 아니다. 10C-1은 합성 설정과 disposable resource의 origin harness 검증까지만 수행하며 10C-2/10D에서 별도 승인·검증한다.
+위 운영 항목 중 Mac mini deploy, 실제 Access/Tunnel, production DB/secret/User, production backup/restore와 uptime monitor는 10C-2A 완료 기준이 아니다. 10C-2A는 source one-shot과 합성 disposable restore 가능성을 검증하며 실제 schedule·retention·외부복제·production restore는 10D에서 별도 승인한다.
 
 ## 문서
 
