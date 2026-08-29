@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.3
+version: 1.4
 last_updated: 2026-08-29
 related:
   - ADR-008
@@ -172,6 +172,23 @@ Immutable Production Runtime Harness Slice는 추가로 다음을 실제 Docker 
 - Spring graceful shutdown log/exit와 성공·실패 trap 이후 project container/network/volume/image tag residue 0
 
 `scripts/verify-production-runtime.sh`는 실제 운영 값 대신 고유 Compose project, Docker가 할당한 loopback port, 합성 credential과 disposable volume만 사용한다. 같은 script를 local `verify.sh`와 Hosted Full CI exact HEAD에서 실행한다. 실제 production deployment, migration, backup/restore, Cloudflare/Tunnel과 monitor는 이 테스트 대상이 아니다.
+
+Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
+
+- env/backup path의 absolute/canonical/owner-only/repository 밖 경계와 root·Docker data·symlink·traversal 거부
+- exact Compose project/config/image label, running/healthy PostgreSQL과 project-scoped volume/internal network
+- restrictive umask, concurrent directory lock, user-controlled text 없는 strict artifact filename
+- custom-format online `pg_dump`, nonzero/`PGDMP`/`pg_restore --list`, SHA-256/size/metadata/checksum 일치
+- partial owner-only bundle의 atomic directory rename과 verified success 뒤 `last-success.json` atomic update
+- collision, lock, path, missing project/service, stopped/unhealthy DB, injected pg_dump failure에서 이전 bundle/marker 보존
+- zero/truncated/corrupt archive, checksum mismatch, metadata mismatch와 archive-list failure의 restore 전 거부
+- 2 User/1 Household/2 Member, 세 Account nature/type, Category, INCOME/EXPENSE/TRANSFER/REFUND와 Budget/Recurring/Goal synthetic fixture
+- source와 별도 고유 project/network/volume의 empty PostgreSQL에 fail-fast single-transaction restore
+- Flyway V1→V8, core row, Transaction/Entry/Refund lineage, Account balance와 net worth source/target equality
+- Household composite FK/Entry·Goal Account unique enforcement와 exact-HEAD production API JPA/readiness startup 뒤 state 불변
+- missing restore DB failure와 성공·실패 trap 뒤 exact project container/network/volume/image tag residue 0
+
+`scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
 
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 

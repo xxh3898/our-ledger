@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-29
 related:
   - 00-overview/roadmap.md
@@ -23,7 +23,8 @@ related:
 | 자산 흐름 | 9 | O | O | ASSET-LIABILITY |
 | CSV 내보내기 | 10A | O | O | current Household, canonical Entry, formula 방어, no-store |
 | Immutable runtime | 10C-1 | O | O | multi-stage image, same-origin Nginx, production Compose/smoke |
-| Runtime lifecycle | 10C-2 | - | - | backup/restore, observability, 운영 runbook |
+| Backup/Restore safety | 10C-2A | O | - | custom dump, atomic integrity bundle, isolated restore drill |
+| Observability/Alert harness | 10C-2B | - | - | health, backup freshness, scheduler/disk signal |
 | PWA 설치 | 10B | - | - | 최종 한글 이름·production icon 결정까지 HOLD |
 | Production activation | 10D | - | - | Access/Tunnel, secret, bootstrap, deploy |
 
@@ -87,6 +88,15 @@ related:
 - Compose: Web loopback-only publish, API/DB host port 없음, PostgreSQL named volume/internal network, app read-only/capability hardening
 - 검증: 고유 project·임시 port·합성 설정·disposable volume의 clean build/start/restart/graceful stop와 residue 0
 - 제한: PWA, image push, Cloudflare/Tunnel, 실제 secret/User/DB, backup/restore, observability, deploy 없음
+
+## Slice 10C-2A Backup/Restore Safety Gate 구현
+
+- Backup: existing healthy PostgreSQL 18.6의 online `pg_dump` custom archive, API/Web restart와 DB volume direct read 없음
+- Artifact: owner-only partial bundle, nonzero/`PGDMP`/`pg_restore --list`/SHA-256/metadata 검증 뒤 atomic directory rename
+- Latest success: 비민감 `last-success.json`을 verified success 뒤에만 atomic 갱신하고 failure는 이전 marker 보존
+- Restore: 고유 source/target Compose project와 별도 disposable volume, synthetic non-empty fixture, fail-fast `pg_restore`
+- 검산: Flyway V1~V8, core row/Transaction/Entry/Refund lineage, ASSET/LIABILITY/순자산, FK/unique, production API JPA/readiness
+- 제한: 실제 production backup/restore, schedule, retention 삭제, 외부 destination/암호화/복제, observability/alert, deploy 없음
 
 ## 공통 요구
 

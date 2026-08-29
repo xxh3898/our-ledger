@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-29
 related:
   - 06-security/privacy-model.md
@@ -43,6 +43,14 @@ Account, Category, Category Group은 거래가 연결되면 archive한다. archi
 - Transaction ID와 REFUND 원거래 ID는 lineage 검산에 필요한 최소 기술 ID로 포함한다.
 - Account/Card 전체 번호, `lastFour`, email, Access/CSRF credential은 포함하지 않는다.
 - CSV는 사용자가 내려받은 뒤 browser와 사용자 기기의 보존 정책을 따르며 서버 운영 backup이나 삭제 복원의 대체물이 아니다.
+
+## PostgreSQL Backup Artifact
+
+- 10C-2A backup은 logical delete row와 Flyway history를 포함한 PostgreSQL custom archive이므로 CSV보다 민감하고 복구 범위가 넓다.
+- 검증된 dump, checksum, metadata는 owner-only atomic bundle 하나로 취급한다. `last-success.json`은 dump 내용을 복제하지 않고 최신 성공 시각·schema·size·hash·파일명만 가리킨다.
+- metadata와 marker에는 email, memo, Category/Account 내용, DB password, token/cookie와 resolved Compose config를 넣지 않는다.
+- strict inventory는 valid/invalid/incomplete/foreign artifact를 분류만 하며 삭제하지 않는다.
+- 실제 보관 일·주·월 개수, 외부 암호화 복제 위치와 backup 파기는 RPO/RTO·저장공간·개인정보 정책을 확인하는 10D 운영 결정 전까지 미확정이다.
 
 ## 실제 삭제
 

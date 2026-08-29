@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-08-29
 related:
   - 06-security/privacy-model.md
@@ -11,7 +11,13 @@ related:
 
 ## 현재 상태
 
-Slice 10C-1은 container healthcheck와 stdout/stderr log 경계만 제공한다. Uptime Kuma 연결, metrics exporter/dashboard, backup·scheduler alert, 실제 임계치와 알림 채널은 Slice 10C-2/10D 범위이며 아직 활성화하지 않았다.
+Slice 10C-1은 container healthcheck와 stdout/stderr log 경계를 제공한다. Slice 10C-2A는 verified backup 뒤에만 atomically 갱신되는 비민감 `last-success.json`과 명확한 process exit status를 제공한다. Uptime Kuma 연결, metrics exporter/dashboard, backup freshness·scheduler alert, 실제 임계치와 알림 채널은 Slice 10C-2B/10D 범위이며 아직 활성화하지 않았다.
+
+## Backup freshness interface
+
+`last-success.json`에는 latest verified bundle의 UTC timestamp, Flyway schema version, byte size, SHA-256, artifact 이름과 PostgreSQL client/server version만 있다. dump 내용, email, memo, DB password, token/cookie와 absolute production path는 포함하지 않는다.
+
+monitor는 dump를 열거나 backup command를 재실행하지 않고 marker freshness와 one-shot exit status만 읽어야 한다. stale threshold, alert channel, disk threshold와 실제 scheduler는 10C-2B/10D에서 결정한다. failed backup은 이전 marker를 현재 성공 시각으로 갱신하지 않는다.
 
 ## 목표
 
