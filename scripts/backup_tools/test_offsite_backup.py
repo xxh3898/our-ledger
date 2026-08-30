@@ -270,6 +270,63 @@ class OffsiteBackupTest(unittest.TestCase):
             list(self.state_directory.glob(".offsite-cipher.*.partial")), []
         )
 
+    def test_should_not_overwrite_destination_created_at_finalization(self) -> None:
+        self.run_success()
+        marker_path = self.state_directory / contract.MARKER_FILENAME
+        previous_marker = marker_path.read_bytes()
+        previous_marker_value = self.marker()
+        previous_final = (
+            self.target_directory / previous_marker_value["ciphertextFilename"]
+        )
+        previous_final_bytes = previous_final.read_bytes()
+        previous_final_identity = (
+            previous_final.stat().st_dev,
+            previous_final.stat().st_ino,
+        )
+        second = self.commit_bundle(
+            SECOND_CREATED_AT, b"PGDMPfinalization-collision"
+        )
+        collision_final = (
+            self.target_directory / contract._ciphertext_name(second.name)
+        )
+        collision_bytes = b"concurrent-owner-ciphertext"
+        collision_identity: tuple[int, int] | None = None
+        real_rename = contract._rename_no_replace
+
+        def collide_before_rename(source: Path, destination: Path) -> None:
+            nonlocal collision_identity
+            if destination == collision_final:
+                collision_final.write_bytes(collision_bytes)
+                collision_final.chmod(0o600)
+                info = collision_final.stat()
+                collision_identity = (info.st_dev, info.st_ino)
+            real_rename(source, destination)
+
+        with mock.patch.object(
+            contract, "_rename_no_replace", side_effect=collide_before_rename
+        ):
+            with self.assertRaises(contract.ContractError):
+                contract.run_offsite_backup(
+                    self.authority,
+                    pipeline_runner=self.fake_pipeline,
+                    now=lambda: NOW + dt.timedelta(hours=6),
+                )
+
+        self.assertIsNotNone(collision_identity)
+        self.assertEqual(collision_final.read_bytes(), collision_bytes)
+        collision_info = collision_final.stat()
+        self.assertEqual(
+            (collision_info.st_dev, collision_info.st_ino), collision_identity
+        )
+        self.assertEqual(marker_path.read_bytes(), previous_marker)
+        self.assertEqual(previous_final.read_bytes(), previous_final_bytes)
+        previous_final_info = previous_final.stat()
+        self.assertEqual(
+            (previous_final_info.st_dev, previous_final_info.st_ino),
+            previous_final_identity,
+        )
+        self.assert_no_transaction_residue()
+
     def test_should_report_missing_fresh_stale_and_invalid_without_mutation(self) -> None:
         before = self.tree_fingerprint(self.state_directory)
         missing = contract.offsite_status(self.authority, now=lambda: NOW)

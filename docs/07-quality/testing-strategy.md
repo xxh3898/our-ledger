@@ -241,9 +241,10 @@ Encrypted Offsite Backup Source Gate는 추가로 다음을 검증한다.
 
 - strict `last-success.json`과 exact verified bundle만 source로 선택하고 처리 전후 file set/stat/content authority가 같은지 확인
 - plaintext tar/dump staging 없이 tar stdout을 age public-recipient encryption으로 직접 연결
-- owner-only ciphertext staging fsync/hash, target `.partial` copy/fsync/hash, final rename/reverify와 atomic marker ordering
+- owner-only ciphertext staging fsync/hash, target `.partial` copy/fsync/hash, macOS/Linux native atomic no-replace final publish/reverify와 atomic marker ordering
 - same latest marker/final exact match의 `NO_OP`, newer source advance와 기존 final 보존
-- unsafe config/path/symlink/hardlink/mode/overlap, invalid source, collision과 tar/age/timeout/fsync/copy/hash/rename/marker failure의 fail-closed preservation
+- unsafe config/path/symlink/hardlink/mode/overlap, invalid source, pre-existing collision과 finalization 순간 collision, tar/age/timeout/fsync/copy/hash/rename/marker failure의 fail-closed preservation
+- finalization 호출 직전에 경쟁 destination을 생성해 native no-replace가 이를 덮어쓰지 않고 bytes/inode, 이전 marker/final을 보존하며 invocation-owned staging/partial만 정리하는지 macOS local과 Linux Hosted에서 동일하게 검증
 - 8시간 `FRESH|STALE` boundary와 missing/invalid privacy-safe read-only status
 - `00:50/06:50/12:50/18:50`, no `KeepAlive`/private identity LaunchAgent example
 - official SHA-256로 pin한 age v1.3.1 actual encrypt/decrypt round-trip과 decrypted tar exact source hash

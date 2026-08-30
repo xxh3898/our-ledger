@@ -151,6 +151,11 @@ assert "python3 -B -m scripts.backup_tools.offsite_backup" in wrapper
 assert "shell=True" not in worker
 assert "AGE-SECRET-KEY-" not in worker
 assert "HOMEOPS" not in worker.upper()
+assert "renamex_np" in worker
+assert "DARWIN_RENAME_EXCL = 0x00000004" in worker
+assert "renameat2" in worker
+assert "LINUX_RENAME_NOREPLACE = 1" in worker
+assert "os.rename(partial_path, final_path)" not in worker
 assert re.search(r"FRESHNESS_GRACE_SECONDS\s*=\s*8\s*\*\s*60\s*\*\s*60", worker)
 assert "PRODUCTION_AGE_ENTRYPOINT = Path(\"/opt/homebrew/bin/age\")" in worker
 assert "PRODUCTION_TAR_EXECUTABLE = Path(\"/usr/bin/bsdtar\")" in worker

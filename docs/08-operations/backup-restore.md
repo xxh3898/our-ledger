@@ -101,13 +101,13 @@ fixed config/path/binary + strict latest marker/bundle 검증
 → staging file fsync + nonzero + SHA-256
 → project-specific iCloud .partial copy + fsync + SHA-256 비교
 → local source authority 재검증
-→ final rename + target directory fsync
+→ native atomic no-replace final publish + target directory fsync
 → final regular-file/size/SHA-256 및 source 재검증
 → offsite-last-success.json temp fsync + atomic replace + directory fsync
 → invocation-owned local staging cleanup
 ```
 
-plaintext tar file과 raw PostgreSQL dump를 offsite/staging에 만들지 않는다. source가 처리 중 변경되거나 config/binary/path/marker/bundle/tar/age/fsync/copy/hash/rename/final 검증이 실패하면 nonzero이고 기존 valid final/marker와 unrelated target entry를 보존한다. worker는 이번 invocation이 만든 exact staging/partial/final만 identity 확인 후 rollback할 수 있으며 broad cleanup이나 retention 삭제를 하지 않는다. final publish 뒤 marker commit 전에 crash하여 marker 없는 collision이 남으면 randomized ciphertext를 덮어쓰거나 성공으로 추측하지 않고 operator 분류가 필요한 fail-closed 상태다.
+plaintext tar file과 raw PostgreSQL dump를 offsite/staging에 만들지 않는다. final publish는 macOS의 `renamex_np(RENAME_EXCL)`, Linux CI의 `renameat2(RENAME_NOREPLACE)`만 사용하며 check-then-rename이나 overwrite fallback을 허용하지 않는다. finalization 순간 destination이 생기거나 native primitive가 없으면 nonzero로 끝나고 경쟁 destination의 bytes/inode, 기존 valid final/marker와 unrelated target entry를 보존한다. source가 처리 중 변경되거나 config/binary/path/marker/bundle/tar/age/fsync/copy/hash/rename/final 검증이 실패해도 같은 fail-closed 계약을 지키며, worker는 이번 invocation이 만든 exact staging/partial/final만 identity 확인 후 rollback할 수 있고 broad cleanup이나 retention 삭제를 하지 않는다. final publish 뒤 marker commit 전에 crash하여 marker 없는 collision이 남으면 randomized ciphertext를 덮어쓰거나 성공으로 추측하지 않고 operator 분류가 필요한 fail-closed 상태다.
 
 marker는 source logical bundle/createdAt/schema, replicatedAt, ciphertext filename/size/SHA-256만 저장한다. 같은 latest source의 marker와 final hash가 정확히 일치할 때만 새 randomized ciphertext를 만들지 않고 `NO_OP`한다. `status`는 marker/final을 쓰지 않고 검증해 `MISSING`, `INVALID`, `FRESH`, `STALE`, age와 8시간 grace만 privacy-safe JSON으로 노출한다. local verified backup grace는 계속 7시간이다. HomeOps에는 offsite freshness type이 없으므로 다른 signal로 위장하지 않으며 central typed alert는 별도 HomeOps extension이다.
 

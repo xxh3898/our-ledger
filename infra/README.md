@@ -274,7 +274,7 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 
 `pruneCandidates`를 포함해 어떤 artifact도 삭제하지 않는다. backup plist example은 `00:35/06:35/12:35/18:35`, offsite plist example은 `00:50/06:50/12:50/18:50` fixed external bootstrap과 `KeepAlive` 부재만 고정한다.
 
-Encrypted offsite source는 committed latest bundle 전체의 tar stdout만 public age recipient로 암호화하고 owner-only local ciphertext → iCloud `.partial` → final → atomic local marker 순서로 게시한다. production CLI는 `run|status`, fixed paths와 `/opt/homebrew/bin/age`, `/usr/bin/bsdtar`만 사용하며 private identity와 plaintext tar/dump offsite copy를 허용하지 않는다. `status`는 final/marker를 read-only 검증해 8시간 freshness만 privacy-safe하게 반환한다.
+Encrypted offsite source는 committed latest bundle 전체의 tar stdout만 public age recipient로 암호화하고 owner-only local ciphertext → iCloud `.partial` → native atomic no-replace final → atomic local marker 순서로 게시한다. macOS는 `renamex_np(RENAME_EXCL)`, Linux gate는 `renameat2(RENAME_NOREPLACE)`를 사용하며 destination collision을 overwrite하지 않는다. production CLI는 `run|status`, fixed paths와 `/opt/homebrew/bin/age`, `/usr/bin/bsdtar`만 사용하며 private identity와 plaintext tar/dump offsite copy를 허용하지 않는다. `status`는 final/marker를 read-only 검증해 8시간 freshness만 privacy-safe하게 반환한다.
 
 ```bash
 ./scripts/verify-offsite-backup.sh

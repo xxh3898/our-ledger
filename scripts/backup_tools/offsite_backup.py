@@ -9,8 +9,10 @@ directories; production always uses the fixed Mac mini authority below.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import dataclass
 import datetime as dt
+import errno
 import fcntl
 import hashlib
 import json
@@ -33,6 +35,9 @@ LOCK_FILENAME = ".our-ledger-offsite.lock"
 FRESHNESS_GRACE_SECONDS = 8 * 60 * 60
 MAX_CONFIG_BYTES = 16 * 1024
 PIPELINE_TIMEOUT_SECONDS = 15 * 60
+DARWIN_RENAME_EXCL = 0x00000004
+LINUX_AT_FDCWD = -100
+LINUX_RENAME_NOREPLACE = 1
 
 PRODUCTION_BACKUP_DIRECTORY = Path(
     "/Users/homeserver/Server/backups/our-ledger/data"
@@ -716,6 +721,68 @@ def _fsync_directory(directory: Path) -> None:
             os.close(descriptor)
 
 
+def _rename_no_replace(source: Path, destination: Path) -> None:
+    require(
+        source.parent == destination.parent,
+        "offsite final publish path는 같은 directory여야 합니다.",
+    )
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        source_bytes = os.fsencode(source)
+        destination_bytes = os.fsencode(destination)
+        if sys.platform == "darwin":
+            rename = library.renamex_np
+            rename.argtypes = [
+                ctypes.c_char_p,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+            rename.restype = ctypes.c_int
+            arguments = (
+                source_bytes,
+                destination_bytes,
+                DARWIN_RENAME_EXCL,
+            )
+        elif sys.platform.startswith("linux"):
+            rename = library.renameat2
+            rename.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+            rename.restype = ctypes.c_int
+            arguments = (
+                LINUX_AT_FDCWD,
+                source_bytes,
+                LINUX_AT_FDCWD,
+                destination_bytes,
+                LINUX_RENAME_NOREPLACE,
+            )
+        else:
+            raise ContractError(
+                "atomic no-replace final publish를 지원하지 않는 platform입니다."
+            )
+        ctypes.set_errno(0)
+        result = rename(*arguments)
+    except AttributeError as error:
+        raise ContractError(
+            "atomic no-replace final publish primitive를 사용할 수 없습니다."
+        ) from error
+    except OSError as error:
+        raise ContractError(
+            "atomic no-replace final publish를 실행할 수 없습니다."
+        ) from error
+
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise ContractError("offsite final ciphertext collision이 발생했습니다.")
+    raise ContractError("atomic no-replace final publish가 실패했습니다.")
+
+
 def _unlink_owned(path: Path, identity: tuple[int, int], label: str) -> None:
     if not os.path.lexists(path):
         return
@@ -1054,11 +1121,7 @@ def run_offsite_backup(
 
             revalidate_source(source, resolved.backup_directory)
             fault("before_final_rename")
-            require(
-                not os.path.lexists(final_path),
-                "offsite final ciphertext collision이 발생했습니다.",
-            )
-            os.rename(partial_path, final_path)
+            _rename_no_replace(partial_path, final_path)
             final_created = True
             final_identity = partial_identity
             partial_identity = None
