@@ -155,6 +155,8 @@ state는 temp file write → file `fsync` → atomic `os.replace` → state dire
 
 10D-2B1의 project `operations/lock`은 deploy와 standalone backup을 직렬화하는 별도 owner-only atomic directory lock이다. read-only monitor worker의 persistent kernel lock이나 HomeOps pending state를 대체하거나 공유하지 않는다. B1 source gate는 actual fixed app root, monitor state/reporter와 LaunchAgent를 설치·호출하지 않는다.
 
+10D-2B2 deploy transaction은 같은 external reporter의 `deployments` mode만 재사용한다. event key 하나에 `RUNNING` 뒤 `SUCCESS`, `FAILED` 또는 `ROLLED_BACK` terminal lifecycle을 보내며 branch `main`, candidate/previous commit SHA, bounded actor/failure stage/summary와 rollback boolean만 포함한다. payload는 compact JSON stdin, `shell=False`, fixed timeout이고 reporter stdout/stderr는 폐기한다. HomeOps endpoint/secret/HMAC/spool, absolute host path, token, raw exception 또는 사용자·금융 data를 읽거나 전송하지 않는다. reporter validation은 transaction 시작 전 fail closed하고, 검증 뒤 reporter nonzero/timeout은 이미 결정된 application transaction 성공/rollback을 뒤집지 않는다. 이 source gate는 actual reporter를 호출하지 않고 fake reporter만 사용한다.
+
 ## HomeOps reporter worker
 
 `scripts/monitor-production.sh`는 다음 external 값이 준비된 뒤 B1 status와 evaluator를 한 번 실행하는 source entrypoint다.
@@ -197,7 +199,7 @@ snapshot과 error에는 다음을 포함하지 않는다.
 
 B2 source는 threshold, evaluator, state format, HomeOps reporter 경계와 LaunchAgent example을 확정하지만 monitor를 생성하거나 실행하지 않는다. HomeOps가 현재 지원하는 것은 trusted reporter의 `DISK_LOW` signal, existing monitored-service와 reporter spool/retry다. our-ledger service/origin/recurring/backup freshness policy result는 local-only다. recurring과 backup freshness의 central typed incident는 별도 HomeOps Issue/PR에서 receiver contract를 추가한 뒤 연동한다. Slack, Discord webhook, Pushover, SMS, Sentry와 Prometheus/Grafana/OTel alert stack을 새로 도입하지 않으며 HomeOps repository, ingestion 설정과 Discord/global notification switch를 변경하거나 활성 상태라고 주장하지 않는다.
 
-10D-2B2/10D-3에서 exact production target, 첫 verified backup, external owner-only state/reporter/bootstrap, existing monitored-service exact HTTPS target와 rollback을 확인한 뒤 설치한다. Category나 memo 같은 사용자 행동 데이터와 raw health response를 외부 분석 서비스로 보내지 않는다.
+10D-3에서 exact production target, 첫 verified backup, external owner-only state/reporter/bootstrap, existing monitored-service exact HTTPS target와 rollback을 확인한 뒤 설치한다. Category나 memo 같은 사용자 행동 데이터와 raw health response를 외부 분석 서비스로 보내지 않는다.
 
 ## 검증
 

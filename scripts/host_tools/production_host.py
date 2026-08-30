@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import stat
@@ -17,6 +18,14 @@ from scripts.host_tools.host_state import (
     inspect_state,
     production_paths,
     validate_layout,
+)
+from scripts.host_tools.deploy_transaction import (
+    MAX_TOKEN_BYTES,
+    DeploymentError,
+    OperatorInterventionRequired,
+    RecoveryCompleted,
+    read_token,
+    run_deployment,
 )
 
 
@@ -77,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--env-file", required=True)
     backup.add_argument("--backup-dir", required=True)
     subparsers.add_parser("inspect", help="inspect fixed host state")
+    subparsers.add_parser("deploy", help="run the fixed restricted deployment")
     return parser
 
 
@@ -95,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     arguments.backup_dir,
                 ]
             )
+        if arguments.command == "deploy":
+            return run_restricted_deploy()
         paths = production_paths()
         validate_layout(paths)
         _validate_production_worker_source(paths)
@@ -102,9 +114,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = inspect_state(paths, lock)
         print(json.dumps(result, separators=(",", ":"), sort_keys=True))
         return 0
-    except (ContractError, LockBusyError, OSError):
+    except (
+        ContractError,
+        DeploymentError,
+        LockBusyError,
+        OSError,
+        OperatorInterventionRequired,
+        RecoveryCompleted,
+    ):
         print("host operation contract failed", file=sys.stderr)
         return 1
+
+
+def run_restricted_deploy() -> int:
+    command = os.environ.get("SSH_ORIGINAL_COMMAND")
+    if command is None:
+        raise ContractError("restricted deployment command is unavailable")
+    source = sys.stdin.buffer.read(MAX_TOKEN_BYTES + 2)
+    token = read_token(source)
+    source = b""
+    paths = production_paths()
+    validate_layout(paths)
+    _validate_production_worker_source(paths)
+
+    from scripts.host_tools.production_deploy import ProductionDeploymentAdapter
+
+    result = run_deployment(
+        command,
+        token,
+        paths=paths,
+        adapter=ProductionDeploymentAdapter(paths),
+        clock=lambda: dt.datetime.now(dt.timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z"),
+    )
+    print(json.dumps({"status": result.status}, separators=(",", ":")))
+    return 0
 
 
 def _validate_production_worker_source(paths) -> None:

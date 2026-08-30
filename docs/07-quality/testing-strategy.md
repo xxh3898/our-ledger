@@ -244,11 +244,23 @@ Host State / Shared Operation Lock Harness는 다음을 추가로 검증한다.
 - public standalone backup과 synthetic deploy의 공통 lock contention, lock-held internal backup core direct invocation의 self-deadlock 부재
 - exact digest-derived release path, exact allowlist/mode, same-content reuse와 same-digest different-content overwrite 거부
 - source/release symlink, hardlink, FIFO, unexpected entry, path-like digest와 external current target 거부
-- relative current atomic pointer와 formatVersion 1 state/pending의 `0600`, exact schema, file/directory fsync와 temp residue 부재
+- relative current atomic pointer와 B2 phase/schema evidence를 포함한 formatVersion 2 state/pending의 `0600`, exact schema, file/directory fsync와 temp residue 부재
 - pending 중 신규 stage/transaction 차단, crash 뒤 pending 보존, unchanged previous에서만 explicit abandoned pending/stage cleanup 허용
 - runtime-config Dockerfile, detector, release gate의 new host/core source와 non-executable internal core mode 동기화
 
 `scripts/verify-host-state.sh`는 Python unit과 shell/source contract만 temp root에서 실행하고 실제 `/Users/homeserver/Server`, production resource와 network를 사용하지 않는다. `scripts/verify-backup-restore.sh`는 같은 test-only injected host adapter 아래 actual internal backup core를 disposable PostgreSQL과 경합시켜 artifact 의미가 유지됨을 검증한다. local `verify.sh`와 Hosted Full CI의 독립 `host-state` job에서 실행한다.
+
+Restricted Host Deployment Transaction Harness는 다음을 추가로 검증한다.
+
+- 기존 keep/update parser 재사용, malformed/extra/shell/path 입력 거부, stdin token 크기/newline/zeroization과 ambient Docker/Compose authority 제거
+- verified current 필수, keep identity 재사용, update exact digest stage, API/Web/runtime image ID·linux/arm64·repository digest·OCI revision 검증
+- single shared lock 아래 writer quiesce, verified backup, pre/post Flyway authority, same-image migration marker, same-SHA cutover, readiness와 commit의 strict ordering
+- quiesce/backup/migration/API·Web readiness failure와 schema-equivalent previous pair recovery, schema-changed operator intervention, automatic DB restore/reverse migration 부재
+- formatVersion 2 phase transition, 각 transaction 경계 crash, current/state write 중간 crash와 observed runtime/schema/readiness 기반 deterministic recovery
+- external HomeOps reporter의 exact executable plus `deployments`, compact JSON stdin, actual `RUNNING/SUCCESS/FAILED/ROLLED_BACK` lifecycle, generic nonzero/timeout과 reporter degradation 독립
+- exact env image key만 atomic replacement, runtime tar symlink/nonregular/unexpected material 거부, private temp/config cleanup과 금지 command/source override 부재
+
+`scripts/verify-host-deploy-transaction.sh`는 32개 Python synthetic regression과 source/shell gate만 실행한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`를 사용하지 않으므로 생성할 disposable container/network/volume/image도 없고 residue는 0이다. local `verify.sh`와 Hosted Full CI의 독립 `host-deploy-transaction` job에서 실행한다.
 
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
@@ -431,4 +443,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 13개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 10개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

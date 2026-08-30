@@ -33,9 +33,21 @@ RUNTIME_FILES = {
         "0600",
         "/runtime/scripts/backup_tools/backup_core.sh",
     ),
+    "scripts/deploy-production.sh": (
+        "0700",
+        "/runtime/scripts/deploy-production.sh",
+    ),
+    "scripts/host_tools/deploy_transaction.py": (
+        "0600",
+        "/runtime/scripts/host_tools/deploy_transaction.py",
+    ),
     "scripts/host_tools/host_state.py": (
         "0600",
         "/runtime/scripts/host_tools/host_state.py",
+    ),
+    "scripts/host_tools/production_deploy.py": (
+        "0600",
+        "/runtime/scripts/host_tools/production_deploy.py",
     ),
     "scripts/host_tools/production_host.py": (
         "0600",
@@ -430,7 +442,7 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn("--platform linux/arm64", source)
         self.assertIn("--network none", source)
         self.assertIn(
-            "io.homeserver.cleanup.task=issue-41-host-state-runtime-config-staging",
+            "io.homeserver.cleanup.task=issue-43-host-deploy-transaction",
             source,
         )
         self.assertNotRegex(

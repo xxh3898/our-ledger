@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.8
+version: 0.9
 last_updated: 2026-08-30
 related:
   - AGENTS.md
@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/monitor/HomeOps reporter, restricted host wrapper, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. Slice 10D-2B2는 이 authority 위에 restricted wrapper, exact artifact 검증, backup/migration/cutover/readiness와 crash recovery를 조합한 source를 추가한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/monitor/HomeOps reporter, forced-command 설치, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
 
 ## 목표 구조
 
@@ -89,7 +89,7 @@ normal `api`는 `production` profile에서 Flyway를 비활성화하고 JPA `ddl
 
 `api-migration`은 같은 `${OUR_LEDGER_API_IMAGE}`를 `production,migration` profile로 실행한다. 이 mode만 Flyway를 활성화하고 JPA validate를 이어서 수행하며 Web application context, HTTP listener, bootstrap runner와 recurring scheduling을 만들지 않는다. 둘 다 성공하면 `migration-validation: success` 한 줄 뒤 Spring context를 닫고 exit 0, 어느 단계나 authority 검증이 실패하면 nonzero다. `migration` 단독, local/test 혼합, Flyway/JPA/Web/bootstrap/scheduler override와 datasource 누락은 fail closed한다.
 
-후속 10D-2B2 host worker가 B1 shared lock 아래 사용할 canonical command shape는 healthy PostgreSQL과 exact candidate image가 확정된 기존 Compose에서 다음과 같다. 이 예시는 실제 production 실행 승인이 아니다.
+10D-2B2 host worker가 B1 shared lock 아래 사용하는 canonical command shape는 healthy PostgreSQL과 exact candidate image가 확정된 기존 Compose에서 다음과 같다. 이 예시는 실제 production 실행 승인이 아니다.
 
 ```bash
 docker compose \
@@ -159,7 +159,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1 source는 release/state/current의 owner/mode를 강제하고 실제 Mac mini app root와 bootstrap 설치는 10D-2B2가 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1 source는 release/state/current의 owner/mode를 강제하고 실제 Mac mini app root와 bootstrap 설치는 10D-3가 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 
@@ -168,7 +168,7 @@ deploy-our-ledger-v1 <exact-40-sha> keep <bounded-actor>
 deploy-our-ledger-v1 <exact-40-sha> update <sha256:64-lowercase-hex> <bounded-actor>
 ```
 
-helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. 10D-2B1 host source는 token을 읽거나 artifact를 pull/cutover하지 않으므로 kill switch를 활성화할 운영 근거도 아직 없다.
+helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. B2 `deploy-production.sh`도 `SSH_ORIGINAL_COMMAND`와 최대 8 KiB stdin token 외 caller override를 받지 않으며 token을 argument/environment/state/report에 넣지 않고 종료 시 mutable buffer를 비운다. source가 존재해도 forced-command와 credential이 설치되지 않았으므로 kill switch를 활성화할 운영 근거는 아직 없다.
 
 ## 10D-2B1 host state와 shared operation lock
 
@@ -184,46 +184,60 @@ production worker의 app root는 source에서 `/Users/homeserver/Server/apps/our
 └─ operations/lock
 ```
 
-managed directory는 current user mode `0700`, state/pending JSON은 `0600`이다. shared operation lock은 `operations/lock` directory의 atomic `mkdir`로 non-blocking 획득한다. symlink·unexpected entry·다른 holder·crash 뒤 stale directory는 즉시 fail closed하며 PID만 보고 지우거나 steal하지 않는다. public `backup-production.sh`는 이 lock을 획득한 뒤 non-executable `backup_core.sh`를 호출하고 future deploy transaction은 이미 lock을 보유한 상태에서 같은 core를 직접 호출한다. `--skip-lock`이나 environment bypass는 없다.
+managed directory는 current user mode `0700`, state/pending JSON은 `0600`이다. shared operation lock은 `operations/lock` directory의 atomic `mkdir`로 non-blocking 획득한다. symlink·unexpected entry·다른 holder·crash 뒤 stale directory는 즉시 fail closed하며 PID만 보고 지우거나 steal하지 않는다. public `backup-production.sh`는 이 lock을 획득한 뒤 non-executable `backup_core.sh`를 호출하고 B2 deploy transaction은 이미 lock을 보유한 상태에서 같은 core를 직접 호출한다. `--skip-lock`이나 environment bypass는 없다.
 
 runtime-config release 이름은 restricted intent의 exact `sha256:<64hex>`에서만 파생한다. artifact의 exact regular-file/directory allowlist와 `0600`/`0700`, current owner, hardlink/symlink/nonregular/unexpected entry 부재를 다시 검증한 뒤 owner-only partial tree의 file/directory fsync와 atomic directory rename으로 publish한다. 같은 digest·content는 재사용할 수 있지만 같은 digest의 다른 content는 overwrite하지 않는다.
 
-`current`는 verified `releases/<digesthex>`를 향하는 relative symlink만 허용하고 temp symlink→atomic replace→runtime-config directory fsync 순서로 갱신한다. `deployment.json`과 `transaction.json`은 `formatVersion: 1` exact schema의 비민감 application/runtime-config identity만 저장하고 temp write→file fsync→atomic replace→directory fsync를 따른다. pending이 있으면 새 stage/transaction을 시작하지 않는다. crash 뒤 pending을 보존하고 candidate 성공을 추측하지 않으며, explicit abandoned cleanup은 current/state가 recorded previous에서 전혀 움직이지 않은 경우만 허용한다.
+`current`는 verified `releases/<digesthex>`를 향하는 relative symlink만 허용하고 temp symlink→atomic replace→runtime-config directory fsync 순서로 갱신한다. `deployment.json`과 `transaction.json`은 `formatVersion: 2` exact schema를 사용한다. pending은 비민감 actor/start 시각, candidate/previous identity, transaction phase와 pre/post schema authority만 저장하고 temp write→file fsync→atomic replace→directory fsync를 따른다. production activation 전 source이므로 formatVersion 1 migration/compatibility shim은 제공하지 않고 구버전을 fail closed한다. pending이 있으면 새 stage/transaction을 시작하지 않으며 candidate 성공을 추측하지 않는다.
 
-이 B1 source는 API/Web cutover, production deployment state 확정과 rollback 결정을 수행하지 않는다. actual root 생성/설치, forced-command, artifact pull/token, predeploy backup/migration/readiness/HomeOps는 B2 또는 10D-3의 별도 승인 대상이다.
+이 B1 primitive의 install/bootstrap은 여전히 수행하지 않았다. API/Web cutover와 rollback을 조합하는 B2 source도 synthetic gate에서만 실행한다.
 
-## 10D-2B2/10D-3 activation boundary
+## 10D-2B2 restricted host deployment transaction
 
-10D-2B2 restricted host deployment transaction과 10D-3 public activation은 B1 source authority 위에서 다음 목표 상태 전이를 별도 Issue, 계획, production 승인으로 구현·검증한다.
+`scripts/deploy-production.sh`는 fixed current release의 `production_host deploy`만 실행한다. 실제 설치 시에도 production CLI는 root, env, backup, Compose, image repository, reporter, readiness target과 skip option을 받지 않는다. source에 고정된 authority는 다음과 같다.
+
+- app root: `/Users/homeserver/Server/apps/our-ledger`
+- Compose project: `our-ledger-production`
+- env: app root의 owner-only `.env`
+- backup: `/Users/homeserver/Server/backups/our-ledger/data`
+- HomeOps reporter: HomeOps current release의 `report-homeops-event.py`
+- image repository: `ghcr.io/xxh3898/our-ledger-{api,web,runtime-config}`
+- local smoke: `127.0.0.1:18080`
+
+future execution은 다음 순서를 건너뛰지 않는다.
 
 ```text
-main merge/release intent
-→ full validation
-→ API/Web linux/arm64 exact commit SHA image publish
-→ image digest/revision validation
-→ Tailscale OIDC
-→ restricted SSH command
+restricted command parse + stdin token
+→ fixed host/source authority
 → project operation lock
 → current runtime identity check
+→ linux/arm64 exact API/Web and runtime artifact 검증
+→ runtime-config keep 또는 exact digest stage
+→ current API writer quiesce
 → predeploy verified backup
-→ 10D-2A의 same-candidate one-shot Flyway + JPA validate
+→ pre-migration Flyway authority
+→ 10D-2A same-candidate one-shot Flyway + JPA validate
+→ post-migration Flyway authority
 → same-SHA API/Web cutover
-→ Compose readiness
-→ Cloudflare Access를 우회하지 않는 approved smoke
-→ current/previous state 확정
-→ failure 시 compatible previous image pair rollback
+→ PostgreSQL/API/Web + loopback readiness
+→ exact image env + current/state durable commit
+→ HomeOps deployment lifecycle
+→ private Docker config/container/temp cleanup + token zeroization
 ```
 
-- API/Web은 같은 40자리 commit SHA의 immutable image pair여야 하며 `latest`를 사용하지 않는다.
-- runtime-config update는 exact digest로만 받으며 host가 repository branch, caller path 또는 mutable tag를 실행하지 않는다.
-- deploy와 scheduled backup은 B1의 같은 project non-blocking operation lock을 사용한다. actual fixed root와 bootstrap/worker 설치·dry run은 B2에서 별도 검증한다.
-- predeploy verified backup 실패 시 migration/cutover를 시작하지 않는다.
-- Flyway는 candidate API의 one-shot migration/validate로 분리하고 일반 API startup에서 임의 schema update를 사용하지 않는다.
-- readiness와 approved smoke 성공 전에는 `current`를 candidate로 확정하지 않는다.
-- image rollback과 DB restore를 분리한다. backward-incompatible migration 뒤 previous image가 호환된다고 가정하거나 production DB restore를 자동 rollback으로 사용하지 않는다.
-- `down --volumes`, broad Docker prune, automatic reverse migration과 caller가 임의 shell/Compose path/image를 넘기는 SSH를 금지한다.
+- API/Web candidate는 requested 40자리 SHA tag, valid image ID/repository digest, linux/arm64와 OCI source/revision/version이 모두 일치해야 한다. runtime-config update는 command exact digest의 image를 owner-only `/private/tmp` 아래로 export하고 allowlist/mode/symlink·hardlink·size를 다시 검증한다. keep은 verified current identity를 그대로 재사용하며 fresh host는 두 mode 모두 거부한다.
+- Compose subprocess는 fixed minimal environment와 external owner-only env만 사용해 ambient `DOCKER_HOST`, image 또는 secret override를 authority로 삼지 않는다. candidate cutover는 API/Web만 `--no-deps --pull never`로 바꾸고 PostgreSQL volume/network를 유지한다.
+- pre/post schema authority는 latest successful Flyway version, failed migration 0과 deterministic history SHA-256이다. migration 이후 이 값이 바뀐 failure에는 previous image 호환성을 추측하지 않고 pending을 보존해 operator intervention으로 끝낸다. DB restore/reverse migration은 자동 실행하지 않는다.
+- schema authority가 동일한 failure만 previous exact image pair 복구를 시도한다. readiness 전 current/state commit은 없고 external env는 두 image key만 file fsync→atomic replace→parent fsync로 바꾼다.
+- pending phase는 `ARTIFACTS_VERIFIED`부터 `COMMITTING`까지 strict transition이다. recovery는 pending phase, observed container revision, schema와 readiness를 함께 확인하고 pre-migration abandoned, compatible rollback 또는 readiness-verified commit만 자동 처리한다. 모호한 post-migration 상태는 그대로 보존한다.
+- HomeOps reporter는 `[canonical_reporter, "deployments"]`, `shell=False`, compact JSON stdin으로 actual vocabulary `RUNNING/SUCCESS/FAILED/ROLLED_BACK`만 받는다. event에는 branch `main`, candidate/previous SHA, bounded actor/stage/summary와 rollback 여부만 포함하며 endpoint/secret/HMAC/spool, path, token과 사용자·금융 data는 포함하지 않는다. reporter 장애는 application transaction 결과를 바꾸지 않는다.
+- `down --volumes`, broad Docker prune, automatic DB rollback과 caller shell/Compose path/image를 금지한다. public Cloudflare smoke는 B2가 호출하지 않는다.
 
-10D-2B1에는 host state/lock/runtime-config staging source와 synthetic gate만 있다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, restricted wrapper, backup/migration/cutover worker와 Mac mini install/dry run은 10D-2B2다. Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+`./scripts/verify-host-deploy-transaction.sh`는 fake adapter/reporter와 owner-only temp state로 32개 command/token/artifact/order/failure/crash/recovery/privacy regression을 수행한다. 실제 Docker daemon, GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에는 접근하지 않는다. Hosted Full CI의 독립 `host-deploy-transaction` job도 같은 source gate만 실행한다.
+
+## 10D-3 activation boundary
+
+B2 완료는 transaction source와 synthetic recovery가 검증됐다는 의미다. 실제 GHCR package/credential, Tailscale credential, authorized key forced command, worker/runtime-config install, production 변경 없는 host preflight와 dry run, Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 모두 10D-3 별도 승인 대상이다. one-shot migration architecture가 실제 schema 변경과 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -238,7 +252,7 @@ main merge/release intent
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1/10D-2A/10D-2B1 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, host state 설치, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
+10C source와 10D-1/10D-2A/10D-2B1/B2 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, host state 설치, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3 운영 결정이다.
 
 ## 롤백
 

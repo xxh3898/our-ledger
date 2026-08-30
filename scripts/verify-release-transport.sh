@@ -20,8 +20,8 @@ if ! command -v docker >/dev/null 2>&1 \
   exit 1
 fi
 
-image_tag="our-ledger-runtime-config:issue-41-${git_head:0:12}-$$"
-container_name="our-ledger-runtime-config-issue-41-$$"
+image_tag="our-ledger-runtime-config:issue-43-${git_head:0:12}-$$"
+container_name="our-ledger-runtime-config-issue-43-$$"
 
 if docker container inspect "$container_name" >/dev/null 2>&1 \
   || docker image inspect "$image_tag" >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ trap 'exit 130' HUP INT TERM
 cleanup_labels=(
   --label io.homeserver.cleanup.environment=development
   --label io.homeserver.cleanup.project=our-ledger
-  --label io.homeserver.cleanup.task=issue-41-host-state-runtime-config-staging
+  --label io.homeserver.cleanup.task=issue-43-host-deploy-transaction
   --label io.homeserver.cleanup.lifecycle=task
   --label io.homeserver.cleanup.retain=false
   --label "io.homeserver.cleanup.git-head=$git_head"
@@ -134,7 +134,10 @@ expected_files = {
     "scripts/backup-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/deploy-production.sh": 0o700,
+    "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/host_state.py": 0o600,
+    "scripts/host_tools/production_deploy.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
@@ -204,6 +207,7 @@ PY
 bash -n \
   "$runtime_dir/scripts/backup-production.sh" \
   "$runtime_dir/scripts/backup_tools/backup_core.sh" \
+  "$runtime_dir/scripts/deploy-production.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
   "$runtime_dir/scripts/production-status.sh"
 (
