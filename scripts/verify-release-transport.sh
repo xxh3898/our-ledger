@@ -132,12 +132,16 @@ expected_files = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
     "scripts/backup-production.sh": 0o700,
+    "scripts/bootstrap-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
     "scripts/deploy-production.sh": 0o700,
     "scripts/host_tools/deploy_transaction.py": 0o600,
+    "scripts/host_tools/fresh_bootstrap_state.py": 0o600,
+    "scripts/host_tools/fresh_host_bootstrap.py": 0o600,
     "scripts/host_tools/host_state.py": 0o600,
     "scripts/host_tools/production_deploy.py": 0o600,
+    "scripts/host_tools/production_fresh_bootstrap.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
@@ -206,6 +210,7 @@ PY
 
 bash -n \
   "$runtime_dir/scripts/backup-production.sh" \
+  "$runtime_dir/scripts/bootstrap-production.sh" \
   "$runtime_dir/scripts/backup_tools/backup_core.sh" \
   "$runtime_dir/scripts/deploy-production.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
@@ -214,6 +219,7 @@ bash -n \
   cd "$runtime_dir"
   python3 -B -m scripts.release_tools.release_contract --help >/dev/null
   python3 -B -m scripts.host_tools.production_host --help >/dev/null
+  SSH_ORIGINAL_COMMAND=invalid python3 -B -m scripts.host_tools.production_fresh_bootstrap </dev/null >/dev/null 2>&1 || true
   python3 -B -m scripts.status_tools.production_status --help >/dev/null
   python3 -B -m scripts.status_tools.monitor_worker --help >/dev/null
 )

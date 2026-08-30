@@ -34,7 +34,7 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10D-1. Immutable Release/Deploy Source | Full CI 재사용, exact-SHA artifact, restricted intent | 기본 비활성 source/CI harness 검증 |
 | 10D-2A. Candidate Migration/Validation Gate | normal startup mutation 제거, same-image one-shot Flyway/JPA gate | disposable DB에서 migration/cutover 선행조건 검증 |
 | 10D-2B1. Host State / Shared Operation Lock / Runtime-config Staging | 고정 host root, project lock, immutable release와 versioned state source | temp host synthetic gate 검증 |
-| 10D-2B2. Host Deployment Transaction | restricted wrapper, backup/migration/cutover/readiness/recovery 조합 | pure/synthetic source gate 검증, 실제 설치는 10D-3A2/3B |
+| 10D-2B2. Host Deployment Transaction | restricted wrapper, backup/migration/cutover/readiness/recovery 조합 | pure/synthetic source gate 검증, 실제 설치는 10D-3B |
 | 10D-3A1. Production Household Bootstrap One-shot Gate | same-image no-HTTP exact-state bootstrap protocol | 합성 DB에서 create/verify/fail-closed source 검증 |
 | 10D-3A2. Fresh-host Bootstrap Transaction Source | owner-only input, fixed ingress, migration/bootstrap/backup durable transaction | 실제 값 없는 fresh-host source 검증 |
 | 10D-3B. Public Production Activation | Cloudflare, secret, 실제 User, schedule/replication | 허용된 두 사용자의 실제 운영 시작 |

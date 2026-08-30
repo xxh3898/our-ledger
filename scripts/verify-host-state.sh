@@ -9,10 +9,15 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest \
 
 bash -n \
   "$ROOT_DIR/scripts/backup-production.sh" \
+  "$ROOT_DIR/scripts/bootstrap-production.sh" \
   "$ROOT_DIR/scripts/backup_tools/backup_core.sh"
 
 if [[ ! -x "$ROOT_DIR/scripts/backup-production.sh" ]]; then
   printf 'Public backup wrapper에 실행 권한이 없습니다.\n' >&2
+  exit 1
+fi
+if [[ ! -x "$ROOT_DIR/scripts/bootstrap-production.sh" ]]; then
+  printf 'Fresh bootstrap wrapper에 실행 권한이 없습니다.\n' >&2
   exit 1
 fi
 if [[ -x "$ROOT_DIR/scripts/backup_tools/backup_core.sh" ]]; then

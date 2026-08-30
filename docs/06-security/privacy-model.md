@@ -79,6 +79,10 @@ PostgreSQL backup은 논리삭제 row, email, memo, Account/Category 이름을 �
 - checksum/metadata/latest marker는 dump의 integrity와 freshness만 표현하며 email, memo, 금융 reference 내용, Cloudflare credential을 포함하지 않는다.
 - 실제 외부 destination과 encryption key/tool은 10D에서 별도 승인하며 10C-2A source gate가 암호화된 외부 copy를 대신하지 않는다.
 
+## Production bootstrap input
+
+최초 Household input은 email, 표시명과 Household 이름을 포함하므로 backup과 별개의 일회성 민감 파일이다. 10D-3A2 source는 repository/runtime release 밖 fixed owner-only `0600` regular file만 최대 8 KiB로 읽어 same-image bootstrap stdin에 전달한다. CLI argument, environment, pending/state와 stdout/stderr에는 raw JSON·PII·생성 ID를 넣지 않는다. schema, readiness와 first verified backup이 모두 확인된 뒤에만 input을 unlink하고 parent directory를 fsync한다. 이 계약은 SSD secure erase를 뜻하지 않는다. 실제 input 생성·설치·전송은 10D-3B 별도 승인 대상이다.
+
 ## 운영자 접근
 
 Mac mini와 DB shell 접근은 Tailscale 등 관리 경로로 제한한다. Cloudflare Access 정책 변경과 내부 User provision도 운영 작업으로 취급한다. 운영자가 실데이터를 조회하는 절차는 필요성과 최소 범위를 기록한다.
