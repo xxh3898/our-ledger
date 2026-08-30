@@ -19,6 +19,9 @@ backend/
 - `application.yml`: 공통 Flyway/JPA/Actuator 계약
 - `application-local.yml`: local PostgreSQL 연결
 - `application-test.yml`: test log와 profile 분리
+- `application-production.yml`: Flyway/bootstrap off, JPA validate, HTTP/recurring normal runtime
+- `application-migration.yml`: same-image Flyway/JPA no-HTTP one-shot
+- `application-bootstrap.yml`: same-image JPA validate/Household bootstrap no-HTTP one-shot
 - `V1__foundation.sql`: 업무 table 없이 Flyway 연속성을 시작하는 Foundation migration
 - `V2__users_households.sql`: User, Household, HouseholdMember와 identity/membership 제약
 - `V3__accounts_categories_transactions.sql`: Account, Category Group/Category, Transaction과 Household composite FK
@@ -50,9 +53,11 @@ default/production 실행에는 저장소 밖의 `CLOUDFLARE_ACCESS_ISSUER`, `CL
 
 ## Bootstrap
 
-`our-ledger.bootstrap.enabled`는 기본 `false`다. 명시적으로 활성화하면 `ApplicationRunner`가 외부 설정의 두 User와 한 Household를 한 transaction으로 provision한다. 정확한 기존 상태는 no-op이고, partial data나 다른 표시명·상태·role·Household는 fail-fast한다.
+local/default의 `our-ledger.bootstrap.enabled`는 기본 `false`다. 개발 환경에서 명시적으로 활성화하면 generic `ApplicationRunner`가 외부 설정의 두 User와 한 Household를 한 transaction으로 provision한다. 정확한 기존 상태는 no-op이고, partial data나 다른 표시명·상태·role·Household는 fail-fast한다.
 
-local sample은 `OUR_LEDGER_BOOTSTRAP_*`에 `example.test` identity만 제공한다. 최초 provision 뒤 enabled를 다시 `false`로 두며 production DB 실행은 별도 운영 gate다.
+local sample은 `OUR_LEDGER_BOOTSTRAP_*`에 `example.test` identity만 제공한다. 최초 provision 뒤 enabled를 다시 `false`로 둔다.
+
+production은 generic runner를 등록하지 않는다. 동일 candidate image의 `production,bootstrap` mode만 최대 8 KiB raw byte를 먼저 제한하고 strict UTF-8로 디코딩한 exact JSON object 하나를 stdin에서 받아 JPA schema validation 뒤 `HouseholdBootstrapService`를 한 번 호출한다. Flyway, Web/HTTP, recurring scheduling, Cloudflare/local/test identity는 비활성이고 성공 시 `household-bootstrap: created|verified` marker 한 줄 뒤 context를 닫아 exit 0으로 끝난다. empty/malformed/oversize/invalid UTF-8, UTF-16/UTF-32 encoded JSON, unknown/duplicate/missing/null/wrong-type/trailing 입력, profile/flag override, DB/schema 실패와 partial/mismatch/extra 상태는 PII를 출력하지 않고 nonzero다. 실제 production input과 실행은 이 source gate 범위 밖이다.
 
 ## 실행
 

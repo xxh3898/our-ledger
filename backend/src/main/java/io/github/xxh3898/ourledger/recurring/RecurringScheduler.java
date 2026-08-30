@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 
 @Component
-@Profile("!migration")
+@Profile("!migration & !bootstrap")
 @ConditionalOnProperty(
         prefix = "our-ledger.recurring.scheduler",
         name = "enabled",

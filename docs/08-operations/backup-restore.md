@@ -11,7 +11,7 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. Slice 10D-2B1은 public standalone wrapper의 project operation lock과 lock을 다시 얻지 않는 internal backup core를 분리해 future deploy의 nested self-deadlock을 제거한다. Slice 10D-2B2 transaction source는 current API writer를 멈춘 뒤 같은 shared lock을 유지하며 internal core 성공과 pre-schema authority를 확인한 경우에만 candidate migration을 시작한다. host 설치, production backup/migration 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. Slice 10D-2B1은 public standalone wrapper의 project operation lock과 lock을 다시 얻지 않는 internal backup core를 분리해 future deploy의 nested self-deadlock을 제거한다. Slice 10D-2B2 transaction source는 current API writer를 멈춘 뒤 같은 shared lock을 유지하며 internal core 성공과 pre-schema authority를 확인한 경우에만 candidate migration을 시작한다. Slice 10D-3A1의 Household bootstrap source는 backup을 대신하거나 backup artifact에 input/PII를 저장하지 않으며, first verified backup을 포함한 fresh-host ordering은 후속 10D-3A2에서만 조합한다. host 설치, production backup/migration/bootstrap 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
 
 실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
@@ -87,7 +87,7 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 
 ## Future schedule과 offsite
 
-`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. B2도 plist나 fixed app root를 설치·실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 host preflight/dry run, LaunchAgent load와 scheduled backup 실행은 10D-3의 별도 운영 승인이다.
+`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. B2도 plist나 fixed app root를 설치·실행하지 않는다. 실제 restricted bootstrap 설치와 production 변경 없는 host preflight/dry run, LaunchAgent load와 scheduled backup 실행은 10D-3A2/3B의 별도 운영 승인이다.
 
 future offsite는 다음 순서를 따른다.
 
@@ -144,4 +144,4 @@ production DB를 drop/recreate하거나 `docker compose down --volumes`하는 co
 - CSV는 지정 기간의 미삭제 Transaction과 최소 reference/provenance만 포함하며 schema, Flyway history, 논리삭제 row, 운영 설정을 복구하지 못한다.
 - CSV 성공은 `pg_dump`, 외부 보관, retention, restore drill 성공을 의미하지 않는다.
 - 서버는 CSV history나 temp file을 backup처럼 보관하지 않는다.
-- 10C-2A source/drill, 10D-1 immutable transport, 10D-2A candidate migration, 10D-2B1 shared lock/state와 10D-2B2 transaction source gate는 구현됐지만 production backup/migration/restore 실행과 host install·보관·외부복제 활성화는 10D-3의 별도 운영 Gate다.
+- 10C-2A source/drill, 10D-1 immutable transport, 10D-2A candidate migration, 10D-2B1 shared lock/state, 10D-2B2 transaction과 10D-3A1 Household bootstrap source gate는 구현됐지만 production backup/migration/bootstrap/restore 실행과 host install·보관·외부복제 활성화는 10D-3A2/3B의 별도 운영 Gate다.

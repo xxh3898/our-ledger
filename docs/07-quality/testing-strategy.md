@@ -176,6 +176,20 @@ Immutable Production Runtime Harness Slice는 추가로 다음을 실제 Docker 
 
 `scripts/verify-production-runtime.sh`는 실제 운영 값 대신 고유 Compose project, Docker가 할당한 loopback port, 합성 credential과 disposable volume만 사용한다. `api-migration`과 normal `api`는 같은 exact-HEAD image를 사용하며 같은 script를 local `verify.sh`와 Hosted Full CI exact HEAD에서 실행한다. 실제 production deployment, migration, backup/restore, Cloudflare/Tunnel과 monitor는 이 테스트 대상이 아니다.
 
+Production Household Bootstrap One-shot Gate는 별도 actual PostgreSQL/container process에서 다음을 검증한다.
+
+- 같은 candidate API image의 `production,bootstrap`, no-HTTP/no-Flyway/no-recurring/database-only Compose authority
+- unmigrated DB nonzero와 table mutation 0, same-image V1→V8 migration의 bootstrap row 0
+- migrated empty DB의 exact 2 User/1 Household/2 Membership·OWNER/MEMBER·KRW·Asia/Seoul 생성
+- 같은 input `verified` rerun 전후 row/identity sequence와 Flyway history fingerprint 불변
+- empty/malformed/oversize/invalid UTF-8, valid UTF-16LE/BE·UTF-32LE/BE, unknown/duplicate/missing/null/wrong-type/trailing/same-email stdin failure
+- partial User, swapped role, extra User의 nonzero와 자동 repair 없는 state fingerprint 불변
+- normal production bootstrap override, migration/local/test/unknown profile 혼합, JPA schema damage와 unreachable DB fail-closed
+- bootstrap success marker exact 1회, raw JSON/PII/credential/ID/JDBC URL 비노출, one-shot container residue 0
+- migrated normal API readiness 뒤 bootstrap/Flyway state 불변과 V1~V8 filename/byte SHA-256 고정
+
+`scripts/verify-production-bootstrap.sh`는 cleanup label을 가진 고유 Compose project, 합성 identity/credential과 disposable PostgreSQL volume만 사용한다. 실제 production input/DB, GHCR/Tailscale/SSH/HomeOps/Cloudflare/LaunchAgent에 접근하지 않으며 local `verify.sh`와 Hosted Full CI의 독립 `production-bootstrap` job에서 실행한다.
+
 Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
 
 - env/backup path의 absolute/canonical/owner-only/repository 밖 경계와 root·Docker data·symlink·traversal 거부
@@ -443,4 +457,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 13개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 10개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 14개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 11개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

@@ -60,6 +60,7 @@ required_paths=(
   "scripts/verify-monitor-policy.sh"
   "scripts/verify-observability.sh"
   "scripts/verify-production-runtime.sh"
+  "scripts/verify-production-bootstrap.sh"
   "launchd/com.homeserver.our-ledger-monitor.plist.example"
   "launchd/com.homeserver.our-ledger-backup.plist.example"
 )

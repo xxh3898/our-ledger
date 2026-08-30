@@ -8,11 +8,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 @Configuration(proxyBeanMethods = false)
+@Profile("!production & !migration & !bootstrap")
 @EnableConfigurationProperties(HouseholdBootstrapProperties.class)
 public class HouseholdBootstrapConfiguration {
 
     @Bean("householdBootstrapRunner")
-    @Profile("!migration")
     @ConditionalOnProperty(
             prefix = "our-ledger.bootstrap",
             name = "enabled",

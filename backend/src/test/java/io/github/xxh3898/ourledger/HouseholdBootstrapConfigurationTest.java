@@ -58,4 +58,32 @@ class HouseholdBootstrapConfigurationTest {
                     ));
                 });
     }
+
+    @Test
+    void should_preserveGenericRunner_when_localProfileIsEnabled() {
+        contextRunner
+                .withInitializer(context -> context.getEnvironment().setActiveProfiles("local"))
+                .withPropertyValues(
+                        "our-ledger.bootstrap.enabled=true",
+                        "our-ledger.bootstrap.household-name=테스트 Household",
+                        "our-ledger.bootstrap.owner.email=owner@example.test",
+                        "our-ledger.bootstrap.owner.display-name=Owner",
+                        "our-ledger.bootstrap.member.email=member@example.test",
+                        "our-ledger.bootstrap.member.display-name=Member"
+                )
+                .run(context -> assertThat(context.containsBean("householdBootstrapRunner"))
+                        .isTrue());
+    }
+
+    @Test
+    void should_notRegisterGenericRunner_when_protectedProfileIsEnabled() {
+        for (String profile : new String[]{"production", "migration", "bootstrap"}) {
+            contextRunner
+                    .withInitializer(context -> context.getEnvironment().setActiveProfiles(profile))
+                    .withPropertyValues("our-ledger.bootstrap.enabled=true")
+                    .run(context -> assertThat(context.containsBean("householdBootstrapRunner"))
+                            .isFalse());
+        }
+        verifyNoInteractions(bootstrapService);
+    }
 }
