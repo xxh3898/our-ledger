@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from scripts.release_tools import release_contract
 ROOT = Path(__file__).resolve().parents[2]
 DETECTOR = ROOT / "scripts" / "detect-runtime-config-change.sh"
 DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
+PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-release.yml"
 FULL_CI_WORKFLOW = ROOT / ".github" / "workflows" / "full-ci.yml"
 RUNTIME_DOCKERFILE = ROOT / "runtime-config.Dockerfile"
 VERIFY_SCRIPT = ROOT / "scripts" / "verify-release-transport.sh"
@@ -19,7 +21,9 @@ REVISION = "1" * 40
 API_DIGEST = "sha256:" + ("a" * 64)
 WEB_DIGEST = "sha256:" + ("b" * 64)
 RUNTIME_DIGEST = "sha256:" + ("c" * 64)
+OTHER_DIGEST = "sha256:" + ("d" * 64)
 CHECKOUT_SHA = "d23441a48e516b6c34aea4fa41551a30e30af803"
+VALIDATION_RUN_ID = "33300523522"
 
 RUNTIME_FILES = {
     "compose.prod.yaml": ("0600", "/runtime/compose.yaml"),
@@ -92,6 +96,110 @@ RUNTIME_SOURCES = set(RUNTIME_FILES)
 
 
 class ReleaseContractTest(unittest.TestCase):
+    def test_validates_exact_publish_request_and_release_harness_authority(self) -> None:
+        request = release_contract.validate_publish_request(
+            revision=REVISION,
+            validation_run_id=VALIDATION_RUN_ID,
+        )
+        authority = release_contract.validate_publish_authority(
+            revision=REVISION,
+            validation_run_id=VALIDATION_RUN_ID,
+            repository="xxh3898/our-ledger",
+            run=_validation_run(),
+        )
+
+        self.assertEqual(request["releaseSha"], REVISION)
+        self.assertEqual(request["validationRunId"], int(VALIDATION_RUN_ID))
+        self.assertEqual(authority, request)
+
+    def test_publish_authority_rejects_wrong_or_incomplete_run(self) -> None:
+        mutations = (
+            ("id", 1),
+            ("head_branch", "dev"),
+            ("head_sha", "2" * 40),
+            ("status", "in_progress"),
+            ("conclusion", "failure"),
+            ("name", "Full CI"),
+            ("path", ".github/workflows/full-ci.yml"),
+            ("event", "pull_request"),
+        )
+
+        for key, value in mutations:
+            run = _validation_run()
+            run[key] = value
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(release_contract.ContractError):
+                    release_contract.validate_publish_authority(
+                        revision=REVISION,
+                        validation_run_id=VALIDATION_RUN_ID,
+                        repository="xxh3898/our-ledger",
+                        run=run,
+                    )
+
+        for repository_key in ("repository", "head_repository"):
+            run = _validation_run()
+            run[repository_key]["full_name"] = "other/repository"
+            with self.subTest(repository_key=repository_key):
+                with self.assertRaises(release_contract.ContractError):
+                    release_contract.validate_publish_authority(
+                        revision=REVISION,
+                        validation_run_id=VALIDATION_RUN_ID,
+                        repository="xxh3898/our-ledger",
+                        run=run,
+                    )
+
+    def test_publish_request_rejects_noncanonical_revision_and_run_id(self) -> None:
+        invalid = (
+            (release_contract.ZERO_SHA, VALIDATION_RUN_ID),
+            (REVISION.upper().replace("1", "A"), VALIDATION_RUN_ID),
+            (REVISION, "0"),
+            (REVISION, "01"),
+            (REVISION, "run-33300523522"),
+        )
+
+        for revision, run_id in invalid:
+            with self.subTest(revision=revision, run_id=run_id):
+                with self.assertRaises(release_contract.ContractError):
+                    release_contract.validate_publish_request(
+                        revision=revision,
+                        validation_run_id=run_id,
+                    )
+
+    def test_classifies_absent_and_same_digest_exact_tag(self) -> None:
+        create = release_contract.classify_package_tag(
+            revision=REVISION,
+            digest=API_DIGEST,
+            versions=[[_package_version(API_DIGEST)]],
+        )
+        reuse = release_contract.classify_package_tag(
+            revision=REVISION,
+            digest=API_DIGEST,
+            versions=[[_package_version(API_DIGEST, REVISION)]],
+        )
+
+        self.assertEqual(create, "create")
+        self.assertEqual(reuse, "reuse")
+
+    def test_package_tag_conflict_ambiguity_and_malformed_metadata_fail_closed(self) -> None:
+        invalid = (
+            [[_package_version(OTHER_DIGEST)]],
+            [[_package_version(API_DIGEST), _package_version(API_DIGEST)]],
+            [[_package_version(API_DIGEST), _package_version(OTHER_DIGEST, REVISION)]],
+            [[_package_version(API_DIGEST, REVISION), _package_version(OTHER_DIGEST, REVISION)]],
+            [[_package_version(API_DIGEST, REVISION, REVISION)]],
+            [[{"name": API_DIGEST, "metadata": {}}]],
+            {"name": API_DIGEST},
+        )
+
+        for versions in invalid:
+            with self.subTest(versions=versions):
+                with self.assertRaises(release_contract.ContractError):
+                    release_contract.classify_package_tag(
+                        revision=REVISION,
+                        digest=API_DIGEST,
+                        versions=versions,
+                    )
+
     def test_builds_and_parses_fixed_fresh_bootstrap_command(self) -> None:
         command = release_contract.build_bootstrap_command(
             revision=REVISION,
@@ -239,6 +347,36 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertEqual(result.stderr, "release contract validation failed\n")
         self.assertNotIn(secret_like_actor, result.stderr)
 
+    def test_publish_authority_cli_failure_is_generic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_file = Path(temporary) / "run.json"
+            run = _validation_run()
+            run["head_sha"] = "2" * 40
+            run_file.write_text(json.dumps(run), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(ROOT / "scripts/release_tools/release_contract.py"),
+                    "validate-publish-authority",
+                    "--revision",
+                    REVISION,
+                    "--validation-run-id",
+                    VALIDATION_RUN_ID,
+                    "--repository",
+                    "xxh3898/our-ledger",
+                    "--run-json-file",
+                    str(run_file),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 64)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "release contract validation failed\n")
+        self.assertNotIn(str(run_file), result.stderr)
+
 
 class RuntimeConfigChangeDetectorTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -337,6 +475,103 @@ class RuntimeConfigChangeDetectorTest(unittest.TestCase):
 
 
 class ReleaseSourceContractTest(unittest.TestCase):
+    def test_publish_only_workflow_is_manual_main_only_and_serialized(self) -> None:
+        workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        trigger = workflow[: workflow.index("\npermissions:\n")]
+        publish = workflow_job(workflow, "publish")
+
+        self.assertIn("on:\n  workflow_dispatch:\n", trigger)
+        for forbidden_trigger in ("push:", "pull_request:", "schedule:"):
+            self.assertNotIn(forbidden_trigger, trigger)
+        self.assertIn("      release_sha:", trigger)
+        self.assertIn("      validation_run_id:", trigger)
+        self.assertIn("  group: our-ledger-production\n", workflow)
+        self.assertIn("  cancel-in-progress: false\n", workflow)
+        self.assertIn("Reject non-main dispatch source", publish)
+        self.assertIn('"${GITHUB_REF}" != refs/heads/main', publish)
+        self.assertIn("runs-on: ubuntu-24.04-arm", publish)
+
+    def test_publish_only_permissions_and_boundary_are_minimal(self) -> None:
+        workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        publish = workflow_job(workflow, "publish")
+
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("      actions: read", publish)
+        self.assertIn("      contents: read", publish)
+        self.assertIn("      packages: write", publish)
+        for forbidden in (
+            "OUR_LEDGER_DEPLOY_ENABLED",
+            "deployments: write",
+            "id-token: write",
+            "environment: Production",
+            "tailscale/",
+            "ssh ",
+            "HOME_MINI",
+        ):
+            self.assertNotIn(forbidden, workflow)
+        self.assertEqual(workflow.count("  publish:\n"), 1)
+        self.assertNotIn("\n  deploy:\n", workflow)
+
+    def test_publish_only_validates_authority_before_registry_login(self) -> None:
+        workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        publish = workflow_job(workflow, "publish")
+
+        authority = publish.index("      - name: Validate exact publish authority")
+        login = publish.index("      - name: Log in to GHCR")
+        first_build = publish.index("      - name: Build API by digest")
+        self.assertLess(authority, login)
+        self.assertLess(login, first_build)
+        self.assertIn("validate-publish-request", publish)
+        self.assertIn("validate-publish-authority", publish)
+        self.assertIn('"${RELEASE_SHA}" != "${live_main}"', publish)
+        self.assertIn("git merge-base --is-ancestor", publish)
+        self.assertEqual(publish.count("git ls-remote"), 2)
+        self.assertIn("/actions/runs/${VALIDATION_RUN_ID}", publish)
+        self.assertIn("git worktree add --detach", publish)
+        self.assertIn("persist-credentials: false", publish)
+
+    def test_publish_only_builds_three_arm64_digests_then_preflights_tags(self) -> None:
+        workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        publish = workflow_job(workflow, "publish")
+
+        self.assertEqual(publish.count("platforms: linux/arm64"), 3)
+        self.assertEqual(publish.count("push-by-digest=true"), 3)
+        self.assertEqual(publish.count("name-canonical=true"), 3)
+        self.assertEqual(
+            publish.count("org.opencontainers.image.revision=${{ env.RELEASE_SHA }}"),
+            3,
+        )
+        self.assertEqual(
+            publish.count("org.opencontainers.image.version=${{ env.RELEASE_SHA }}"),
+            3,
+        )
+        self.assertIn("REVISION=${{ env.RELEASE_SHA }}", publish)
+        self.assertNotIn("\n          tags:", publish)
+        self.assertIn("classify-package-tag", publish)
+        self.assertIn("api_mode=", publish)
+        self.assertIn("runtime_config_mode=", publish)
+        self.assertLess(
+            publish.index("for record in \"${artifacts[@]}\"; do"),
+            publish.index("docker buildx imagetools create"),
+        )
+        self.assertIn("--prefer-index=false", publish)
+        self.assertIn("validate-publish", publish)
+
+    def test_publish_only_privileged_actions_use_exact_commit_revisions(self) -> None:
+        workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        publish = workflow_job(workflow, "publish")
+        action_refs = re.findall(
+            r"^\s+uses:\s+([^\s@]+)@([^\s#]+)",
+            publish,
+            re.MULTILINE,
+        )
+
+        self.assertTrue(action_refs)
+        self.assertIn(("actions/checkout", CHECKOUT_SHA), action_refs)
+        for action, revision in action_refs:
+            with self.subTest(action=action):
+                self.assertRegex(revision, r"^[0-9a-f]{40}$")
+
     def test_full_ci_is_reusable_and_main_validation_has_one_authority(self) -> None:
         workflow = FULL_CI_WORKFLOW.read_text(encoding="utf-8")
         push_block = workflow[
@@ -490,10 +725,10 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn("python3 -m unittest", source)
         self.assertIn("--platform linux/arm64", source)
         self.assertIn("--network none", source)
-        self.assertIn(
-            "io.homeserver.cleanup.task=issue-43-host-deploy-transaction",
-            source,
-        )
+        self.assertIn('cleanup_task="${GITHUB_HEAD_REF:-}"', source)
+        self.assertIn('git -C "$ROOT_DIR" branch --show-current', source)
+        self.assertIn('io.homeserver.cleanup.task=$cleanup_task', source)
+        self.assertNotIn("issue-43-host-deploy-transaction", source)
         self.assertNotRegex(
             source,
             r"(?m)(?:^|\s)(?:curl|gh|ssh|tailscale)(?:\s|$)|docker\s+(?:login|push)",
@@ -508,6 +743,31 @@ def workflow_job(workflow: str, job_id: str) -> str:
     body_start = start + len(header)
     match = re.search(r"\n  [A-Za-z0-9_-]+:\n", workflow[body_start:])
     return workflow[start:] if match is None else workflow[start : body_start + match.start()]
+
+
+def _validation_run() -> dict[str, object]:
+    return {
+        "conclusion": "success",
+        "event": "push",
+        "head_branch": "main",
+        "head_repository": {"full_name": "xxh3898/our-ledger"},
+        "head_sha": REVISION,
+        "id": int(VALIDATION_RUN_ID),
+        "name": "Release Source Harness",
+        "path": ".github/workflows/deploy.yml",
+        "repository": {"full_name": "xxh3898/our-ledger"},
+        "status": "completed",
+    }
+
+
+def _package_version(digest: str, *tags: str) -> dict[str, object]:
+    return {
+        "metadata": {
+            "container": {"tags": list(tags)},
+            "package_type": "container",
+        },
+        "name": digest,
+    }
 
 
 if __name__ == "__main__":

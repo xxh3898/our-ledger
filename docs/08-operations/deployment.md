@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. Slice 10D-2B2는 이 authority 위에 restricted wrapper, exact artifact 검증, backup/migration/cutover/readiness와 crash recovery를 조합한 source를 추가한다. Slice 10D-3A1은 같은 candidate API image의 production Household bootstrap stdin protocol과 deterministic no-HTTP lifecycle을 고정하고, Slice 10D-3A2는 current가 없는 host만 허용하는 별도 ingress와 durable forward recovery transaction을 source/disposable gate로 조합한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/bootstrap/monitor/HomeOps reporter, forced-command/pre-current ingress 설치, actual bootstrap input, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. Slice 10D-2B2는 이 authority 위에 restricted wrapper, exact artifact 검증, backup/migration/cutover/readiness와 crash recovery를 조합한 source를 추가한다. Slice 10D-3A1은 같은 candidate API image의 production Household bootstrap stdin protocol과 deterministic no-HTTP lifecycle을 고정하고, Slice 10D-3A2는 current가 없는 host만 허용하는 별도 ingress와 durable forward recovery transaction을 source/disposable gate로 조합한다. Slice 10D-3B0은 deploy와 분리된 exact-SHA GHCR publish-only source를 추가한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/bootstrap/monitor/HomeOps reporter, forced-command/pre-current ingress 설치, actual bootstrap input, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
 
 ## 목표 구조
 
@@ -191,6 +191,18 @@ deploy-our-ledger-v1 <exact-40-sha> update <sha256:64-lowercase-hex> <bounded-ac
 
 helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. B2 `deploy-production.sh`도 `SSH_ORIGINAL_COMMAND`와 최대 8 KiB stdin token 외 caller override를 받지 않으며 token을 argument/environment/state/report에 넣지 않고 종료 시 mutable buffer를 비운다. source가 존재해도 forced-command와 credential이 설치되지 않았으므로 kill switch를 활성화할 운영 근거는 아직 없다.
 
+## 10D-3B0 exact-SHA GHCR publish-only source
+
+`.github/workflows/publish-release.yml`은 normal release/deploy workflow와 분리된 `workflow_dispatch` 전용 source다. `OUR_LEDGER_DEPLOY_ENABLED`를 읽거나 변경하지 않고 Tailscale, SSH, deployment permission, `Production` environment와 host command를 포함하지 않는다. production concurrency는 기존 writer와 같은 `our-ledger-production`, `cancel-in-progress: false`를 사용하며 publish job만 validation run 조회용 `actions: read`, source용 `contents: read`, artifact용 `packages: write`를 갖는다.
+
+입력은 lowercase non-zero exact `release_sha`와 성공한 Release Source Harness `validation_run_id` 두 개뿐이다. login/build 전에 dispatch ref와 checked-out/remote live `main`, candidate의 live-main equality, run의 same repository, `main`, exact SHA, workflow name/path, completed/success를 fail closed로 결합한다. trusted live-main checkout은 helper authority로 남기고 candidate source는 별도 detached worktree에서 build한다.
+
+API/Web/runtime-config는 candidate SHA의 `linux/arm64`, OCI source/revision/version identity로 tag 없이 digest-first push한다. package version metadata에서 세 candidate digest가 정확히 하나씩 확인된 뒤 exact SHA tag를 모두 preflight한다. absent는 candidate digest로 생성하고 same은 재사용하며 conflict, duplicate, malformed, unavailable은 final tag write 전에 실패한다. tag 생성 뒤 세 tag를 같은 digest로 다시 확인한다. metadata indexing은 bounded retry하고 실패를 success로 간주하지 않는다.
+
+GHCR에는 source가 사용할 수 있는 documented conditional tag-create API가 없으므로 workflow 밖 registry admin의 동시 retag까지 원자적으로 막는다고 주장하지 않는다. repository-owned writer는 shared concurrency로 직렬화하고 exact SHA tag를 운영상 immutable로 취급한다. digest-first 이후 실패하면 untagged candidate digest나 일부 동일-candidate tag가 남을 수 있으며 기존 tag를 삭제·교체하지 않고 같은 exact request로 forward-complete한다.
+
+`GITHUB_TOKEN`은 validation/package GitHub API와 GHCR login에만 사용하고 argv, artifact, summary나 raw error에 기록하지 않는다. local/PR/Hosted `verify-release-transport.sh`는 helper와 workflow source를 읽어 검증할 뿐 login/push를 실행하지 않는다. 이 source가 `dev`에 병합되고 별도 Release Gate로 `main`에 승격되기 전까지 Issue #59는 HOLD이며, source release만으로 actual package가 존재한다고 간주하지 않는다.
+
 ## 10D-2B1 host state와 shared operation lock
 
 production worker의 app root는 source에서 `/Users/homeserver/Server/apps/our-ledger`로 고정한다. production CLI와 environment는 root, app/state/Compose path override를 받지 않는다. test-only `synthetic_host`만 dependency injection으로 mode `0700` temp root를 사용하며 actual fixed path를 읽거나 쓰지 않는다.
@@ -292,7 +304,7 @@ DB mutation 뒤 실패에는 volume/User/Household/Flyway history를 삭제하�
 
 ## 10D-3B activation boundary
 
-B2, 3A1과 3A2 완료는 deployment/application bootstrap/fresh transaction source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. owner-only actual env/input, pre-current ingress 설치, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, Cloudflare/secret/User, actual production DB/migration/bootstrap/backup, schedule·replication, public smoke와 kill switch 활성화는 10D-3B 별도 승인 대상이다. one-shot migration/bootstrap architecture가 실제 schema나 2인 Household 의미와 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+B2, 3A1, 3A2와 3B0 완료는 deployment/application bootstrap/fresh transaction/publish-only source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. 3B0 workflow의 실제 실행, owner-only actual env/input, pre-current ingress 설치, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, Cloudflare/secret/User, actual production DB/migration/bootstrap/backup, schedule·replication, public smoke와 kill switch 활성화는 10D-3B 별도 승인 대상이다. one-shot migration/bootstrap architecture가 실제 schema나 2인 Household 의미와 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -307,7 +319,7 @@ B2, 3A1과 3A2 완료는 deployment/application bootstrap/fresh transaction sour
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1/A2 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, ingress/host state 설치, actual bootstrap input/DB write, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3B 운영 결정이다.
+10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1/A2/3B0 source/CI 통과는 artifact publish workflow 실행, Tailscale/SSH, production deploy, ingress/host state 설치, actual bootstrap input/DB write, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3B 운영 결정이다.
 
 ## 롤백
 
