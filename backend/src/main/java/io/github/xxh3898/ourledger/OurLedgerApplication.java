@@ -1,5 +1,6 @@
 package io.github.xxh3898.ourledger;
 
+import io.github.xxh3898.ourledger.bootstrap.ProductionHouseholdBootstrapRunner;
 import io.github.xxh3898.ourledger.ops.MigrationEnvironmentValidator;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -15,6 +16,14 @@ public class OurLedgerApplication {
 
         if (MigrationEnvironmentValidator.isMigrationMode(context.getEnvironment())) {
             System.out.println("migration-validation: success");
+            int exitCode = SpringApplication.exit(context);
+            System.exit(exitCode);
+        }
+
+        if (MigrationEnvironmentValidator.isBootstrapMode(context.getEnvironment())) {
+            ProductionHouseholdBootstrapRunner runner =
+                    context.getBean(ProductionHouseholdBootstrapRunner.class);
+            System.out.println(runner.successMarker());
             int exitCode = SpringApplication.exit(context);
             System.exit(exitCode);
         }

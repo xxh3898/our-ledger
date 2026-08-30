@@ -121,14 +121,14 @@ related:
 - `main` push와 controlled manual dispatch가 같은 재사용 Full CI를 먼저 실행하며 production concurrency는 `our-ledger-production`, `cancel-in-progress: false`로 직렬화된다.
 - `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 정확히 `true`가 아니면 validation만 실행되고 GHCR login/publish, Tailscale, SSH와 production environment job은 시작하지 않는다.
 - API와 Web은 같은 exact 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로만 publish하도록 정의하며 `latest`와 임의 image/tag를 허용하지 않는다.
-- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B1 state primitive와 10D-3 설치 단계가 강제한다.
+- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B1 state primitive와 10D-3A2 설치 단계가 강제한다.
 - last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
 - restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
 - GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
 - publish/deploy privileged job의 모든 third-party action ref는 exact 40자리 commit SHA다.
 - local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
-- 10D-1 완료는 transport source contract만 뜻한다. B1 lock/state와 B2 restricted transaction source가 후속 gate로 추가됐어도 actual host install, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+- 10D-1 완료는 transport source contract만 뜻한다. B1 lock/state와 B2 restricted transaction source가 후속 gate로 추가됐어도 actual host install/bootstrap, credential·Cloudflare·schedule·public activation은 10D-3A2/3B 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
 
 ### Slice 10D-2A Candidate Migration/Validation Gate
 
@@ -143,6 +143,19 @@ related:
 - 성공·실패 cleanup 뒤 exact synthetic project container/network/volume/image residue가 0이며 credential/token/email을 output evidence로 노출하지 않는다.
 - Hosted Full CI가 PR exact HEAD에서 전체 gate를 통과하고 actual production/GHCR/Tailscale/SSH/HomeOps/Cloudflare를 사용하지 않는다.
 
+### Slice 10D-3A1 Production Household Bootstrap One-shot Gate
+
+- normal `production`은 bootstrap false를 강제하며 env override로 HTTP runtime과 bootstrap을 함께 실행할 수 없다.
+- profile-gated `api-bootstrap`은 normal API/migration과 동일한 exact candidate image, database-only network, no port, read-only/non-root one-shot contract를 사용한다.
+- bootstrap mode는 정확히 `production,bootstrap`, Flyway false, JPA validate, Web NONE, recurring false, production bootstrap true를 요구하고 migration/local/test/unknown profile 또는 effective setting override를 nonzero로 거부한다.
+- stdin은 최대 8 KiB UTF-8 JSON object 하나이며 exact field set, `formatVersion=1`, duplicate/unknown/missing/null/wrong-type/trailing 거부와 기존 email canonicalization/distinct-domain validation을 적용한다.
+- empty migrated DB에는 2 ACTIVE User, KRW/Asia/Seoul Household 하나와 OWNER/MEMBER membership을 한 transaction으로 생성한다. 같은 input 재실행은 verified exit 0이며 row와 identity sequence가 변하지 않는다.
+- partial User/Household/membership, role/name/status mismatch, extra User/Household는 repair/delete/overwrite하지 않고 state fingerprint 불변 nonzero로 끝난다.
+- 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
+- actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
+- local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
+- Hosted Full CI가 exact PR HEAD에서 신규 `production-bootstrap`을 포함한 11개 job 전체를 통과하며 actual production input/DB, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
 - production worker의 app root는 `/Users/homeserver/Server/apps/our-ledger`로 고정하고 production CLI/environment에 `--root`, `--app-dir`, state/Compose path override 또는 public lock bypass를 노출하지 않는다.
@@ -155,7 +168,7 @@ related:
 - pending 존재 중 새 stage/transaction은 거부하고 crash 뒤 pending을 보존한다. candidate 성공을 추측하지 않으며 explicit abandoned pending clear는 current/state가 previous에서 변하지 않은 경우만 허용한다.
 - local `verify-host-state.sh`와 synthetic backup/restore gate는 temp app root/disposable Compose만 사용해 lock contention, release reuse/collision, corruption/path escape, pending/crash와 internal core 호출을 검증한다.
 - runtime-config Dockerfile, change detector, exported file/mode gate와 Hosted Full CI 독립 `host-state` job이 동기화되고 actual `/Users/homeserver/Server`, GHCR/Tailscale/SSH/HomeOps/production resource를 읽거나 쓰지 않는다.
-- 10D-2B1 primitive는 B2 transaction에서 재사용하며 actual host install/dry run과 activation은 10D-3 전까지 수행하지 않는다.
+- 10D-2B1 primitive는 B2/3A2 transaction에서 재사용하며 actual host install/dry run과 activation은 10D-3A2/3B 전까지 수행하지 않는다.
 
 ### Slice 10D-2B2 Restricted Host Deployment Transaction Gate
 
@@ -182,7 +195,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/migration/restore/HomeOps reporter와 LaunchAgent는 10D-2B2 완료 기준이 아니다. B2는 host transaction source의 합성 검증까지만 제공하며 install/credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User/bootstrap input, production status/backup/migration/bootstrap/restore/HomeOps reporter와 LaunchAgent는 10D-3A1 완료 기준이 아니다. B2/3A1은 host transaction/bootstrap protocol source의 합성 검증까지만 제공하며 install·fresh-host transaction은 10D-3A2, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3B 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 
