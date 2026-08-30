@@ -44,6 +44,8 @@ docker build --file infra/docker/web.Dockerfile --tag our-ledger-web:sha-replace
 
 `.github/workflows/deploy.yml`은 `main` exact HEAD에서 reusable Full CI를 먼저 실행한다. `OUR_LEDGER_DEPLOY_ENABLED` repository variable이 없거나 정확히 `true`가 아니면 publish와 deploy job은 건너뛰어 GHCR login/push, Tailscale과 SSH가 실행되지 않는다. workflow는 production concurrency `our-ledger-production`을 `cancel-in-progress: false`로 직렬화한다.
 
+`.github/workflows/publish-release.yml`은 kill switch와 transport를 사용하지 않는 별도 manual publish-only source다. live `main` source, same-repository successful Release Source Harness run과 같은 exact candidate를 login 전에 결합하고 API/Web/runtime-config를 candidate SHA의 ARM64 digest-first artifact로 만든다. 세 package exact tag를 모두 preflight해 absent만 생성하고 same은 reuse하며 conflict/ambiguous metadata는 tag write 전에 실패한다. 생성 뒤 세 tag/digest를 재확인한다. job은 validation 조회용 `actions: read`, source용 `contents: read`, artifact용 `packages: write`만 사용하고 Tailscale, SSH, deployment permission, Production environment와 host command가 없다.
+
 kill switch 이후 source contract는 API/Web/runtime-config를 같은 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로 publish하고 digest 형식을 확인한다. runtime-config detector는 last successful Production revision과 candidate 사이 exact source allowlist를 비교해 `keep` 또는 `update`만 반환하며 invalid/missing/non-ancestor range를 거부한다. restricted intent grammar는 다음 두 개뿐이다.
 
 ```text
@@ -59,7 +61,7 @@ local source 검증은 다음 command다.
 ./scripts/verify-release-transport.sh
 ```
 
-이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1/A2 source가 강제하고 actual install은 10D-3B가 담당한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
+이 gate는 helper/unit와 두 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1/A2 source가 강제하고 actual install은 10D-3B가 담당한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다. publish-only source의 actual dispatch와 Issue #59 재개는 source Release 이후 별도 운영 승인 대상이다.
 
 ## Host state/shared operation lock source
 

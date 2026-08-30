@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
 
 
 ZERO_SHA = "0" * 40
@@ -16,6 +17,12 @@ BOOTSTRAP_COMMAND_NAME = "bootstrap-our-ledger-v1"
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 ACTOR_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+RUN_ID_PATTERN = re.compile(r"[1-9][0-9]{0,19}")
+PUBLISH_REPOSITORY = "xxh3898/our-ledger"
+VALIDATION_WORKFLOW_NAME = "Release Source Harness"
+VALIDATION_WORKFLOW_PATH = ".github/workflows/deploy.yml"
+VALIDATION_WORKFLOW_EVENTS = frozenset(("push", "workflow_dispatch"))
+MAX_JSON_BYTES = 8 * 1024 * 1024
 KEEP_COMMAND_PATTERN = re.compile(
     rf"{COMMAND_NAME} ([0-9a-f]{{40}}) keep ([A-Za-z0-9][A-Za-z0-9_-]{{0,63}})"
 )
@@ -51,6 +58,132 @@ def validate_actor(value: str) -> str:
     if ACTOR_PATTERN.fullmatch(value) is None:
         raise ContractError("release actor is invalid")
     return value
+
+
+def validate_run_id(value: str) -> int:
+    if RUN_ID_PATTERN.fullmatch(value) is None:
+        raise ContractError("validation run id is invalid")
+    return int(value)
+
+
+def validate_publish_request(
+    *,
+    revision: str,
+    validation_run_id: str,
+) -> dict[str, int | str]:
+    return {
+        "releaseSha": validate_revision(revision),
+        "validationRunId": validate_run_id(validation_run_id),
+    }
+
+
+def validate_publish_authority(
+    *,
+    revision: str,
+    validation_run_id: str,
+    repository: str,
+    run: object,
+) -> dict[str, int | str]:
+    request = validate_publish_request(
+        revision=revision,
+        validation_run_id=validation_run_id,
+    )
+    if repository != PUBLISH_REPOSITORY or type(run) is not dict:
+        raise ContractError("publish authority is invalid")
+
+    run_id = run.get("id")
+    if type(run_id) is not int or run_id != request["validationRunId"]:
+        raise ContractError("publish authority is invalid")
+    for repository_key in ("repository", "head_repository"):
+        run_repository = run.get(repository_key)
+        if type(run_repository) is not dict:
+            raise ContractError("publish authority is invalid")
+        if run_repository.get("full_name") != repository:
+            raise ContractError("publish authority is invalid")
+
+    expected = {
+        "conclusion": "success",
+        "head_branch": "main",
+        "head_sha": request["releaseSha"],
+        "name": VALIDATION_WORKFLOW_NAME,
+        "path": VALIDATION_WORKFLOW_PATH,
+        "status": "completed",
+    }
+    if any(run.get(key) != value for key, value in expected.items()):
+        raise ContractError("publish authority is invalid")
+    if run.get("event") not in VALIDATION_WORKFLOW_EVENTS:
+        raise ContractError("publish authority is invalid")
+    return request
+
+
+def classify_package_tag(
+    *,
+    revision: str,
+    digest: str,
+    versions: object,
+) -> str:
+    revision = validate_revision(revision)
+    digest = validate_digest(digest)
+    entries = _flatten_package_versions(versions)
+
+    candidate_count = 0
+    tagged_digests: list[str] = []
+    for entry in entries:
+        version_digest = validate_digest(_required_string(entry, "name"))
+        metadata = entry.get("metadata")
+        if type(metadata) is not dict or metadata.get("package_type") != "container":
+            raise ContractError("package metadata is invalid")
+        container = metadata.get("container")
+        if type(container) is not dict:
+            raise ContractError("package metadata is invalid")
+        tags = container.get("tags")
+        if type(tags) is not list or any(type(tag) is not str or not tag for tag in tags):
+            raise ContractError("package metadata is invalid")
+        if len(tags) != len(set(tags)):
+            raise ContractError("package metadata is invalid")
+
+        if version_digest == digest:
+            candidate_count += 1
+        if revision in tags:
+            tagged_digests.append(version_digest)
+
+    if candidate_count != 1:
+        raise ContractError("candidate package digest is unavailable")
+    if not tagged_digests:
+        return "create"
+    if tagged_digests == [digest]:
+        return "reuse"
+    raise ContractError("package tag conflicts with candidate digest")
+
+
+def _flatten_package_versions(value: object) -> list[dict[str, object]]:
+    if type(value) is not list:
+        raise ContractError("package metadata is invalid")
+    if all(type(entry) is dict for entry in value):
+        return value
+    if not all(type(page) is list for page in value):
+        raise ContractError("package metadata is invalid")
+
+    entries: list[dict[str, object]] = []
+    for page in value:
+        if not all(type(entry) is dict for entry in page):
+            raise ContractError("package metadata is invalid")
+        entries.extend(page)
+    return entries
+
+
+def _required_string(value: dict[str, object], key: str) -> str:
+    result = value.get(key)
+    if type(result) is not str:
+        raise ContractError("package metadata is invalid")
+    return result
+
+
+def _load_json_file(value: str) -> object:
+    payload = Path(value).read_bytes()
+    if not payload or len(payload) > MAX_JSON_BYTES:
+        raise ContractError("JSON authority is invalid")
+    return json.loads(payload.decode("utf-8"))
 
 
 def build_command(
@@ -179,6 +312,21 @@ def _parser() -> argparse.ArgumentParser:
     publish.add_argument("--web-digest", required=True)
     publish.add_argument("--mode", required=True)
     publish.add_argument("--runtime-config-digest")
+
+    publish_request = subparsers.add_parser("validate-publish-request")
+    publish_request.add_argument("--revision", required=True)
+    publish_request.add_argument("--validation-run-id", required=True)
+
+    publish_authority = subparsers.add_parser("validate-publish-authority")
+    publish_authority.add_argument("--revision", required=True)
+    publish_authority.add_argument("--validation-run-id", required=True)
+    publish_authority.add_argument("--repository", required=True)
+    publish_authority.add_argument("--run-json-file", required=True)
+
+    classify_tag = subparsers.add_parser("classify-package-tag")
+    classify_tag.add_argument("--revision", required=True)
+    classify_tag.add_argument("--digest", required=True)
+    classify_tag.add_argument("--versions-json-file", required=True)
     return parser
 
 
@@ -240,7 +388,44 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-    except ContractError:
+        if arguments.command == "validate-publish-request":
+            print(
+                json.dumps(
+                    validate_publish_request(
+                        revision=arguments.revision,
+                        validation_run_id=arguments.validation_run_id,
+                    ),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if arguments.command == "validate-publish-authority":
+            print(
+                json.dumps(
+                    validate_publish_authority(
+                        revision=arguments.revision,
+                        validation_run_id=arguments.validation_run_id,
+                        repository=arguments.repository,
+                        run=_load_json_file(arguments.run_json_file),
+                    ),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if arguments.command == "classify-package-tag":
+            print(
+                classify_package_tag(
+                    revision=arguments.revision,
+                    digest=arguments.digest,
+                    versions=_load_json_file(arguments.versions_json_file),
+                )
+            )
+            return 0
+    except (ContractError, OSError, UnicodeError, json.JSONDecodeError):
         print("release contract validation failed", file=sys.stderr)
         return 64
     raise AssertionError("unreachable command")
