@@ -49,6 +49,26 @@ jobs:
       - name: Production runtime 검증
         run: ./scripts/verify-production-runtime.sh
 
+  production-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Production Household bootstrap 검증
+        run: ./scripts/verify-production-bootstrap.sh
+
+  fresh-host-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Fresh-host bootstrap transaction 검증
+        run: ./scripts/verify-fresh-host-bootstrap.sh
+
   host-state:
     runs-on: ubuntu-latest
     timeout-minutes: 10

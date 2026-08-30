@@ -227,7 +227,7 @@ export CLOUDFLARE_ACCESS_JWK_SET_URI=https://runtime.cloudflareaccess.example/cd
 export CLOUDFLARE_ACCESS_AUDIENCE=runtime-audience
 export OUR_LEDGER_EXPECTED_COMPOSE_PROJECT="$project_name"
 
-"${compose[@]}" --profile migration config --format json \
+"${compose[@]}" --profile migration --profile bootstrap config --format json \
   | python3 "$ROOT_DIR/scripts/check-production-compose.py"
 
 printf '\n[production 2/13] clean immutable image build\n'

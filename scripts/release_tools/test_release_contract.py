@@ -25,6 +25,10 @@ RUNTIME_FILES = {
     "compose.prod.yaml": ("0600", "/runtime/compose.yaml"),
     "infra/nginx/nginx.conf": ("0600", "/runtime/infra/nginx/nginx.conf"),
     "scripts/backup-production.sh": ("0700", "/runtime/scripts/backup-production.sh"),
+    "scripts/bootstrap-production.sh": (
+        "0700",
+        "/runtime/scripts/bootstrap-production.sh",
+    ),
     "scripts/backup_tools/backup_artifact.py": (
         "0600",
         "/runtime/scripts/backup_tools/backup_artifact.py",
@@ -41,6 +45,14 @@ RUNTIME_FILES = {
         "0600",
         "/runtime/scripts/host_tools/deploy_transaction.py",
     ),
+    "scripts/host_tools/fresh_bootstrap_state.py": (
+        "0600",
+        "/runtime/scripts/host_tools/fresh_bootstrap_state.py",
+    ),
+    "scripts/host_tools/fresh_host_bootstrap.py": (
+        "0600",
+        "/runtime/scripts/host_tools/fresh_host_bootstrap.py",
+    ),
     "scripts/host_tools/host_state.py": (
         "0600",
         "/runtime/scripts/host_tools/host_state.py",
@@ -48,6 +60,10 @@ RUNTIME_FILES = {
     "scripts/host_tools/production_deploy.py": (
         "0600",
         "/runtime/scripts/host_tools/production_deploy.py",
+    ),
+    "scripts/host_tools/production_fresh_bootstrap.py": (
+        "0600",
+        "/runtime/scripts/host_tools/production_fresh_bootstrap.py",
     ),
     "scripts/host_tools/production_host.py": (
         "0600",
@@ -76,6 +92,39 @@ RUNTIME_SOURCES = set(RUNTIME_FILES)
 
 
 class ReleaseContractTest(unittest.TestCase):
+    def test_builds_and_parses_fixed_fresh_bootstrap_command(self) -> None:
+        command = release_contract.build_bootstrap_command(
+            revision=REVISION,
+            runtime_config_digest=RUNTIME_DIGEST,
+            actor="release_actor-1",
+        )
+
+        self.assertEqual(
+            command,
+            f"bootstrap-our-ledger-v1 {REVISION} {RUNTIME_DIGEST} release_actor-1",
+        )
+        self.assertEqual(
+            release_contract.parse_bootstrap_command(command),
+            {
+                "actor": "release_actor-1",
+                "revision": REVISION,
+                "runtimeConfigDigest": RUNTIME_DIGEST,
+            },
+        )
+
+    def test_fresh_bootstrap_command_rejects_flags_paths_and_extra_arguments(self) -> None:
+        invalid = (
+            f"bootstrap-our-ledger-v1 {REVISION} {RUNTIME_DIGEST} actor extra",
+            f"bootstrap-our-ledger-v1 {REVISION} {RUNTIME_DIGEST} actor;id",
+            f"bootstrap-our-ledger-v1 {REVISION} /tmp/runtime actor",
+            f"bootstrap-our-ledger-v1 {REVISION} {RUNTIME_DIGEST} actor --skip-backup",
+            f"bootstrap-our-ledger-v1 {'A' * 40} {RUNTIME_DIGEST} actor",
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaises(release_contract.ContractError):
+                    release_contract.parse_bootstrap_command(value)
+
     def test_builds_and_parses_fixed_keep_command(self) -> None:
         command = release_contract.build_command(
             revision=REVISION,

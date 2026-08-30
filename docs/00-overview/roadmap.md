@@ -1,6 +1,6 @@
 ---
 status: active
-version: 1.6
+version: 1.7
 last_updated: 2026-08-30
 related:
   - 01-product/feature-matrix.md
@@ -34,8 +34,10 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10D-1. Immutable Release/Deploy Source | Full CI 재사용, exact-SHA artifact, restricted intent | 기본 비활성 source/CI harness 검증 |
 | 10D-2A. Candidate Migration/Validation Gate | normal startup mutation 제거, same-image one-shot Flyway/JPA gate | disposable DB에서 migration/cutover 선행조건 검증 |
 | 10D-2B1. Host State / Shared Operation Lock / Runtime-config Staging | 고정 host root, project lock, immutable release와 versioned state source | temp host synthetic gate 검증 |
-| 10D-2B2. Host Deployment Transaction | restricted wrapper, backup/migration/cutover/readiness/recovery 조합 | pure/synthetic source gate 검증, 실제 설치는 10D-3 |
-| 10D-3. Public Production Activation | Cloudflare, secret, User, schedule/replication | 허용된 두 사용자의 실제 운영 시작 |
+| 10D-2B2. Host Deployment Transaction | restricted wrapper, backup/migration/cutover/readiness/recovery 조합 | pure/synthetic source gate 검증, 실제 설치는 10D-3B |
+| 10D-3A1. Production Household Bootstrap One-shot Gate | same-image no-HTTP exact-state bootstrap protocol | 합성 DB에서 create/verify/fail-closed source 검증 |
+| 10D-3A2. Fresh-host Bootstrap Transaction Source | owner-only input, fixed ingress, migration/bootstrap/backup durable transaction | 실제 값 없는 fresh-host source 검증 |
+| 10D-3B. Public Production Activation | Cloudflare, secret, 실제 User, schedule/replication | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Slice 3 구현 경계
 
@@ -103,7 +105,9 @@ Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 �
 - **10D-2A Candidate Migration/Validation Gate**: normal `production` startup은 Flyway를 비활성화하고 JPA validate만 수행한다. 동일 candidate API image의 profile-gated one-shot만 HTTP/bootstrap/scheduler 없이 Flyway와 JPA validate를 완료하고 명시적으로 종료한다. clean/idempotent/손상/연결·profile failure를 disposable PostgreSQL에서 검증하며 V1~V8 byte를 고정한다.
 - **10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging**: production worker의 app root를 `/Users/homeserver/Server/apps/our-ledger`로 고정하고 deploy와 standalone backup이 공유할 owner-only atomic directory lock을 source로 제공한다. runtime-config는 digest-derived `releases/<digesthex>`, relative atomic `current`, versioned `state/pending`만 허용하며 temp host와 synthetic backup에서 contention/corruption/crash를 검증한다. 실제 host path는 읽거나 쓰지 않는다.
 - **10D-2B2 Host Deployment Transaction**: B1 lock/state authority 아래 restricted host wrapper, stdin-only registry token, exact artifact 검증, writer quiesce, verified backup, 10D-2A migration, same-SHA cutover, readiness, schema-aware rollback과 HomeOps lifecycle을 source로 조합하고 pure/synthetic gate로 검증한다.
-- **10D-3 Public Production Activation**: actual GHCR/Tailscale/SSH credential, Cloudflare/도메인/secret/User, backup schedule·retention·외부 암호화 복제와 public smoke를 각각 승인한 뒤 운영을 시작한다.
+- **10D-3A1 Production Household Bootstrap One-shot Gate**: 동일 candidate API image의 `production,bootstrap` profile이 Flyway/Web/recurring/local identity 없이 JPA validate 뒤 최대 8 KiB exact JSON stdin을 한 번 처리한다. empty DB는 exact 2 User/1 Household/OWNER·MEMBER를 생성하고 동일 입력은 state/ID 변화 없이 검증하며 partial/mismatch/extra 상태와 입력·profile·DB/schema 오류는 fail closed한다. actual production input/DB는 사용하지 않는다.
+- **10D-3A2 Fresh-host Bootstrap Transaction Source**: repository 밖 owner-only one-time input, pre-current fixed ingress와 immutable runtime staging을 B1 lock 아래 `fresh PostgreSQL → migration → bootstrap → normal readiness → first verified backup → durable current/state`로 조합한다. 실제 값·host 실행은 여전히 제외한다.
+- **10D-3B Public Production Activation**: actual GHCR/Tailscale/SSH credential, Cloudflare/도메인/secret/User, backup schedule·retention·외부 암호화 복제와 public smoke를 각각 승인한 뒤 운영을 시작한다.
 
 10D-2B2 완료는 restricted transaction source와 crash/recovery 분류가 local/Hosted synthetic gate에서 검증됐다는 뜻이다. actual forced-command, GHCR/Tailscale/SSH credential과 Mac mini 설치가 없으므로 artifact publish, production status/backup/migration/reporter 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
 

@@ -6,8 +6,8 @@
 
 ## 현재 상태
 
-- 단계: Slice 10D-2A — Candidate DB Migration/Validation Gate
-- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL backup/restore, privacy-safe 운영 관측, 비활성 Release/Deploy source harness와 candidate one-shot migration gate
+- 단계: Slice 10D-3A2 — Fresh-host Bootstrap Transaction Source
+- 구현 코드: Auth/Household부터 CSV Export까지의 제품 흐름, immutable production runtime, 검증된 PostgreSQL backup/restore, privacy-safe 운영 관측, 비활성 Release/Deploy source harness, candidate migration, production Household bootstrap과 fresh-host transaction source gate
 - 로컬 실행: 개발 전용 Docker Compose 또는 Java 25 / Node.js 24
 - 기본 브랜치 전략: `feature/* → dev → main`
 - 문서, Issue, Pull Request, 사람이 읽는 설명: 한글
@@ -39,9 +39,9 @@
 
 현재 CSV 내보내기는 Settings에서 Household timezone 기간을 지정해 실행한다. `GET /api/v1/exports/transactions.csv`는 미삭제 Transaction을 canonical Entry와 함께 검증하고 한국어 19개 column, UTF-8 BOM, RFC 4180, spreadsheet formula 방어를 적용한다. CSV는 운영 backup의 대체물이 아니다.
 
-Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다. Slice 10C-2B1은 Web/API/PostgreSQL, Nginx origin, recurring scheduler, verified backup marker와 backup filesystem을 한 번에 읽는 canonical JSON status command를 추가했다. Slice 10C-2B2는 이 raw snapshot을 service 2회, recurring 5분/3 poll, backup 7시간, disk 80/90% 정책으로 평가하고 owner-only atomic state와 HomeOps reporter의 `DISK_LOW` episode 경계를 synthetic하게 검증한다. Slice 10D-1은 `main` exact HEAD의 재사용 Full CI, kill switch가 닫힌 Release workflow, linux/arm64 API/Web/runtime-config artifact와 고정된 restricted SSH intent를 source와 합성 gate로 검증한다. Slice 10D-2A는 normal production startup의 Flyway 권한을 제거하고 같은 candidate API image의 명시적 `production,migration` one-shot만 `Flyway V1→V8 → JPA validate → exit 0`을 수행하도록 분리한다. Slice 10D-2B1은 deploy와 standalone backup이 공유할 owner-only non-blocking operation lock, digest-derived immutable runtime-config release와 versioned current/pending/state primitive를 temp host에서 검증하고 public backup wrapper를 lock-free internal core와 분리한다. Slice 10D-2B2는 같은 lock 아래 restricted intent와 stdin token, exact linux/arm64 artifact, writer quiesce, verified backup, schema snapshot, same-image migration, same-SHA cutover, readiness, durable recovery와 HomeOps deployment lifecycle을 pure/synthetic gate로 조합한다.
+Slice 10C-1은 Java 25 API와 Node 24 build 결과를 non-root runtime image로 분리하고 Nginx가 정적 SPA와 `/api/**`를 same-origin으로 제공하는 production origin harness를 추가했다. Slice 10C-2A는 existing healthy PostgreSQL의 online custom dump를 owner-only atomic bundle과 checksum/metadata로 검증하는 one-shot command, 합성 non-empty DB를 별도 volume에 실제 복구하는 drill을 추가한다. Slice 10C-2B1은 Web/API/PostgreSQL, Nginx origin, recurring scheduler, verified backup marker와 backup filesystem을 한 번에 읽는 canonical JSON status command를 추가했다. Slice 10C-2B2는 이 raw snapshot을 service 2회, recurring 5분/3 poll, backup 7시간, disk 80/90% 정책으로 평가하고 owner-only atomic state와 HomeOps reporter의 `DISK_LOW` episode 경계를 synthetic하게 검증한다. Slice 10D-1은 `main` exact HEAD의 재사용 Full CI, kill switch가 닫힌 Release workflow, linux/arm64 API/Web/runtime-config artifact와 고정된 restricted SSH intent를 source와 합성 gate로 검증한다. Slice 10D-2A는 normal production startup의 Flyway 권한을 제거하고 같은 candidate API image의 명시적 `production,migration` one-shot만 `Flyway V1→V8 → JPA validate → exit 0`을 수행하도록 분리한다. Slice 10D-2B1은 deploy와 standalone backup이 공유할 owner-only non-blocking operation lock, digest-derived immutable runtime-config release와 versioned current/pending/state primitive를 temp host에서 검증하고 public backup wrapper를 lock-free internal core와 분리한다. Slice 10D-2B2는 같은 lock 아래 restricted intent와 stdin token, exact linux/arm64 artifact, writer quiesce, verified backup, schema snapshot, same-image migration, same-SHA cutover, readiness, durable recovery와 HomeOps deployment lifecycle을 pure/synthetic gate로 조합한다. Slice 10D-3A1은 동일 candidate API image의 `production,bootstrap` one-shot에서만 최대 8 KiB exact JSON stdin을 받아 JPA validate 뒤 2 User/1 Household/OWNER·MEMBER 상태를 생성하거나 exact 검증하고 결정적으로 종료한다. Slice 10D-3A2는 verified current가 없는 host만 허용하는 별도 fixed ingress와 `FRESH_BOOTSTRAP` pending을 추가해 exact artifact stage부터 PostgreSQL, migration, Household bootstrap, readiness, first verified backup, input unlink/fsync, existing B2-compatible current/state commit까지 forward-recoverable하게 조합한다.
 
-이 source gate는 `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 `true`가 아니면 publish, Tailscale, SSH, Mac mini deploy를 전부 건너뛰고 검증만 수행한다. 10D-2B2도 owner-only synthetic temp root와 fake adapter/reporter만 사용하며 실제 GHCR package/credential, forced-command 설치, `/Users/homeserver/Server` host state, production service/backup/migration/HomeOps reporter, LaunchAgent, Cloudflare/Tunnel, production secret/User/DB와 deploy activation은 10D-3의 별도 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
+이 source gate는 `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 `true`가 아니면 publish, Tailscale, SSH, Mac mini deploy를 전부 건너뛰고 검증만 수행한다. 10D-2B2/10D-3A1/10D-3A2도 owner-only synthetic temp root와 가짜 identity만 사용하며 실제 GHCR package/credential, forced-command 또는 pre-current ingress 설치, `/Users/homeserver/Server` host state, production service/backup/migration/bootstrap/HomeOps reporter, actual bootstrap input, LaunchAgent, Cloudflare/Tunnel과 deploy activation은 10D-3B의 별도 승인 대상이다. Slice 10B PWA는 최종 한글 앱 이름과 production icon 확정 전까지 보류한다.
 
 ## 기술 기준
 
@@ -132,6 +132,8 @@ Java/Node를 host에 설치하지 않고 전체 애플리케이션을 실행하�
 
 최초 local data가 필요하면 `.env.dev.local`의 가짜 `example.test` 값을 확인하고 `OUR_LEDGER_BOOTSTRAP_ENABLED=true`로 한 번 시작한다. 두 User와 한 Household가 생성된 뒤 다음 startup부터 다시 `false`로 둔다. 정확히 같은 입력의 재실행은 no-op이고, 부분 생성·다른 표시명·다른 membership은 덮어쓰지 않고 startup을 실패시킨다. 실제 이메일이나 production DB에는 이 절차를 실행하지 않는다.
 
+production용 bootstrap은 이 local env runner와 분리된다. normal `production`은 env override로 bootstrap을 켤 수 없고, profile-gated `api-bootstrap`만 no-HTTP/no-Flyway/no-recurring one-shot으로 bounded JSON stdin을 받는다. fresh-host transaction source도 repository 검증에서는 합성 값만 사용하며 실제 production input file 생성·ingress 설치와 DB 실행은 10D-3B 별도 승인 전까지 수행하지 않는다.
+
 ```bash
 docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app up
 ```
@@ -154,7 +156,7 @@ docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app down
 ./scripts/verify.sh
 ```
 
-이 명령은 repository/docs/Flyway byte/Compose 검사, Release/Deploy source contract, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build, candidate migration failure matrix, disposable backup/restore drill, production runtime smoke와 observability/status smoke를 순서대로 실행한다.
+이 명령은 repository/docs/Flyway byte/Compose 검사, Release/Deploy source contract, Backend unit·PostgreSQL integration·health/REST Docs test, Frontend lint·typecheck·component test·production build, candidate migration·production bootstrap·fresh-host transaction failure/recovery matrix, disposable backup/restore drill, production runtime smoke와 observability/status smoke를 순서대로 실행한다.
 
 host에 Java 25 또는 Node.js 24가 없으면 `compose.verify.yaml`의 격리 container를 사용한다. 이 fallback은 운영 resource나 Docker socket을 참조하지 않으며 검증 PostgreSQL data는 container 종료와 함께 사라지고 dependency cache volume은 보존된다. production runtime smoke는 매번 고유 Compose project와 임시 loopback port, 합성 credential, disposable PostgreSQL volume을 사용하고 성공·실패 모두에서 container/network/volume과 검증 image tag를 제거한다. Hosted Backend CI는 기본 Testcontainers 경로를 사용한다.
 

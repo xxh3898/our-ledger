@@ -1,0 +1,23 @@
+spring:
+  config:
+    activate:
+      on-profile: bootstrap
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  main:
+    web-application-type: none
+
+our-ledger:
+  bootstrap:
+    enabled: true
+  recurring:
+    scheduler:
+      enabled: false
+
+logging:
+  level:
+    root: WARN

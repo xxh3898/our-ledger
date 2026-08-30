@@ -86,7 +86,7 @@ labels = {
     "io.homeserver.cleanup.git-head": git_head,
 }
 targets = {
-    "services": {"web", "api", "api-migration", "postgres"},
+    "services": {"web", "api", "api-migration", "api-bootstrap", "postgres"},
     "networks": {"application", "database"},
     "volumes": {"postgres-data"},
 }

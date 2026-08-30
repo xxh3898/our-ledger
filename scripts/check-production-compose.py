@@ -27,13 +27,14 @@ def network_names(service: dict) -> set[str]:
 config = json.load(sys.stdin)
 services = config.get("services", {})
 require(
-    set(services) == {"web", "api", "api-migration", "postgres"},
-    "production service는 web/api/api-migration/postgres만 허용합니다.",
+    set(services) == {"web", "api", "api-migration", "api-bootstrap", "postgres"},
+    "production service는 web/api/api-migration/api-bootstrap/postgres만 허용합니다.",
 )
 
 web = services["web"]
 api = services["api"]
 migration = services["api-migration"]
+bootstrap = services["api-bootstrap"]
 postgres = services["postgres"]
 
 for service_name, service in services.items():
@@ -41,9 +42,9 @@ for service_name, service in services.items():
     require(not service.get("privileged", False), f"{service_name} service는 privileged일 수 없습니다.")
     require(service.get("network_mode") != "host", f"{service_name} service는 host network를 사용할 수 없습니다.")
     require(service.get("init") is True, f"{service_name} service는 init을 활성화해야 합니다.")
-    if service_name == "api-migration":
-        require(service.get("restart") == "no", "api-migration은 one-shot restart policy여야 합니다.")
-        require(not service.get("healthcheck"), "api-migration에는 healthcheck가 없어야 합니다.")
+    if service_name in {"api-migration", "api-bootstrap"}:
+        require(service.get("restart") == "no", f"{service_name}은 one-shot restart policy여야 합니다.")
+        require(not service.get("healthcheck"), f"{service_name}에는 healthcheck가 없어야 합니다.")
     else:
         require(service.get("restart") == "unless-stopped", f"{service_name} restart policy가 누락됐습니다.")
         require(bool(service.get("healthcheck")), f"{service_name} healthcheck가 누락됐습니다.")
@@ -59,7 +60,12 @@ for service_name, service in services.items():
         require("docker.sock" not in source and "docker.sock" not in target,
                 f"{service_name}에 Docker socket mount가 있습니다.")
 
-for service_name, service in (("web", web), ("api", api), ("api-migration", migration)):
+for service_name, service in (
+    ("web", web),
+    ("api", api),
+    ("api-migration", migration),
+    ("api-bootstrap", bootstrap),
+):
     require(service.get("read_only") is True, f"{service_name} root filesystem은 read-only여야 합니다.")
     require("ALL" in (service.get("cap_drop", []) or []), f"{service_name}는 Linux capability를 모두 drop해야 합니다.")
     security_options = service.get("security_opt", []) or []
@@ -75,6 +81,8 @@ require(api.get("depends_on", {}).get("postgres", {}).get("condition") == "servi
         "api는 healthy postgres에 의존해야 합니다.")
 require(migration.get("depends_on", {}).get("postgres", {}).get("condition") == "service_healthy",
         "api-migration은 healthy postgres에 의존해야 합니다.")
+require(bootstrap.get("depends_on", {}).get("postgres", {}).get("condition") == "service_healthy",
+        "api-bootstrap은 healthy postgres에 의존해야 합니다.")
 
 web_ports = web.get("ports", []) or []
 require(len(web_ports) == 1, "web은 정확히 한 개 port만 publish해야 합니다.")
@@ -84,6 +92,7 @@ require(web_port.get("host_ip") == "127.0.0.1", "web port는 127.0.0.1에만 bin
 require(web_port.get("protocol") == "tcp", "web publish protocol은 tcp여야 합니다.")
 require(not (api.get("ports", []) or []), "api는 host port를 publish할 수 없습니다.")
 require(not (migration.get("ports", []) or []), "api-migration은 host port를 publish할 수 없습니다.")
+require(not (bootstrap.get("ports", []) or []), "api-bootstrap은 host port를 publish할 수 없습니다.")
 require(not (postgres.get("ports", []) or []), "postgres는 host port를 publish할 수 없습니다.")
 
 expected_postgres_image = (
@@ -91,11 +100,17 @@ expected_postgres_image = (
     "697c180dbf244d3ce4a8f4cbc0156cde840af055c1bf8b76aebe422a4822086f"
 )
 require(postgres.get("image") == expected_postgres_image, "PostgreSQL image tag/digest가 계약과 다릅니다.")
-for service_name, service in (("web", web), ("api", api), ("api-migration", migration)):
+for service_name, service in (
+    ("web", web),
+    ("api", api),
+    ("api-migration", migration),
+    ("api-bootstrap", bootstrap),
+):
     image = str(service.get("image", ""))
     require(bool(image), f"{service_name} image가 비어 있습니다.")
     require(not image.endswith(":latest"), f"{service_name} image에 latest tag를 사용할 수 없습니다.")
 require(migration.get("image") == api.get("image"), "api와 api-migration은 동일한 candidate image를 사용해야 합니다.")
+require(bootstrap.get("image") == api.get("image"), "api와 api-bootstrap은 동일한 candidate image를 사용해야 합니다.")
 
 api_environment = api.get("environment", {}) or {}
 required_api_environment = {
@@ -148,6 +163,39 @@ require(migration_environment["OUR_LEDGER_BOOTSTRAP_ENABLED"] == "false",
 require(migration_environment["OUR_LEDGER_RECURRING_SCHEDULER_ENABLED"] == "false",
         "api-migration recurring scheduler는 false여야 합니다.")
 
+bootstrap_profiles = bootstrap.get("profiles", []) or []
+require(bootstrap_profiles == ["bootstrap"], "api-bootstrap은 bootstrap profile로만 활성화돼야 합니다.")
+bootstrap_environment = bootstrap.get("environment", {}) or {}
+expected_bootstrap_environment = {
+    "SPRING_PROFILES_ACTIVE",
+    "SPRING_DATASOURCE_URL",
+    "SPRING_DATASOURCE_USERNAME",
+    "SPRING_DATASOURCE_PASSWORD",
+    "SPRING_FLYWAY_ENABLED",
+    "SPRING_JPA_HIBERNATE_DDL_AUTO",
+    "SPRING_MAIN_WEB_APPLICATION_TYPE",
+    "OUR_LEDGER_BOOTSTRAP_ENABLED",
+    "OUR_LEDGER_RECURRING_SCHEDULER_ENABLED",
+}
+require(
+    set(bootstrap_environment) == expected_bootstrap_environment,
+    "api-bootstrap 환경변수 allowlist가 계약과 다릅니다.",
+)
+require(
+    bootstrap_environment["SPRING_PROFILES_ACTIVE"] == "production,bootstrap",
+    "api-bootstrap은 production,bootstrap profile만 활성화해야 합니다.",
+)
+require(bootstrap_environment["SPRING_FLYWAY_ENABLED"] == "false",
+        "api-bootstrap Flyway는 false여야 합니다.")
+require(bootstrap_environment["SPRING_JPA_HIBERNATE_DDL_AUTO"] == "validate",
+        "api-bootstrap JPA mode는 validate여야 합니다.")
+require(bootstrap_environment["SPRING_MAIN_WEB_APPLICATION_TYPE"] == "none",
+        "api-bootstrap Web application type은 none이어야 합니다.")
+require(bootstrap_environment["OUR_LEDGER_BOOTSTRAP_ENABLED"] == "true",
+        "api-bootstrap bootstrap은 true여야 합니다.")
+require(bootstrap_environment["OUR_LEDGER_RECURRING_SCHEDULER_ENABLED"] == "false",
+        "api-bootstrap recurring scheduler는 false여야 합니다.")
+
 postgres_mounts = mounts(postgres)
 require(len(postgres_mounts) == 1, "postgres는 정확히 한 개 data volume을 사용해야 합니다.")
 postgres_mount = postgres_mounts[0]
@@ -157,6 +205,7 @@ require(postgres_mount.get("target") == "/var/lib/postgresql", "PostgreSQL 18 da
 require(network_names(web) == {"application"}, "web은 application network에만 연결해야 합니다.")
 require(network_names(api) == {"application", "database"}, "api network 경계가 잘못됐습니다.")
 require(network_names(migration) == {"application", "database"}, "api-migration network 경계가 잘못됐습니다.")
+require(network_names(bootstrap) == {"database"}, "api-bootstrap은 database network에만 연결해야 합니다.")
 require(network_names(postgres) == {"database"}, "postgres는 database network에만 연결해야 합니다.")
 
 networks = config.get("networks", {}) or {}

@@ -1598,9 +1598,15 @@ describe('App', () => {
   it('synchronizes Calendar state on popstate without adding a router dependency', async () => {
     useCalendarUrl()
     installLedgerRouter()
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener')
     render(<App />)
     await screen.findByRole('heading', { name: '2026년 8월' })
+    await waitFor(() => expect(addEventListenerSpy).toHaveBeenCalledWith(
+      'popstate',
+      expect.any(Function),
+    ))
 
+    const historyLength = window.history.length
     window.history.pushState(
       {},
       '',
@@ -1611,6 +1617,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '2026년 7월' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Member' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('heading', { name: '7월 15일의 기록' })).toBeInTheDocument()
+    expect(window.history.length).toBe(historyLength + 1)
   })
 
   it('opens Quick Entry on the selected date with current-user PERSONAL defaults', async () => {

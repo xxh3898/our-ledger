@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-30
 related:
   - ADR-008
   - 06-security/privacy-model.md
@@ -60,13 +60,15 @@ production/default startup에는 다음 외부 설정이 모두 필요하며 하
 
 Cloudflare Access 인증 성공만으로 내부 User를 자동 생성하지 않는다.
 
-V1의 두 User는 기본 비활성인 `ApplicationRunner` bootstrap으로 미리 생성할 수 있다. Household 이름, 두 email과 표시명은 `OUR_LEDGER_BOOTSTRAP_*` 외부 설정으로 주입한다.
+local 개발에서는 기본 비활성인 generic `ApplicationRunner` bootstrap으로 두 User를 미리 만들 수 있다. Household 이름, 두 email과 표시명은 Git 제외 local `OUR_LEDGER_BOOTSTRAP_*` 설정으로만 주입한다.
 
 - `OUR_LEDGER_BOOTSTRAP_ENABLED=false`가 기본이다.
 - clean DB에는 ACTIVE User 두 명, 한 Household, OWNER/MEMBER를 한 transaction으로 생성한다.
 - 정확한 상태의 재실행은 no-op이다.
 - 부분 생성, 추가 data, 다른 표시명·상태·role·Household는 덮어쓰지 않고 startup을 실패시킨다.
-- 저장소에는 `example.test` sample만 두며 actual production provision은 별도 운영 gate다.
+- 저장소에는 `example.test` sample만 둔다.
+
+production provision은 local env runner와 분리한다. normal `production`은 bootstrap false를 강제하고 env override를 거부한다. 동일 candidate API image의 `production,bootstrap` one-shot만 최대 8 KiB exact JSON stdin을 읽으며 email은 기존 canonical normalizer를 거친다. CLI argument, Compose environment, workflow input, process title에 Household 이름·email·표시명을 넣지 않고 raw JSON, PII 또는 생성 ID를 log/stdout/stderr에 남기지 않는다. 10D-3A2 fresh-host worker도 input을 fixed owner-only file에서 stdin으로만 전달하고 pending/state에는 candidate, phase, schema와 backup marker hash만 기록한다. bootstrap mode는 Web, Cloudflare/local/test identity, Flyway와 recurring scheduler를 활성화하지 않으며 실제 input 생성·전송, ingress 설치와 production DB 실행은 10D-3B 별도 승인 대상이다.
 
 ## 비밀번호와 애플리케이션 세션
 

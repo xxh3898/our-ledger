@@ -6,6 +6,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @Configuration
 @EnableScheduling
-@Profile("!migration")
+@Profile("!migration & !bootstrap")
 public class RecurringSchedulingConfiguration {
 }

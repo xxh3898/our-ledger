@@ -12,6 +12,7 @@ import sys
 ZERO_SHA = "0" * 40
 ZERO_DIGEST = "sha256:" + ("0" * 64)
 COMMAND_NAME = "deploy-our-ledger-v1"
+BOOTSTRAP_COMMAND_NAME = "bootstrap-our-ledger-v1"
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 ACTOR_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -20,6 +21,10 @@ KEEP_COMMAND_PATTERN = re.compile(
 )
 UPDATE_COMMAND_PATTERN = re.compile(
     rf"{COMMAND_NAME} ([0-9a-f]{{40}}) update (sha256:[0-9a-f]{{64}}) "
+    r"([A-Za-z0-9][A-Za-z0-9_-]{0,63})"
+)
+BOOTSTRAP_COMMAND_PATTERN = re.compile(
+    rf"{BOOTSTRAP_COMMAND_NAME} ([0-9a-f]{{40}}) (sha256:[0-9a-f]{{64}}) "
     r"([A-Za-z0-9][A-Za-z0-9_-]{0,63})"
 )
 
@@ -90,6 +95,33 @@ def parse_command(value: str) -> dict[str, str | None]:
     raise ContractError("restricted deployment command is invalid")
 
 
+def build_bootstrap_command(
+    *,
+    revision: str,
+    runtime_config_digest: str,
+    actor: str,
+) -> str:
+    return " ".join(
+        (
+            BOOTSTRAP_COMMAND_NAME,
+            validate_revision(revision),
+            validate_digest(runtime_config_digest),
+            validate_actor(actor),
+        )
+    )
+
+
+def parse_bootstrap_command(value: str) -> dict[str, str]:
+    match = BOOTSTRAP_COMMAND_PATTERN.fullmatch(value)
+    if match is None:
+        raise ContractError("restricted bootstrap command is invalid")
+    return {
+        "actor": validate_actor(match.group(3)),
+        "revision": validate_revision(match.group(1)),
+        "runtimeConfigDigest": validate_digest(match.group(2)),
+    }
+
+
 def validate_publish_result(
     *,
     revision: str,
@@ -133,6 +165,14 @@ def _parser() -> argparse.ArgumentParser:
     parse = subparsers.add_parser("parse-command")
     parse.add_argument("--value", required=True)
 
+    build_bootstrap = subparsers.add_parser("build-bootstrap-command")
+    build_bootstrap.add_argument("--revision", required=True)
+    build_bootstrap.add_argument("--runtime-config-digest", required=True)
+    build_bootstrap.add_argument("--actor", required=True)
+
+    parse_bootstrap = subparsers.add_parser("parse-bootstrap-command")
+    parse_bootstrap.add_argument("--value", required=True)
+
     publish = subparsers.add_parser("validate-publish")
     publish.add_argument("--revision", required=True)
     publish.add_argument("--api-digest", required=True)
@@ -159,6 +199,25 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     parse_command(arguments.value),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if arguments.command == "build-bootstrap-command":
+            print(
+                build_bootstrap_command(
+                    revision=arguments.revision,
+                    runtime_config_digest=arguments.runtime_config_digest,
+                    actor=arguments.actor,
+                )
+            )
+            return 0
+        if arguments.command == "parse-bootstrap-command":
+            print(
+                json.dumps(
+                    parse_bootstrap_command(arguments.value),
                     ensure_ascii=True,
                     separators=(",", ":"),
                     sort_keys=True,
