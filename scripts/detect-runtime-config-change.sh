@@ -54,7 +54,10 @@ if git diff --quiet \
   scripts/backup-production.sh \
   scripts/backup_tools/backup_artifact.py \
   scripts/backup_tools/backup_core.sh \
+  scripts/deploy-production.sh \
+  scripts/host_tools/deploy_transaction.py \
   scripts/host_tools/host_state.py \
+  scripts/host_tools/production_deploy.py \
   scripts/host_tools/production_host.py \
   scripts/monitor-production.sh \
   scripts/production-status.sh \

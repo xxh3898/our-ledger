@@ -7,12 +7,13 @@ import re
 import stat
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping
 
 
 PROJECT = "our-ledger"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 PRODUCTION_APP_ROOT = Path("/Users/homeserver/Server/apps/our-ledger")
 MAX_RELEASE_FILE_SIZE = 2 * 1024 * 1024
 FORBIDDEN_RELEASE_MARKERS = (
@@ -33,7 +34,10 @@ RELEASE_FILES: Mapping[str, int] = {
     "scripts/backup-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/deploy-production.sh": 0o700,
+    "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/host_state.py": 0o600,
+    "scripts/host_tools/production_deploy.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
@@ -52,7 +56,17 @@ RELEASE_DIRECTORIES = frozenset(
 
 STATE_KEYS = frozenset({"formatVersion", "project", "current", "previous"})
 PENDING_KEYS = frozenset(
-    {"formatVersion", "project", "phase", "candidate", "previous"}
+    {
+        "formatVersion",
+        "project",
+        "phase",
+        "candidate",
+        "previous",
+        "actor",
+        "startedAt",
+        "schemaBefore",
+        "schemaAfter",
+    }
 )
 IDENTITY_KEYS = frozenset(
     {
@@ -62,6 +76,25 @@ IDENTITY_KEYS = frozenset(
         "runtimeConfigContentSha256",
     }
 )
+SCHEMA_AUTHORITY_KEYS = frozenset(
+    {"successfulVersion", "failedMigrationCount", "historySha256"}
+)
+DEPLOYMENT_PHASES = (
+    "ARTIFACTS_VERIFIED",
+    "WRITER_QUIESCED",
+    "BACKUP_VERIFIED",
+    "MIGRATION_STARTED",
+    "MIGRATION_VERIFIED",
+    "CUTOVER_STARTED",
+    "READINESS_VERIFIED",
+    "COMMITTING",
+)
+DEPLOYMENT_PHASE_TRANSITIONS = {
+    current: following
+    for current, following in zip(DEPLOYMENT_PHASES, DEPLOYMENT_PHASES[1:])
+}
+ACTOR_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+FLYWAY_VERSION_PATTERN = re.compile(r"^[1-9][0-9]*(?:[.][0-9]+)*$")
 
 
 class ContractError(RuntimeError):
@@ -70,6 +103,47 @@ class ContractError(RuntimeError):
 
 class LockBusyError(ContractError):
     pass
+
+
+@dataclass(frozen=True)
+class SchemaAuthority:
+    successful_version: str
+    failed_migration_count: int
+    history_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.successful_version, str)
+            or FLYWAY_VERSION_PATTERN.fullmatch(self.successful_version) is None
+        ):
+            raise ContractError("schema version authority is invalid")
+        if (
+            type(self.failed_migration_count) is not int
+            or self.failed_migration_count != 0
+        ):
+            raise ContractError("failed migration authority is invalid")
+        if (
+            not isinstance(self.history_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.history_sha256) is None
+        ):
+            raise ContractError("schema history authority is invalid")
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "successfulVersion": self.successful_version,
+            "failedMigrationCount": self.failed_migration_count,
+            "historySha256": self.history_sha256,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> "SchemaAuthority":
+        if not isinstance(value, dict) or set(value) != SCHEMA_AUTHORITY_KEYS:
+            raise ContractError("schema authority schema is invalid")
+        return cls(
+            successful_version=value["successfulVersion"],
+            failed_migration_count=value["failedMigrationCount"],
+            history_sha256=value["historySha256"],
+        )
 
 
 @dataclass(frozen=True)
@@ -334,8 +408,98 @@ def begin_pending(
         "phase": "STAGED",
         "candidate": candidate.to_json(),
         "previous": previous.to_json() if previous else None,
+        "actor": None,
+        "startedAt": None,
+        "schemaBefore": None,
+        "schemaAfter": None,
     }
     _atomic_write_json(paths.pending_file, payload)
+
+
+def begin_deployment_pending(
+    paths: HostPaths,
+    lock: OperationLock,
+    candidate: ReleaseIdentity,
+    *,
+    actor: str,
+    started_at: str,
+) -> None:
+    lock.assert_held(paths)
+    _require_no_pending(paths)
+    _require_stable_committed_state(paths)
+    _require_identity_release(paths, candidate)
+    previous = _read_committed_identity(paths)
+    payload = {
+        "formatVersion": FORMAT_VERSION,
+        "project": PROJECT,
+        "phase": DEPLOYMENT_PHASES[0],
+        "candidate": candidate.to_json(),
+        "previous": previous.to_json() if previous else None,
+        "actor": _require_actor(actor),
+        "startedAt": _require_instant(started_at),
+        "schemaBefore": None,
+        "schemaAfter": None,
+    }
+    _atomic_write_json(paths.pending_file, payload)
+
+
+def advance_deployment_pending(
+    paths: HostPaths,
+    lock: OperationLock,
+    *,
+    expected_phase: str,
+    next_phase: str,
+    schema_before: SchemaAuthority | None = None,
+    schema_after: SchemaAuthority | None = None,
+) -> None:
+    lock.assert_held(paths)
+    pending = _read_pending(paths, required=True)
+    if pending["phase"] != expected_phase:
+        raise ContractError("deployment pending phase differs")
+    if DEPLOYMENT_PHASE_TRANSITIONS.get(expected_phase) != next_phase:
+        raise ContractError("deployment pending phase transition is invalid")
+
+    current_before = pending["schemaBefore"]
+    current_after = pending["schemaAfter"]
+    if schema_before is not None:
+        if current_before is not None and current_before != schema_before:
+            raise ContractError("deployment pre-migration schema authority differs")
+        current_before = schema_before
+    if schema_after is not None:
+        if current_after is not None and current_after != schema_after:
+            raise ContractError("deployment post-migration schema authority differs")
+        current_after = schema_after
+    if next_phase in DEPLOYMENT_PHASES[2:] and current_before is None:
+        raise ContractError("deployment pre-migration schema authority is missing")
+    if next_phase in DEPLOYMENT_PHASES[4:] and current_after is None:
+        raise ContractError("deployment post-migration schema authority is missing")
+
+    _write_pending(
+        paths,
+        pending,
+        phase=next_phase,
+        schema_before=current_before,
+        schema_after=current_after,
+    )
+
+
+def deployment_pending(
+    paths: HostPaths,
+    lock: OperationLock,
+) -> dict[str, object] | None:
+    lock.assert_held(paths)
+    pending = _read_pending(paths, required=False)
+    if pending is None:
+        return None
+    return {
+        "phase": pending["phase"],
+        "candidate": pending["candidate"],
+        "previous": pending["previous"],
+        "actor": pending["actor"],
+        "startedAt": pending["startedAt"],
+        "schemaBefore": pending["schemaBefore"],
+        "schemaAfter": pending["schemaAfter"],
+    }
 
 
 def commit_pending(
@@ -343,9 +507,22 @@ def commit_pending(
     lock: OperationLock,
     *,
     after_current: Callable[[], None] | None = None,
+    after_state: Callable[[], None] | None = None,
 ) -> ReleaseIdentity:
     lock.assert_held(paths)
     pending = _read_pending(paths, required=True)
+    phase = pending["phase"]
+    if phase == "READINESS_VERIFIED":
+        _write_pending(
+            paths,
+            pending,
+            phase="COMMITTING",
+            schema_before=pending["schemaBefore"],
+            schema_after=pending["schemaAfter"],
+        )
+        pending = _read_pending(paths, required=True)
+    elif phase != "STAGED":
+        raise ContractError("pending transaction is not ready to commit")
     candidate = pending["candidate"]
     assert isinstance(candidate, ReleaseIdentity)
     previous = pending["previous"]
@@ -369,6 +546,37 @@ def commit_pending(
         ),
     }
     _atomic_write_json(paths.state_file, state)
+    if after_state is not None:
+        after_state()
+    _unlink_regular_file(paths.pending_file, 0o600)
+    return candidate
+
+
+def finish_committed_pending(
+    paths: HostPaths,
+    lock: OperationLock,
+) -> ReleaseIdentity:
+    lock.assert_held(paths)
+    pending = _read_pending(paths, required=True)
+    if pending["phase"] != "COMMITTING":
+        raise ContractError("deployment pending is not committing")
+    candidate = pending["candidate"]
+    assert isinstance(candidate, ReleaseIdentity)
+    previous = pending["previous"]
+    committed = _read_committed_identity(paths)
+    current = _read_current_identity(paths)
+    if committed not in (previous, candidate) or current not in (previous, candidate):
+        raise ContractError("committing deployment is not durably current")
+    if current != candidate:
+        _write_current(paths, candidate)
+    if committed != candidate:
+        state = {
+            "formatVersion": FORMAT_VERSION,
+            "project": PROJECT,
+            "current": candidate.to_json(),
+            "previous": previous.to_json() if previous else None,
+        }
+        _atomic_write_json(paths.state_file, state)
     _unlink_regular_file(paths.pending_file, 0o600)
     return candidate
 
@@ -376,11 +584,36 @@ def commit_pending(
 def clear_abandoned_pending(paths: HostPaths, lock: OperationLock) -> None:
     lock.assert_held(paths)
     pending = _read_pending(paths, required=True)
+    if pending["phase"] not in {
+        "STAGED",
+        "ARTIFACTS_VERIFIED",
+        "WRITER_QUIESCED",
+        "BACKUP_VERIFIED",
+    }:
+        raise ContractError("pending transaction is not safe to abandon")
     previous = pending["previous"]
     committed = _read_committed_identity(paths)
     current = _read_current_identity(paths)
     if committed != previous or current != previous:
         raise ContractError("pending transaction is not safe to abandon")
+    _unlink_regular_file(paths.pending_file, 0o600)
+
+
+def clear_recovered_deployment_pending(
+    paths: HostPaths,
+    lock: OperationLock,
+) -> None:
+    """Clear only after the caller verified schema and restored the predecessor."""
+    lock.assert_held(paths)
+    pending = _read_pending(paths, required=True)
+    if pending["phase"] not in DEPLOYMENT_PHASES:
+        raise ContractError("recovered pending is not a deployment transaction")
+    previous = pending["previous"]
+    if (
+        _read_committed_identity(paths) != previous
+        or _read_current_identity(paths) != previous
+    ):
+        raise ContractError("recovered deployment predecessor is not current")
     _unlink_regular_file(paths.pending_file, 0o600)
 
 
@@ -590,7 +823,7 @@ def _read_pending(paths: HostPaths, *, required: bool) -> dict[str, object] | No
         type(value["formatVersion"]) is not int
         or value["formatVersion"] != FORMAT_VERSION
         or value["project"] != PROJECT
-        or value["phase"] != "STAGED"
+        or value["phase"] not in {"STAGED", *DEPLOYMENT_PHASES}
     ):
         raise ContractError("runtime config pending authority is invalid")
     candidate = ReleaseIdentity.from_json(value["candidate"])
@@ -599,10 +832,73 @@ def _read_pending(paths: HostPaths, *, required: bool) -> dict[str, object] | No
         if value["previous"] is not None
         else None
     )
+    phase = value["phase"]
+    actor = value["actor"]
+    started_at = value["startedAt"]
+    schema_before = (
+        SchemaAuthority.from_json(value["schemaBefore"])
+        if value["schemaBefore"] is not None
+        else None
+    )
+    schema_after = (
+        SchemaAuthority.from_json(value["schemaAfter"])
+        if value["schemaAfter"] is not None
+        else None
+    )
+    if phase == "STAGED":
+        if any(
+            item is not None
+            for item in (actor, started_at, schema_before, schema_after)
+        ):
+            raise ContractError("runtime config staged pending authority is invalid")
+    else:
+        _require_actor(actor)
+        _require_instant(started_at)
+        phase_index = DEPLOYMENT_PHASES.index(phase)
+        if (phase_index >= 2) != (schema_before is not None):
+            raise ContractError("deployment pre-migration schema authority differs")
+        if (phase_index >= 4) != (schema_after is not None):
+            raise ContractError("deployment post-migration schema authority differs")
     _require_identity_release(paths, candidate)
     if previous is not None:
         _require_identity_release(paths, previous)
-    return {"candidate": candidate, "previous": previous}
+    return {
+        "phase": phase,
+        "candidate": candidate,
+        "previous": previous,
+        "actor": actor,
+        "startedAt": started_at,
+        "schemaBefore": schema_before,
+        "schemaAfter": schema_after,
+    }
+
+
+def _write_pending(
+    paths: HostPaths,
+    pending: dict[str, object],
+    *,
+    phase: str,
+    schema_before: SchemaAuthority | None,
+    schema_after: SchemaAuthority | None,
+) -> None:
+    candidate = pending["candidate"]
+    previous = pending["previous"]
+    if not isinstance(candidate, ReleaseIdentity):
+        raise ContractError("deployment candidate identity is invalid")
+    if previous is not None and not isinstance(previous, ReleaseIdentity):
+        raise ContractError("deployment previous identity is invalid")
+    payload = {
+        "formatVersion": FORMAT_VERSION,
+        "project": PROJECT,
+        "phase": phase,
+        "candidate": candidate.to_json(),
+        "previous": previous.to_json() if previous else None,
+        "actor": pending["actor"],
+        "startedAt": pending["startedAt"],
+        "schemaBefore": schema_before.to_json() if schema_before else None,
+        "schemaAfter": schema_after.to_json() if schema_after else None,
+    }
+    _atomic_write_json(paths.pending_file, payload)
 
 
 def _read_current_identity(paths: HostPaths) -> ReleaseIdentity | None:
@@ -878,3 +1174,21 @@ def _require_digest(value: str) -> str:
     if match is None or value == ZERO_DIGEST:
         raise ContractError("runtime config digest is invalid")
     return match.group(1)
+
+
+def _require_actor(value: object) -> str:
+    if not isinstance(value, str) or ACTOR_PATTERN.fullmatch(value) is None:
+        raise ContractError("deployment actor is invalid")
+    return value
+
+
+def _require_instant(value: object) -> str:
+    if not isinstance(value, str) or len(value) > 64:
+        raise ContractError("deployment timestamp is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ContractError("deployment timestamp is invalid") from error
+    if parsed.tzinfo is None:
+        raise ContractError("deployment timestamp is invalid")
+    return value

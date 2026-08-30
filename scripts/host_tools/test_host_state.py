@@ -21,6 +21,8 @@ REVISION_ONE = "1" * 40
 REVISION_TWO = "2" * 40
 DIGEST_ONE = "sha256:" + ("a" * 64)
 DIGEST_TWO = "sha256:" + ("b" * 64)
+SCHEMA_ONE = host_state.SchemaAuthority("8", 0, "d" * 64)
+SCHEMA_TWO = host_state.SchemaAuthority("9", 0, "e" * 64)
 
 
 class HostStateTest(unittest.TestCase):
@@ -239,7 +241,7 @@ class HostStateTest(unittest.TestCase):
         self.assertEqual(result["status"], "READY")
         self.assertFalse(result["pending"])
         state = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
-        self.assertEqual(state["formatVersion"], 1)
+        self.assertEqual(state["formatVersion"], 2)
         self.assertEqual(state["project"], "our-ledger")
         self.assertFalse(os.path.lexists(self.paths.pending_file))
         self.assertEqual(stat.S_IMODE(self.paths.state_file.stat().st_mode), 0o600)
@@ -265,6 +267,138 @@ class HostStateTest(unittest.TestCase):
 
         self.assertEqual(result["status"], "PENDING")
         self.assertTrue(self.paths.pending_file.is_file())
+
+    def test_deployment_pending_advances_only_through_durable_phases(self) -> None:
+        with host_state.OperationLock(self.paths) as lock:
+            identity = self._stage(lock)
+            host_state.begin_deployment_pending(
+                self.paths,
+                lock,
+                identity,
+                actor="release_actor",
+                started_at="2026-08-30T01:02:03Z",
+            )
+            host_state.advance_deployment_pending(
+                self.paths,
+                lock,
+                expected_phase="ARTIFACTS_VERIFIED",
+                next_phase="WRITER_QUIESCED",
+            )
+            host_state.advance_deployment_pending(
+                self.paths,
+                lock,
+                expected_phase="WRITER_QUIESCED",
+                next_phase="BACKUP_VERIFIED",
+                schema_before=SCHEMA_ONE,
+            )
+            host_state.advance_deployment_pending(
+                self.paths,
+                lock,
+                expected_phase="BACKUP_VERIFIED",
+                next_phase="MIGRATION_STARTED",
+            )
+            host_state.advance_deployment_pending(
+                self.paths,
+                lock,
+                expected_phase="MIGRATION_STARTED",
+                next_phase="MIGRATION_VERIFIED",
+                schema_after=SCHEMA_TWO,
+            )
+            pending = host_state.deployment_pending(self.paths, lock)
+
+        self.assertEqual(pending["phase"], "MIGRATION_VERIFIED")
+        self.assertEqual(pending["schemaBefore"], SCHEMA_ONE)
+        self.assertEqual(pending["schemaAfter"], SCHEMA_TWO)
+        persisted = json.loads(self.paths.pending_file.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["formatVersion"], 2)
+        self.assertEqual(persisted["schemaBefore"], SCHEMA_ONE.to_json())
+        self.assertEqual(stat.S_IMODE(self.paths.pending_file.stat().st_mode), 0o600)
+
+    def test_deployment_pending_rejects_phase_skip_and_schema_omission(self) -> None:
+        with host_state.OperationLock(self.paths) as lock:
+            identity = self._stage(lock)
+            host_state.begin_deployment_pending(
+                self.paths,
+                lock,
+                identity,
+                actor="release_actor",
+                started_at="2026-08-30T01:02:03Z",
+            )
+            with self.assertRaises(host_state.ContractError):
+                host_state.advance_deployment_pending(
+                    self.paths,
+                    lock,
+                    expected_phase="ARTIFACTS_VERIFIED",
+                    next_phase="BACKUP_VERIFIED",
+                    schema_before=SCHEMA_ONE,
+                )
+            host_state.advance_deployment_pending(
+                self.paths,
+                lock,
+                expected_phase="ARTIFACTS_VERIFIED",
+                next_phase="WRITER_QUIESCED",
+            )
+            with self.assertRaises(host_state.ContractError):
+                host_state.advance_deployment_pending(
+                    self.paths,
+                    lock,
+                    expected_phase="WRITER_QUIESCED",
+                    next_phase="BACKUP_VERIFIED",
+                )
+
+    def test_deployment_commit_crash_is_explicitly_finished(self) -> None:
+        with host_state.OperationLock(self.paths) as lock:
+            identity = self._stage(lock)
+            host_state.begin_deployment_pending(
+                self.paths,
+                lock,
+                identity,
+                actor="release_actor",
+                started_at="2026-08-30T01:02:03Z",
+            )
+            self._advance_to_readiness(lock)
+            with self.assertRaisesRegex(RuntimeError, "synthetic commit crash"):
+                host_state.commit_pending(
+                    self.paths,
+                    lock,
+                    after_state=lambda: (_ for _ in ()).throw(
+                        RuntimeError("synthetic commit crash")
+                    ),
+                )
+            pending = host_state.deployment_pending(self.paths, lock)
+
+        self.assertEqual(pending["phase"], "COMMITTING")
+        self.assertTrue(self.paths.state_file.exists())
+        self.assertTrue(self.paths.pending_file.exists())
+
+        with host_state.OperationLock(self.paths) as lock:
+            finished = host_state.finish_committed_pending(self.paths, lock)
+
+        self.assertEqual(finished, identity)
+        self.assertFalse(self.paths.pending_file.exists())
+
+    def test_old_pending_format_fails_closed_without_reset(self) -> None:
+        with host_state.OperationLock(self.paths) as lock:
+            identity = self._stage(lock)
+        old_payload = {
+            "formatVersion": 1,
+            "project": "our-ledger",
+            "phase": "STAGED",
+            "candidate": identity.to_json(),
+            "previous": None,
+        }
+        self.paths.pending_file.write_text(
+            json.dumps(old_payload, separators=(",", ":"), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        self.paths.pending_file.chmod(0o600)
+        before = self.paths.pending_file.read_bytes()
+
+        with host_state.OperationLock(self.paths) as lock:
+            with self.assertRaises(host_state.ContractError):
+                host_state.inspect_state(self.paths, lock)
+
+        self.assertEqual(self.paths.pending_file.read_bytes(), before)
 
     def test_semantically_inconsistent_pending_fails_closed(self) -> None:
         second_source = self._release_source("pending-two")
@@ -564,6 +698,46 @@ class HostStateTest(unittest.TestCase):
             application_revision=application_revision,
             runtime_config_digest=digest,
             runtime_config_revision=runtime_revision,
+        )
+
+    def _advance_to_readiness(self, lock: host_state.OperationLock) -> None:
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="ARTIFACTS_VERIFIED",
+            next_phase="WRITER_QUIESCED",
+        )
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="WRITER_QUIESCED",
+            next_phase="BACKUP_VERIFIED",
+            schema_before=SCHEMA_ONE,
+        )
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="BACKUP_VERIFIED",
+            next_phase="MIGRATION_STARTED",
+        )
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="MIGRATION_STARTED",
+            next_phase="MIGRATION_VERIFIED",
+            schema_after=SCHEMA_ONE,
+        )
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="MIGRATION_VERIFIED",
+            next_phase="CUTOVER_STARTED",
+        )
+        host_state.advance_deployment_pending(
+            self.paths,
+            lock,
+            expected_phase="CUTOVER_STARTED",
+            next_phase="READINESS_VERIFIED",
         )
 
     def _release_source(self, suffix: str) -> Path:

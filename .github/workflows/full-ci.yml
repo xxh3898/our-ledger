@@ -59,6 +59,16 @@ jobs:
       - name: Host state/shared operation lock 검증
         run: ./scripts/verify-host-state.sh
 
+  host-deploy-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Restricted host deployment transaction 검증
+        run: ./scripts/verify-host-deploy-transaction.sh
+
   backup-restore:
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate와 Slice 10D-2B1 host state/shared operation lock source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 temp-root state/lock harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini host install/deploy/status/backup/migration/restore/monitor/HomeOps reporter, restricted forced-command, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate, Slice 10D-2B1 host state/shared operation lock과 Slice 10D-2B2 restricted deployment transaction source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 temp-root transaction harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini host install/deploy/status/backup/migration/restore/monitor/HomeOps reporter, forced-command 설치, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -19,7 +19,7 @@ infra/
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. normal `api`와 profile-gated `api-migration`은 같은 `${OUR_LEDGER_API_IMAGE}`를 사용하며 production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
-repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public backup wrapper와 artifact/internal core는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock worker와 test-only adapter는 `scripts/host_tools/`에 있다. status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, restore, policy와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
+repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public backup wrapper와 artifact/internal core는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock/deployment worker와 test-only adapter는 `scripts/host_tools/`에 있다. restricted entrypoint는 `scripts/deploy-production.sh`, status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, host transaction, restore, policy와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-host-deploy-transaction.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 deploy/backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -51,7 +51,7 @@ deploy-our-ledger-v1 <sha> keep <actor>
 deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
 ```
 
-GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. 이 저장소에는 해당 intent를 실행하는 Mac mini forced-command wrapper가 없으며 actual credential도 구성하지 않았다. 따라서 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. B1은 operation lock/state/runtime-config staging source만 제공하며 restricted wrapper, predeploy backup/migration/cutover/readiness/rollback 조합과 host 설치는 10D-2B2, public route/secret/User/schedule과 kill switch 활성화는 10D-3의 별도 승인 대상이다.
+GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. B2 source의 `deploy-production.sh`는 이 exact intent와 stdin token을 fixed transaction에 연결하지만 Mac mini forced-command, actual credential과 runtime source는 설치하지 않았다. 따라서 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. public route/secret/User/schedule, host install/preflight와 kill switch 활성화는 10D-3의 별도 승인 대상이다.
 
 local source 검증은 다음 command다.
 
@@ -59,21 +59,42 @@ local source 검증은 다음 command다.
 ./scripts/verify-release-transport.sh
 ```
 
-이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1 source와 10D-2B2 설치 계약이 강제한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
+이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1 source와 10D-3 host install이 강제한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
 
 ## Host state/shared operation lock source
 
 production worker root는 `/Users/homeserver/Server/apps/our-ledger` 상수로 고정되고 CLI/environment path override가 없다. `runtime-config/releases/<digesthex>`, `state/deployment.json`, `pending/transaction.json`, relative `current`와 `operations/lock`만 B1 managed authority다. directory/lock은 current owner mode `0700`, JSON은 `0600`이며 runtime release file은 artifact allowlist의 `0600`/`0700`을 다시 검증한다.
 
-`operations/lock`은 deploy와 standalone backup이 공유하는 atomic directory lock이다. holder가 있거나 stale/symlink/tampered lock이면 즉시 nonzero이고 자동 cleanup/stealing은 없다. public backup wrapper는 lock과 pending 검증 뒤 internal non-executable core를 호출한다. future deploy는 이미 lock을 가진 상태에서 core를 직접 호출하므로 public skip flag 없이 self-deadlock을 피한다.
+`operations/lock`은 deploy와 standalone backup이 공유하는 atomic directory lock이다. holder가 있거나 stale/symlink/tampered lock이면 즉시 nonzero이고 자동 cleanup/stealing은 없다. public backup wrapper는 lock과 pending 검증 뒤 internal non-executable core를 호출한다. B2 deploy transaction은 이미 lock을 가진 상태에서 core를 직접 호출하므로 public skip flag 없이 self-deadlock을 피한다.
 
-release directory는 exact digest에서만 정하고 같은 digest의 다른 content를 overwrite하지 않는다. pending은 새 transaction을 차단하고 crash 뒤 보존한다. current/state/pending은 relative confinement, exact versioned schema, file fsync/atomic replace/directory fsync를 사용하며 candidate를 성공으로 추측하지 않는다.
+release directory는 exact digest에서만 정하고 같은 digest의 다른 content를 overwrite하지 않는다. pending은 새 transaction을 차단하고 crash 뒤 보존한다. current/state/pending은 relative confinement, formatVersion 2 exact schema, file fsync/atomic replace/directory fsync를 사용하며 candidate를 성공으로 추측하지 않는다. formatVersion 2는 B2 phase, actor/start 시각과 pre/post Flyway authority를 추가하며 production activation 전이므로 version 1 migration 없이 구버전을 fail closed한다.
 
 ```bash
 ./scripts/verify-host-state.sh
 ```
 
-이 gate와 backup/restore의 test-only adapter는 owner-only temp root/disposable Compose만 사용한다. actual fixed root, GHCR/Tailscale/SSH/HomeOps와 production resource를 읽거나 쓰지 않으며 실제 host bootstrap/install은 10D-2B2다.
+이 gate와 backup/restore의 test-only adapter는 owner-only temp root/disposable Compose만 사용한다. actual fixed root, GHCR/Tailscale/SSH/HomeOps와 production resource를 읽거나 쓰지 않으며 실제 host bootstrap/install은 10D-3다.
+
+## Restricted host deployment transaction source
+
+future fixed entrypoint는 다음 source만 실행한다.
+
+```text
+deploy-our-ledger-v1 <sha> keep <actor>
+deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
+```
+
+`scripts/deploy-production.sh`와 `production_host deploy`에는 root, env, Compose, image, reporter, backup 또는 skip override가 없다. app root, project, env/backup/reporter path, image repository와 loopback target은 source에 고정된다. candidate image는 exact SHA tag, valid ID/repository digest, linux/arm64와 OCI source/revision/version을 모두 확인하며 runtime update는 exact digest export의 allowlist/mode를 다시 검증한다. owner-only temporary Docker config와 runtime tree는 fixed `/private/tmp` 아래 app root와 disjoint하게 만들고 cleanup한다.
+
+shared `operations/lock` 아래 순서는 `current 검증 → artifact 검증/stage → API writer quiesce → verified backup core → pre-schema authority → same-image migration → post-schema authority → API/Web cutover → PostgreSQL/API/Web와 loopback readiness → env/current/state commit`이다. schema authority는 successful Flyway version, failed count 0과 deterministic history SHA-256이다. migration 뒤 schema가 바뀐 failure에는 previous image rollback, DB restore 또는 reverse migration을 자동 수행하지 않고 pending을 보존한다. 같은 authority에서만 previous exact image pair를 복구한다.
+
+HomeOps reporter는 existing `report-homeops-event.py deployments`를 compact JSON stdin으로만 호출하고 `RUNNING/SUCCESS/FAILED/ROLLED_BACK` lifecycle을 사용한다. reporter endpoint/secret/HMAC/spool, stdout/stderr와 raw exception은 transaction이 읽거나 노출하지 않는다. direct network retry도 구현하지 않는다.
+
+```bash
+./scripts/verify-host-deploy-transaction.sh
+```
+
+이 gate는 32개 pure/synthetic test로 command/token, artifact identity, strict ordering, failure, formatVersion 2 crash/recovery, reporter/privacy와 cleanup을 검증한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에 접근하지 않아 production mutation과 Docker residue는 0이다. source 준비는 forced-command/runtime install, credential, host dry run, backup/migration/deploy 또는 kill switch 활성화를 뜻하지 않는다.
 
 ## 환경변수
 
@@ -113,7 +134,7 @@ docker compose \
   up --detach --wait
 ```
 
-normal `up`은 schema를 변경하지 않는다. 후속 10D-2B2 transaction은 B1 shared lock 아래 current writer quiesce와 verified backup 뒤 동일 exact candidate API image로 다음 one-shot을 먼저 실행하고, exit 0일 때만 위 normal `up`으로 cutover해야 한다. 이 command shape는 source 계약이며 현재 production 실행 승인이 아니다.
+normal `up`은 schema를 변경하지 않는다. 10D-2B2 transaction은 B1 shared lock 아래 current writer quiesce와 verified backup 뒤 동일 exact candidate API image로 다음 one-shot을 먼저 실행하고, exit 0일 때만 위 normal `up`으로 cutover한다. 이 command shape는 source 계약이며 현재 production 실행 승인이 아니다.
 
 ```bash
 docker compose \

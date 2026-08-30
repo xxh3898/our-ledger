@@ -121,14 +121,14 @@ related:
 - `main` push와 controlled manual dispatch가 같은 재사용 Full CI를 먼저 실행하며 production concurrency는 `our-ledger-production`, `cancel-in-progress: false`로 직렬화된다.
 - `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 정확히 `true`가 아니면 validation만 실행되고 GHCR login/publish, Tailscale, SSH와 production environment job은 시작하지 않는다.
 - API와 Web은 같은 exact 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로만 publish하도록 정의하며 `latest`와 임의 image/tag를 허용하지 않는다.
-- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B1 state primitive와 10D-2B2 설치 단계가 강제한다.
+- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B1 state primitive와 10D-3 설치 단계가 강제한다.
 - last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
 - restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
 - GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
 - publish/deploy privileged job의 모든 third-party action ref는 exact 40자리 commit SHA다.
 - local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
-- 10D-1 완료는 source contract만 뜻한다. shared operation lock/state source는 10D-2B1, restricted host wrapper와 실제 설치·transaction은 10D-2B2, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+- 10D-1 완료는 transport source contract만 뜻한다. B1 lock/state와 B2 restricted transaction source가 후속 gate로 추가됐어도 actual host install, credential·Cloudflare·schedule·public activation은 10D-3 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
 
 ### Slice 10D-2A Candidate Migration/Validation Gate
 
@@ -147,15 +147,28 @@ related:
 
 - production worker의 app root는 `/Users/homeserver/Server/apps/our-ledger`로 고정하고 production CLI/environment에 `--root`, `--app-dir`, state/Compose path override 또는 public lock bypass를 노출하지 않는다.
 - `operations/lock`은 current owner mode `0700` atomic directory 하나이며 첫 holder만 성공하고 두 번째 holder, stale directory, symlink, unexpected lock entry는 즉시 fail closed한다. PID 기반 stale cleanup과 lock stealing은 없다.
-- public standalone backup wrapper와 future deploy가 같은 project lock authority를 사용하고, lock을 가진 deploy가 non-executable internal backup core를 직접 호출할 수 있어 nested self-deadlock이 없다.
+- public standalone backup wrapper와 B2 deploy transaction이 같은 project lock authority를 사용하고, lock을 가진 deploy가 non-executable internal backup core를 직접 호출할 수 있어 nested self-deadlock이 없다.
 - runtime-config release path는 exact `sha256:<64 lowercase hex>`에서만 `releases/<digesthex>`로 파생하고 exact regular-file/directory allowlist, `0600`/`0700`, current owner와 hardlink/symlink/nonregular/unexpected entry 금지를 검증한다.
 - 같은 digest와 같은 content는 reuse하고 같은 digest의 다른 content는 overwrite하지 않는다. source path가 release destination을 정하거나 immutable release를 교체할 수 없다.
 - `current`는 verified release를 향하는 relative symlink만 허용하고 temp symlink→atomic replace→directory fsync로 갱신한다. absolute/external/dangling/corrupt target은 fail closed한다.
-- `state/deployment.json`과 `pending/transaction.json`은 formatVersion 1 exact schema, mode `0600`, secret/PII 부재, temp write→file fsync→atomic replace→directory fsync를 지킨다.
+- `state/deployment.json`과 `pending/transaction.json`은 B2 phase/schema evidence를 포함한 formatVersion 2 exact schema, mode `0600`, secret/PII 부재, temp write→file fsync→atomic replace→directory fsync를 지킨다. production activation 전 source이므로 formatVersion 1 compatibility shim이나 migration은 제공하지 않고 구버전을 fail closed한다.
 - pending 존재 중 새 stage/transaction은 거부하고 crash 뒤 pending을 보존한다. candidate 성공을 추측하지 않으며 explicit abandoned pending clear는 current/state가 previous에서 변하지 않은 경우만 허용한다.
 - local `verify-host-state.sh`와 synthetic backup/restore gate는 temp app root/disposable Compose만 사용해 lock contention, release reuse/collision, corruption/path escape, pending/crash와 internal core 호출을 검증한다.
 - runtime-config Dockerfile, change detector, exported file/mode gate와 Hosted Full CI 독립 `host-state` job이 동기화되고 actual `/Users/homeserver/Server`, GHCR/Tailscale/SSH/HomeOps/production resource를 읽거나 쓰지 않는다.
-- 10D-2B1 완료는 source primitive 검증만 뜻하며 restricted forced-command, predeploy backup→migration→cutover→readiness→rollback 조합, actual host install/dry run과 activation은 10D-2B2/10D-3 전까지 수행하지 않는다.
+- 10D-2B1 primitive는 B2 transaction에서 재사용하며 actual host install/dry run과 activation은 10D-3 전까지 수행하지 않는다.
+
+### Slice 10D-2B2 Restricted Host Deployment Transaction Gate
+
+- production entrypoint는 `SSH_ORIGINAL_COMMAND`의 기존 keep/update grammar와 stdin token만 받으며 root, Compose, image, reporter, backup 또는 skip override를 노출하지 않는다.
+- verified current가 없는 fresh host는 keep/update 모두 거부한다. API/Web/runtime-config repository와 Mac mini app/env/backup/reporter/loopback authority는 source 상수로 고정한다.
+- API/Web은 requested exact SHA tag, linux/arm64, expected repository, valid image ID/repository digest와 OCI source/revision/version을 모두 만족해야 writer를 멈춘다. runtime update는 command의 exact digest와 exported exact allowlist/mode를 다시 검증한다.
+- shared operation lock 아래 `writer quiesce → verified predeploy backup → pre-schema authority → same-image migration marker → post-schema authority → same-SHA API/Web cutover → postgres/API/Web/loopback readiness → env/current/state commit` 순서를 건너뛰지 않는다.
+- Flyway successful version, failed count 0과 deterministic history fingerprint를 pending에 durable하게 기록한다. migration 뒤 authority가 달라진 failure에는 previous image나 DB restore/reverse migration을 자동 실행하지 않고 pending을 보존해 operator intervention으로 종료한다.
+- schema authority가 같을 때만 previous image pair를 복구하고 exact image env 두 key만 file fsync→atomic replace→parent fsync로 갱신한다. `down --volumes`, broad prune, caller shell/path/image와 public smoke는 사용하지 않는다.
+- pending formatVersion 2 phase는 skipped transition을 거부한다. pre-migration, post-migration, cutover, readiness와 current/state/pending commit crash를 observed runtime/schema/readiness와 함께 deterministic하게 복구하거나 fail closed한다.
+- HomeOps에는 actual receiver vocabulary `RUNNING`, `SUCCESS`, `FAILED`, `ROLLED_BACK`와 bounded non-sensitive lifecycle만 `[reporter, "deployments"]` JSON stdin으로 전달한다. reporter nonzero/timeout은 application outcome을 바꾸지 않고 secret/origin/HMAC/spool을 직접 다루지 않는다.
+- `verify-host-deploy-transaction.sh`의 32개 synthetic test는 실제 GHCR, Docker daemon, Tailscale, SSH, Mac mini, production path/service/backup/migration, HomeOps 또는 public network를 호출하지 않는다.
+- Hosted Full CI가 PR exact HEAD에서 독립 `host-deploy-transaction` job과 기존 전체 gate를 통과한다. 이 완료는 source 검증일 뿐 install, credential, kill switch 활성화, release/deploy 또는 public acceptance가 아니다.
 
 ## 운영
 
@@ -169,7 +182,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/migration/restore/HomeOps reporter와 LaunchAgent는 10D-2B1 완료 기준이 아니다. 10D-2B1은 host lock/state/runtime-config staging의 합성 검증까지만 제공하며 restricted host transaction 조합과 설치는 10D-2B2, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User, production status/backup/migration/restore/HomeOps reporter와 LaunchAgent는 10D-2B2 완료 기준이 아니다. B2는 host transaction source의 합성 검증까지만 제공하며 install/credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 
