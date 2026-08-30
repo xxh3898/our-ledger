@@ -154,7 +154,7 @@ related:
 - 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
 - actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
 - local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
-- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`과 A2 `fresh-host-bootstrap`을 포함한 현재 12개 job 전체를 통과하며 actual production input/DB, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`과 encrypted `offsite-backup`을 포함한 현재 13개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
 
 ### Slice 10D-3A2 Fresh-host Bootstrap Transaction Source Gate
 
@@ -167,7 +167,7 @@ related:
 - first verified backup 이후에만 one-time input을 unlink하고 parent fsync하며, `INPUT_CONSUMED` 이후에는 input 없이 exact authority를 재검증해 commit할 수 있다.
 - 최종 state는 existing B2 formatVersion 2, previous null과 exact candidate current를 사용한다. 성공 후 fresh ingress rerun은 nonzero이고 data/schema/backup authority가 바뀌지 않는다.
 - local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
-- Hosted Full CI가 exact PR HEAD에서 신규 `fresh-host-bootstrap`을 포함한 12개 job 전체를 통과한다. actual production path, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`과 encrypted `offsite-backup`을 포함한 13개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
 ### Slice 10D-3B0 Exact-SHA GHCR Publish-only Source Gate
 
@@ -179,6 +179,20 @@ related:
 - repository-owned writer는 shared concurrency로 직렬화하고 tag 생성 뒤 세 exact tag가 candidate digest를 가리키는지 다시 확인한다. GHCR의 documented conditional tag-create 부재 때문에 workflow 밖 registry admin의 동시 retag를 원자적으로 차단한다고 주장하지 않는다.
 - `OUR_LEDGER_DEPLOY_ENABLED`, Tailscale, SSH, deployment permission, Production environment, Mac mini command와 Cloudflare 경로가 source에 없고 token은 validation/package API와 login 외 argument·artifact·log에 기록하지 않는다.
 - local/PR/Hosted source gate는 helper와 workflow를 synthetic하게 검증할 뿐 GHCR login/push 또는 production resource를 사용하지 않는다. actual manual publish와 Issue #59 production preparation 재개는 source의 별도 Release 이후 운영 승인 대상이다.
+
+### Slice 10D-3B3A Encrypted Offsite Backup Source Gate
+
+- public `offsite-backup-production.sh`는 fixed production authority의 `run|status`만 허용하고 backup/config/state/iCloud/age/tar path나 executable override를 노출하지 않는다.
+- owner-only external config는 exact public `AGE_RECIPIENT`, absolute `ICLOUD_TARGET_DIRECTORY`만 허용한다. mode `0600`, current owner, regular file, link count 1이며 private age identity와 unknown/duplicate/malformed field를 거부한다.
+- latest source는 strict inventory와 committed `last-success.json`이 함께 가리키는 exact verified bundle 하나다. source exact file set/stat/content와 marker metadata를 encrypt 전과 final publish 전에 재검증한다.
+- plaintext dump/tar를 offsite 또는 staging에 쓰지 않고 verified bundle 전체의 tar stdout만 age stdin으로 연결한다. child process는 absolute executable, argument list, `shell=False`, bounded timeout과 suppressed output을 사용한다.
+- owner-only local ciphertext staging fsync/hash 뒤 iCloud project target의 invocation-specific `.partial`을 fsync/hash하고 macOS `renamex_np(RENAME_EXCL)` 또는 Linux `renameat2(RENAME_NOREPLACE)`의 atomic no-replace publish, directory fsync와 final reverify 후에만 local marker를 file fsync→atomic replace→directory fsync한다.
+- marker/final이 같은 latest source/size/SHA를 정확히 증명할 때만 `NO_OP`한다. newer latest는 새 deterministic filename/marker로 전진하고 기존 final은 보존한다.
+- config/path/source/tar/age/timeout/fsync/copy/hash/rename/final/marker failure와 finalization 순간 collision은 기존 valid marker/final 및 경쟁 destination의 bytes/inode와 unrelated target entry를 byte-identical하게 보존한다. check-then-rename, overwrite fallback과 broad cleanup 없이 이번 invocation의 identity-checked staging/partial/final만 rollback한다.
+- read-only status는 final/marker를 쓰지 않고 검증하여 `MISSING|INVALID|FRESH|STALE`, age와 8시간 grace만 privacy-safe JSON으로 노출한다. HomeOps unsupported signal을 만들거나 다른 type으로 위장하지 않는다.
+- LaunchAgent example은 backup windows 뒤 `00:50/06:50/12:50/18:50`, fixed external bootstrap, no `KeepAlive`/private identity environment만 고정한다. actual install/load/start는 OUT이다.
+- `verify-offsite-backup.sh`는 pinned age v1.3.1 actual encrypt/decrypt round-trip, decrypted exact bundle hash, no plaintext staging, idempotency/freshness/failure/privacy/residue를 disposable path에서 검증한다. Hosted Full CI 독립 `offsite-backup` job은 actual production/iCloud/recipient/LaunchAgent/DB/Compose를 사용하지 않는다.
+- runtime-config Dockerfile, host release allowlist, change detector와 export mode gate에 wrapper `0700`, worker `0600`만 추가하며 config, marker, identity, ciphertext는 artifact에 포함하지 않는다.
 
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
@@ -219,7 +233,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User/bootstrap input, production status/backup/migration/bootstrap/restore/HomeOps reporter와 LaunchAgent는 10D-3A2 완료 기준이 아니다. B2/3A1/A2는 deployment/application bootstrap/fresh-host transaction source의 합성 검증까지만 제공하며 actual ingress/install, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3B 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User/bootstrap input, production status/backup/migration/bootstrap/offsite/restore/HomeOps reporter와 LaunchAgent는 source gate 완료 기준이 아니다. B2/3A1/A2/3B3A는 deployment/application bootstrap/fresh-host/offsite source의 합성 검증까지만 제공하며 actual ingress/install, credential·recipient·iCloud path·public route·schedule·retention 삭제·age 외부복제·production restore는 10D-3B 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 

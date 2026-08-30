@@ -55,6 +55,7 @@ if git diff --quiet \
   scripts/bootstrap-production.sh \
   scripts/backup_tools/backup_artifact.py \
   scripts/backup_tools/backup_core.sh \
+  scripts/backup_tools/offsite_backup.py \
   scripts/deploy-production.sh \
   scripts/host_tools/deploy_transaction.py \
   scripts/host_tools/fresh_bootstrap_state.py \
@@ -64,6 +65,7 @@ if git diff --quiet \
   scripts/host_tools/production_fresh_bootstrap.py \
   scripts/host_tools/production_host.py \
   scripts/monitor-production.sh \
+  scripts/offsite-backup-production.sh \
   scripts/production-status.sh \
   scripts/release_tools/release_contract.py \
   scripts/status_tools/monitor_policy.py \

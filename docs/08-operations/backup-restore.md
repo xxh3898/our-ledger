@@ -11,7 +11,7 @@ related:
 
 ## 현재 상태
 
-Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. Slice 10D-2B1은 public standalone wrapper의 project operation lock과 lock을 다시 얻지 않는 internal backup core를 분리해 future deploy의 nested self-deadlock을 제거한다. Slice 10D-2B2 transaction source는 current API writer를 멈춘 뒤 같은 shared lock을 유지하며 internal core 성공과 pre-schema authority를 확인한 경우에만 candidate migration을 시작한다. Slice 10D-3A1의 Household bootstrap source는 backup을 대신하거나 backup artifact에 input/PII를 저장하지 않는다. Slice 10D-3A2 fresh-host source는 normal readiness 뒤 같은 shared lock에서 internal core로 최초 verified backup과 marker hash를 확인한 후에만 input 소비와 current/state commit을 허용한다. host 설치, production backup/migration/bootstrap 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
+Slice 10C-2A는 scheduler에서 호출 가능한 host one-shot command, PostgreSQL custom-format atomic artifact, checksum/metadata/latest-success contract와 synthetic isolated restore drill을 구현한다. Slice 10C-2B2는 실제 삭제 없는 recent4+daily7 retention plan과 future `:35` schedule/offsite freshness 계약을 확정한다. Slice 10D-1의 secret-free runtime-config artifact는 이 공개 backup source를 immutable allowlist로 운반하고, Slice 10D-2A는 source/restore target에 동일 candidate image의 migration/JPA validation one-shot을 적용하도록 drill 순서를 보정한다. Slice 10D-2B1은 public standalone wrapper의 project operation lock과 lock을 다시 얻지 않는 internal backup core를 분리해 future deploy의 nested self-deadlock을 제거한다. Slice 10D-2B2 transaction source는 current API writer를 멈춘 뒤 같은 shared lock을 유지하며 internal core 성공과 pre-schema authority를 확인한 경우에만 candidate migration을 시작한다. Slice 10D-3A1의 Household bootstrap source는 backup을 대신하거나 backup artifact에 input/PII를 저장하지 않는다. Slice 10D-3A2 fresh-host source는 normal readiness 뒤 같은 shared lock에서 internal core로 최초 verified backup과 marker hash를 확인한 후에만 input 소비와 current/state commit을 허용한다. Slice 10D-3B3A는 verified local bundle만 읽는 age encrypted offsite worker, atomic marker, 8시간 freshness와 synthetic decrypt gate를 추가한다. host 설치, production backup/migration/bootstrap/offsite 실행, schedule 또는 retention 삭제는 활성화하지 않는다.
 
 실제 Mac mini production backup/restore는 실행하지 않았고 LaunchAgent, retention 삭제, age recipient/iCloud 복제와 central freshness incident도 활성화하지 않았다. source/CI gate 통과는 production disaster recovery 준비 완료가 아니다.
 
@@ -85,24 +85,33 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 
 최소 7일 운영 관찰, offsite decrypt 성공, isolated restore drill 성공과 별도 production deletion 승인 전에는 `pruneCandidates`를 삭제하지 않는다. `rm -rf` 기반 prune와 이름/age만 본 삭제는 허용하지 않는다.
 
-## Future schedule과 offsite
+## Encrypted offsite source와 schedule activation 경계
 
-`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. Cubing Hub `:05`, Guess Pokémon `:20`과 15분씩 stagger하며 `KeepAlive`를 사용하지 않는다. B2/A2도 plist나 fixed app root를 설치·실행하지 않는다. 실제 restricted bootstrap/ingress 설치와 production 변경 없는 host preflight/dry run, LaunchAgent load와 scheduled backup 실행은 10D-3B의 별도 운영 승인이다.
+`launchd/com.homeserver.our-ledger-backup.plist.example`은 Mac mini local timezone에서 `00:35`, `06:35`, `12:35`, `18:35`에 repository 밖 fixed bootstrap을 호출한다. `launchd/com.homeserver.our-ledger-offsite.plist.example`은 committed backup window 뒤 `00:50`, `06:50`, `12:50`, `18:50`에 fixed offsite bootstrap의 `run`만 호출한다. 둘 다 `KeepAlive`와 private identity environment를 사용하지 않는다. plist나 fixed ingress를 설치·load/start하지 않았으며 실제 schedule은 10D-3B의 별도 운영 승인이다.
 
-future offsite는 다음 순서를 따른다.
+`scripts/offsite-backup-production.sh`의 public interface는 fixed production authority에서 `run`과 read-only `status`만 허용한다. path나 executable override는 없다. actual public config authority는 repository 밖 `/Users/homeserver/Server/apps/our-ledger/offsite.env` regular file 하나이며 current owner, mode `0600`, link count 1을 요구한다. 이 파일은 public `AGE_RECIPIENT`와 canonical iCloud project target `ICLOUD_TARGET_DIRECTORY`만 포함하고 private identity를 허용하지 않는다. state directory는 repository 밖 owner-only `offsite-state`, production encryptor는 `/opt/homebrew/bin/age`, tar는 `/usr/bin/bsdtar`로 고정한다. 이 path와 값은 source 계약일 뿐 이번 gate에서 생성하거나 읽지 않는다.
+
+worker transaction은 다음 순서를 따른다.
 
 ```text
-verified local snapshot
-→ tar stream
-→ age public recipient encryption
+fixed config/path/binary + strict latest marker/bundle 검증
+→ matching marker/final이면 exact hash 확인 뒤 NO_OP
 → owner-only local ciphertext staging
-→ SHA-256 검증
-→ project-specific iCloud .partial
-→ final rename
-→ final regular-file + SHA-256 재검증
+→ verified bundle 전체의 bsdtar stdout을 age public recipient로 암호화
+→ staging file fsync + nonzero + SHA-256
+→ project-specific iCloud .partial copy + fsync + SHA-256 비교
+→ local source authority 재검증
+→ native atomic no-replace final publish + target directory fsync
+→ final regular-file/size/SHA-256 및 source 재검증
+→ offsite-last-success.json temp fsync + atomic replace + directory fsync
+→ invocation-owned local staging cleanup
 ```
 
-raw PostgreSQL dump를 iCloud에 직접 복사하지 않는다. private age identity는 repository나 Mac mini plaintext file에 두지 않는다. iCloud-stage freshness grace는 8시간이고 local verified backup grace는 7시간이다. HomeOps의 현재 signal contract에는 backup freshness type이 없으므로 다른 lifecycle로 위장해 보내지 않는다. recipient/key/iCloud path, ciphertext worker와 central typed freshness 연동은 10D 및 별도 HomeOps extension에서 승인한다.
+plaintext tar file과 raw PostgreSQL dump를 offsite/staging에 만들지 않는다. final publish는 macOS의 `renamex_np(RENAME_EXCL)`, Linux CI의 `renameat2(RENAME_NOREPLACE)`만 사용하며 check-then-rename이나 overwrite fallback을 허용하지 않는다. finalization 순간 destination이 생기거나 native primitive가 없으면 nonzero로 끝나고 경쟁 destination의 bytes/inode, 기존 valid final/marker와 unrelated target entry를 보존한다. source가 처리 중 변경되거나 config/binary/path/marker/bundle/tar/age/fsync/copy/hash/rename/final 검증이 실패해도 같은 fail-closed 계약을 지키며, worker는 이번 invocation이 만든 exact staging/partial/final만 identity 확인 후 rollback할 수 있고 broad cleanup이나 retention 삭제를 하지 않는다. final publish 뒤 marker commit 전에 crash하여 marker 없는 collision이 남으면 randomized ciphertext를 덮어쓰거나 성공으로 추측하지 않고 operator 분류가 필요한 fail-closed 상태다.
+
+marker는 source logical bundle/createdAt/schema, replicatedAt, ciphertext filename/size/SHA-256만 저장한다. 같은 latest source의 marker와 final hash가 정확히 일치할 때만 새 randomized ciphertext를 만들지 않고 `NO_OP`한다. `status`는 marker/final을 쓰지 않고 검증해 `MISSING`, `INVALID`, `FRESH`, `STALE`, age와 8시간 grace만 privacy-safe JSON으로 노출한다. local verified backup grace는 계속 7시간이다. HomeOps에는 offsite freshness type이 없으므로 다른 signal로 위장하지 않으며 central typed alert는 별도 HomeOps extension이다.
+
+`./scripts/verify-offsite-backup.sh`는 disposable owner-only directory와 pinned age v1.3.1만 사용해 actual encrypt/decrypt tar round-trip, source file hash 재현, no-op/new latest, 8시간 freshness, config/path/source/collision과 tar/age/timeout/fsync/copy/hash/rename/marker failure preservation을 검증한다. Linux CI download는 official archive URL과 architecture별 SHA-256을 고정하며 curl-pipe-shell을 사용하지 않는다. 실제 production path, iCloud, recipient, LaunchAgent, DB/Compose와 private identity는 사용하지 않고 test identity는 temporary directory 종료와 함께 제거한다.
 
 ## Restore Drill
 
@@ -144,4 +153,4 @@ production DB를 drop/recreate하거나 `docker compose down --volumes`하는 co
 - CSV는 지정 기간의 미삭제 Transaction과 최소 reference/provenance만 포함하며 schema, Flyway history, 논리삭제 row, 운영 설정을 복구하지 못한다.
 - CSV 성공은 `pg_dump`, 외부 보관, retention, restore drill 성공을 의미하지 않는다.
 - 서버는 CSV history나 temp file을 backup처럼 보관하지 않는다.
-- 10C-2A source/drill, 10D-1 immutable transport, 10D-2A candidate migration, 10D-2B1 shared lock/state, 10D-2B2 deployment transaction과 10D-3A1/A2 bootstrap source gate는 구현됐지만 production backup/migration/bootstrap/restore 실행과 host ingress/install·보관·외부복제 활성화는 10D-3B의 별도 운영 Gate다.
+- 10C-2A source/drill, 10D-1 immutable transport, 10D-2A candidate migration, 10D-2B1 shared lock/state, 10D-2B2 deployment transaction, 10D-3A1/A2 bootstrap과 10D-3B3A encrypted offsite source gate는 구현됐지만 production backup/migration/bootstrap/restore/offsite 실행과 host ingress/install·schedule·보관·외부복제 활성화는 10D-3B의 별도 운영 Gate다.
