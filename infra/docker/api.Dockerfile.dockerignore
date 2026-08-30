@@ -1,0 +1,14 @@
+**
+!backend
+!backend/build.gradle.kts
+!backend/gradle.properties
+!backend/gradlew
+!backend/settings.gradle.kts
+!backend/gradle
+!backend/gradle/**
+!backend/src
+!backend/src/main
+!backend/src/main/**
+!infra
+!infra/docker
+!infra/docker/HttpHealthCheck.java

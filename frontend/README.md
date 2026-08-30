@@ -1,17 +1,38 @@
 # Frontend
 
-React 19.2 + TypeScript 6.0 + Vite 8.x 기반 PWA가 위치한다.
+React 19.2.8 + TypeScript 6.0.3 + Vite 8.2.2 기반 frontend다. Node.js 24.20.0은 `.nvmrc`, dependency는 `package-lock.json`으로 고정한다.
 
-Slice 0 bootstrap 후 lockfile, `.nvmrc`, lint, typecheck, test, build script를 반드시 커밋한다.
+## 실행
 
-```text
-frontend/
-├─ package.json
-├─ package-lock.json
-├─ .nvmrc
-├─ src/
-├─ public/
-└─ vite.config.ts
+개발 Compose를 사용하면 host에 Node.js를 설치하지 않아도 된다.
+
+```bash
+docker compose --env-file .env.dev.local -f compose.dev.yaml --profile app up web
 ```
 
-모바일 우선, 달력 중심 정보구조, API 응답 캐시 금지 정책을 따른다.
+Node.js 24가 이미 있는 환경에서는 npm을 직접 사용할 수 있다.
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+host에서 직접 실행한 Vite development server는 `127.0.0.1:5173`에 bind한다. Compose 내부에서는 container network를 위해 모든 interface를 수신하지만 host 공개 port는 `127.0.0.1:5173`으로 제한한다. `BACKEND_ORIGIN`은 development proxy의 server-side target이며 browser bundle에 secret을 넣지 않는다.
+
+local에서는 `OUR_LEDGER_LOCAL_IDENTITY_EMAIL`이 Vite proxy의 server-side 설정으로만 사용되고 `/api` 요청에 `X-Our-Ledger-Local-Identity`를 추가한다. `VITE_` prefix가 아니므로 browser bundle에 포함되지 않는다. backend의 local/test filter도 해당 identity를 내부 User와 Household membership에 다시 매핑한다. 예시는 root `.env.example`의 가짜 `example.test` 값이다.
+
+## 검증
+
+```bash
+npm run lint
+npm run typecheck
+npm run test:run
+npm run build
+```
+
+repository root에서는 `./scripts/verify-frontend.sh`가 같은 순서를 실행하며 Node.js 24가 없으면 격리된 verification container를 사용한다.
+
+`App.test.tsx`는 `/api/v1/me`의 loading, 정상 User/Household/role, 401 인증 필요, 403 미등록 User 상태를 보존한다. Account/Category 설정, current user 기본값, INCOME/EXPENSE/TRANSFER 빠른 입력, 카드 posting, 실패 시 form 보존, 최근 거래 edit/delete를 추가로 검증한다. 애플리케이션 자체 로그인·OTP 화면은 제공하지 않는다.
+
+Ledger request helper는 same-origin cookie를 유지하고 unsafe request에 `XSRF-TOKEN` cookie의 값을 `X-XSRF-TOKEN` header로 보낸다. 인증이 성공한 뒤에만 current Household의 Member, Account, Category, Transaction을 불러오며 client Household ID를 생성하지 않는다.

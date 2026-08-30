@@ -1,9 +1,10 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.7
+last_updated: 2026-08-29
 related:
   - 03-data/erd.md
+  - ADR-008
   - AGENTS.md
 ---
 
@@ -17,6 +18,35 @@ related:
 - 월: 해당 월 1일의 `DATE`
 - enum 성격: PostgreSQL ENUM 대신 `VARCHAR + CHECK`
 - optimistic lock: `version BIGINT`
+
+## User identity
+
+V1 production 인증은 Cloudflare Access를 사용하므로 `users`는 애플리케이션 자체 비밀번호를 저장하지 않는다.
+
+최소 User 계약:
+
+- `id`
+- `email`
+- `display_name`
+- `status`
+- `created_at`
+- `updated_at`
+
+`password_hash`, 비밀번호 복구 token, 로그인 실패 횟수 같은 자체 credential 컬럼은 V1 스키마에 두지 않는다.
+
+`users.email`은 Cloudflare Access의 검증된 email claim과 내부 User를 매핑하기 위한 식별자이며 `LOWER(email)` 기준 unique를 유지한다. 실제 User 생성은 별도 bootstrap/provision 절차로 수행하고 Access 인증 성공만으로 자동 생성하지 않는다.
+
+`V2__users_households.sql`은 email이 `LOWER(BTRIM(email))`과 같은지 CHECK하고 `LOWER(email)` expression unique index를 추가한다. `status`는 `ACTIVE`, `DISABLED`만 허용한다.
+
+## Household와 Member
+
+- `households.base_currency` DB/code 기본값은 `KRW`다.
+- `households.timezone` DB/code 기본값은 `Asia/Seoul`이다.
+- `household_members.role`은 `OWNER`, `MEMBER`만 허용한다.
+- `(household_id, user_id)` unique로 같은 User의 중복 참여를 막는다.
+- `role = 'OWNER'` partial unique index로 Household당 OWNER를 한 명으로 제한한다.
+- 최대 2명은 단순 CHECK로 표현하지 않는다. `Household` row에 `PESSIMISTIC_WRITE` lock을 건 service transaction에서 현재 count를 검사한다.
+- V1 current Household resolver는 User membership이 정확히 한 건일 때만 principal을 만든다. schema 자체는 향후 다중 Household migration 가능성을 닫지 않는다.
 
 ## Household 경계
 
@@ -42,10 +72,12 @@ FOREIGN KEY (category_id, household_id)
 
 - User email: `LOWER(email)` unique
 - Member: `(household_id, user_id)` unique
+- Household OWNER: `household_id WHERE role = 'OWNER'` partial unique
 - 활성 Category: Household/type/lower(name) partial unique
 - Budget: PostgreSQL `UNIQUE NULLS NOT DISTINCT`로 월·scope·owner·category 중복 방지
-- 반복 생성: `(generated_from_recurring_id, recurrence_date)` partial unique
+- 반복 생성: `(generated_from_recurring_id, recurrence_date)` full unique. null pair를 허용하고 논리삭제 generated row도 중복 방지에 포함
 - Goal Account: `(goal_id, account_id)` PK 및 `account_id` unique
+- Marriage Goal: `household_id WHERE type='MARRIAGE'` partial unique
 
 ## Transaction CHECK 요약
 
@@ -58,6 +90,46 @@ FOREIGN KEY (category_id, household_id)
 
 일부 다중 행 규칙은 CHECK로 표현할 수 없으므로 서비스와 통합 테스트로 강제한다.
 
+## Slice 3 제약
+
+- Account: PERSONAL owner 필수/SHARED owner null, owner composite FK, `currency='KRW'`, nullable 숫자 4자리 `last_four`, ASSET-only savings flag, CREDIT_CARD/LIABILITY, nonnegative sort order
+- Category Group: `(id, household_id, type)` unique target
+- Category: Group과 `(group_id, household_id, type)` composite FK, `(id, household_id, type)` unique target, active `(household_id, type, lower(name))` partial unique
+- Transaction: positive amount, INCOME/EXPENSE scope/category, PERSONAL owner/SHARED owner null, NORMAL/reversal null 또는 EXPENSE REFUND/reversal 필수, audit member와 deleted audit 쌍
+- Entry: same-household Transaction/Account composite FK, nonzero delta, `(transaction_id, entry_role)` unique
+
+Transaction별 exact Entry set은 단일 row CHECK로 표현할 수 없다. Service가 INCOME/EXPENSE의 PRIMARY 1개와 TRANSFER의 SOURCE/DESTINATION 각 1개를 원자적으로 구성하고 PostgreSQL 통합 테스트로 검증한다.
+
+## Slice 5 Budget 제약
+
+- `budget_month`는 `EXTRACT(DAY)=1` CHECK로 월 1일만 허용한다.
+- `scope`는 `HOUSEHOLD`, `PERSONAL`, `SHARED`다.
+- PERSONAL은 owner가 필수이고 HOUSEHOLD/SHARED owner는 null이다.
+- `amount >= 0`, `version >= 0`이다.
+- Member와 Category는 같은 Household의 `(id, household_id)`만 참조한다.
+- `UNIQUE NULLS NOT DISTINCT (household_id, budget_month, scope, owner_member_id, category_id)`로 null 포함 identity 중복을 DB에서 차단한다.
+- EXPENSE/active Category 신규 연결은 Service에서 검사한다. archive된 기존 Category FK와 Budget row는 유지한다.
+
+## Slice 7 Recurring 제약
+
+- rule: positive amount, supported type/frequency, positive interval, valid start/end, nonblank name/memo, `auto_post=true`, nonnegative version
+- template field: INCOME/EXPENSE의 Scope/Owner/Category와 TRANSFER null field 의미를 Transaction과 동일하게 CHECK
+- template Account: same-Household Recurring/Account composite FK, `PRIMARY/SOURCE/DESTINATION`, `(recurring_transaction_id, entry_role)` unique
+- cursor: null 또는 start 이상이며 end가 있으면 end 이하
+- generated Transaction: lineage pair CHECK, same-Household Recurring composite FK, NORMAL-only CHECK
+- occurrence unique는 partial index가 아니라 full UNIQUE이므로 logical delete 후에도 동일 occurrence를 다시 만들 수 없다.
+- exact Account role set과 posting compatibility, schedule anchor, active reference lifecycle은 service와 PostgreSQL integration test로 보완한다.
+
+## Slice 8 Goal 제약
+
+- Goal type은 `MARRIAGE`, `CUSTOM`, 이름은 nonblank 100자 이하, `target_amount > 0`, `version >= 0`이다.
+- Household별 `MARRIAGE` 한 개만 partial unique index로 제한하고 `CUSTOM`은 여러 row를 허용한다.
+- Goal create/update actor와 GoalAccount `linked_by`는 같은 Household Member composite FK다.
+- GoalAccount는 Goal과 Account를 각각 `(id, household_id)` composite FK로 연결한다.
+- `(goal_id, account_id)` PK와 `account_id` unique를 함께 사용한다.
+- 신규 연결 eligibility와 `starting_balance` 계산은 Account row write lock 안에서 service가 검사한다.
+- current amount, 달성률, 월별 순저축과 예상 월은 원장에서 파생하며 schema에 저장하지 않는다.
+
 ## Migration
 
 예상 순서:
@@ -67,9 +139,10 @@ V1__foundation.sql
 V2__users_households.sql
 V3__accounts_categories_transactions.sql
 V4__transaction_account_entries.sql
-V5__budgets.sql
-V6__recurring_transactions.sql
-V7__goals.sql
+V5__credit_card_liability_constraint.sql
+V6__budgets.sql
+V7__recurring_transactions.sql
+V8__goals.sql
 ```
 
 실제 이름과 번호는 bootstrap 이후 연속성을 유지한다. 적용된 migration 파일은 수정하지 않는다.

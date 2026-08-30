@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.8
+last_updated: 2026-08-29
 related:
   - 06-security/authorization.md
 ---
@@ -43,19 +43,104 @@ related:
 
 - `AUTHENTICATION_REQUIRED`
 - `ACCESS_DENIED`
+- `USER_NOT_REGISTERED`
+- `USER_DISABLED`
+- `HOUSEHOLD_MEMBERSHIP_REQUIRED`
+- `HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`
+- `CSRF_TOKEN_INVALID`
+- `EXPORT_RANGE_TOO_LARGE`
 - `HOUSEHOLD_MEMBER_LIMIT_REACHED`
 - `RESOURCE_NOT_FOUND`
 - `TRANSACTION_VERSION_CONFLICT`
 - `TRANSACTION_INVALID_SCOPE`
-- `TRANSACTION_INVALID_ACCOUNT_ENTRY`
+- `TRANSACTION_ENTRY_SET_INVALID`
 - `TRANSACTION_REFUND_ORIGINAL_REQUIRED`
 - `TRANSACTION_REFUND_EXCEEDS_ORIGINAL`
+- `TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS`
+- `TRANSACTION_REFUND_UPDATE_NOT_ALLOWED`
 - `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`
 - `CATEGORY_TYPE_MISMATCH`
 - `BUDGET_DUPLICATE`
+- `BUDGET_VERSION_CONFLICT`
+- `RECURRING_AUTO_POST_REQUIRED`
+- `RECURRING_VERSION_CONFLICT`
+- `RECURRING_REFERENCE_IN_USE`
 - `RECURRING_OCCURRENCE_ALREADY_CREATED`
+- `RECURRING_TEMPLATE_INVALID`
+- `GOAL_ALREADY_EXISTS`
+- `GOAL_VERSION_CONFLICT`
 - `GOAL_ACCOUNT_ALREADY_ASSIGNED`
+- `GOAL_ACCOUNT_NOT_ELIGIBLE`
+
+### Ledger code
+
+- `INVALID_REQUEST`: JSON, enum/date/query 형식과 필수·크기·숫자 범위 validation 실패 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household에서 Member/Account/Category/Transaction을 찾을 수 없음 (`404`)
+- `RESOURCE_STATE_CONFLICT`: DB unique/state race 등 현재 상태 충돌 (`409`)
+- `CATEGORY_NAME_CONFLICT`: 같은 Household/type의 active Category 이름 중복 (`409`)
+- `CATEGORY_GROUP_TYPE_MISMATCH`: Category와 Group type 불일치 (`422`)
+- `ARCHIVED_CATEGORY_GROUP_NOT_ALLOWED`: 보관 Group으로 Category 생성·이동 (`422`)
+- `CATEGORY_TYPE_MISMATCH`: Transaction과 Category type 불일치 (`422`)
+- `ARCHIVED_ACCOUNT_NOT_ALLOWED`, `ARCHIVED_CATEGORY_NOT_ALLOWED`: 보관 기준정보의 신규 posting (`422`)
+- `TRANSACTION_INVALID_SCOPE`: PERSONAL/SHARED owner 조합 또는 INCOME payer 규칙 위반 (`422`)
+- `TRANSACTION_VERSION_CONFLICT`: stale PATCH/DELETE version (`409`)
+- `TRANSACTION_ENTRY_SET_INVALID`: 저장된 거래의 role/delta/Account Entry exact set 불일치 (`409`)
+- `TRANSFER_SAME_ACCOUNT_NOT_ALLOWED`: source와 destination 동일 (`422`)
+- `UNSUPPORTED_TRANSFER_SOURCE`: LIABILITY source 이체 (`422`)
+- `CREDIT_CARD_NATURE_REQUIRED`: CREDIT_CARD/ASSET 조합 (`422`)
+- `ACCOUNT_POSTING_CLASSIFICATION_IMMUTABLE`: Entry가 연결된 Account의 posting 분류 변경 (`409`)
+- `TRANSACTION_REFUND_ORIGINAL_REQUIRED`: original이 active NORMAL EXPENSE가 아님 (`422`)
+- `TRANSACTION_REFUND_EXCEEDS_ORIGINAL`: active 누적 환불 상한 초과 (`422`, amount field error 포함)
+- `TRANSACTION_REFUND_ORIGINAL_HAS_ACTIVE_REFUNDS`: active Refund가 있는 original 금융 edit/delete (`409`)
+- `TRANSACTION_REFUND_UPDATE_NOT_ALLOWED`: Refund generic PATCH 요청 (`422`)
+- `UNSUPPORTED_ADJUSTMENT_TYPE`: generic Transaction POST의 REFUND/reversal 요청 (`422`)
+- `UNSUPPORTED_ACCOUNT_POSTING`: Transaction 유형과 Account nature/type 조합 불일치 (`422`)
+
+### Budget code
+
+- `INVALID_REQUEST`: month/amount 형식, 음수 amount, scope-owner 조합 오류 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household에서 Budget/Member/Category를 찾을 수 없음 (`404`)
+- `CATEGORY_TYPE_MISMATCH`: INCOME Category를 Budget에 연결 (`422`)
+- `ARCHIVED_CATEGORY_NOT_ALLOWED`: archived Category를 신규 생성·수정 identity에 연결 (`422`)
+- `BUDGET_DUPLICATE`: service pre-check 또는 `uq_budgets_identity` DB race (`409`)
+- `BUDGET_VERSION_CONFLICT`: stale PATCH/DELETE optimistic version (`409`)
+
+### Recurring code
+
+- `INVALID_REQUEST`: 필수값, name/memo 길이, 금액·interval, 날짜 범위, 과거 start date validation 실패 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household에서 규칙, Member, Account, Category를 찾을 수 없음 (`404`)
+- `RECURRING_AUTO_POST_REQUIRED`: V1에서 지원하지 않는 `autoPost=false` 요청 (`422`)
+- `RECURRING_VERSION_CONFLICT`: stale PATCH version (`409`)
+- `RECURRING_REFERENCE_IN_USE`: active 규칙이 참조하는 Account/Category/Category Group의 archive 또는 posting 의미 변경 (`409`)
+- `RECURRING_OCCURRENCE_ALREADY_CREATED`: 같은 규칙과 발생일의 생성 거래 중복 (`409`); scheduler는 기존 거래를 확인해 정상 멱등 결과로 흡수한다.
+- `RECURRING_TEMPLATE_INVALID`: 저장된 규칙 template이 canonical Transaction posting 계약을 더 이상 충족하지 않음 (`409`); 해당 규칙 발생만 실패시키고 다른 규칙은 계속 처리한다.
+- Transaction template의 scope, type, archived reference, Account posting 오류는 Basic Ledger와 같은 `422` code를 사용한다.
+
+### Goal code
+
+- `INVALID_REQUEST`: blank/100자 초과 이름, 0 이하 목표 금액, version 누락 (`400`)
+- `RESOURCE_NOT_FOUND`: current Household의 Marriage Goal 또는 Account/link를 찾을 수 없음 (`404`)
+- `GOAL_ALREADY_EXISTS`: Household의 MARRIAGE Goal service pre-check 또는 DB partial unique race (`409`)
+- `GOAL_VERSION_CONFLICT`: stale Goal PATCH optimistic version (`409`)
+- `GOAL_ACCOUNT_ALREADY_ASSIGNED`: 같은 Account의 기존 link 또는 DB assignment unique race (`409`)
+- `GOAL_ACCOUNT_NOT_ELIGIBLE`: archived, non-ASSET, `savings_enabled=false` Account 신규 연결 (`422`)
+
+### CSV Export code
+
+- `INVALID_REQUEST`: `from`/`to` 누락·parse 실패·역전 (`400`)
+- `EXPORT_RANGE_TOO_LARGE`: 시작일 포함 3,653일 초과 동기 export (`422`)
+- `TRANSACTION_ENTRY_SET_INVALID`: export 대상 Transaction의 canonical Entry role/delta/Account 조합 손상 (`409`)
+- 인증과 내부 User/Household 결정 실패는 기존 `401`/`403` code를 재사용한다.
+
+CSV 성공 body를 쓰기 전에 validation, authorization, query, canonical Entry 검증을 모두 끝낸다. 실패 response는 CSV가 아니라 기존 JSON 오류 형식이다.
 
 ## 보안
 
 다른 Household의 리소스가 실제로 존재하는지 구분할 수 없도록 404 또는 일반화된 403 정책을 일관되게 적용한다. stack trace와 SQL을 응답하지 않는다.
+
+Ledger의 ID로 지정된 Member/Account/Category/Transaction은 미존재와 cross-household를 모두 `404 RESOURCE_NOT_FOUND`로 처리한다. 목록 filter는 current Household query 경계 안에서만 평가하며 다른 Household 데이터를 반환하지 않는다.
+
+- Access JWT가 없거나 signature/issuer/audience/time/email 검증에 실패하면 `401 AUTHENTICATION_REQUIRED`다.
+- JWT가 유효하지만 내부 User가 없으면 `403 USER_NOT_REGISTERED`, 비활성이면 `403 USER_DISABLED`다.
+- ACTIVE User에게 current membership이 없으면 `403 HOUSEHOLD_MEMBERSHIP_REQUIRED`, 둘 이상이면 `403 HOUSEHOLD_MEMBERSHIP_AMBIGUOUS`다.
+- unsafe request의 CSRF token이 없거나 다르면 `403 CSRF_TOKEN_INVALID`다.

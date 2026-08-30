@@ -1,0 +1,143 @@
+services:
+  web:
+    image: ${OUR_LEDGER_WEB_IMAGE:?set OUR_LEDGER_WEB_IMAGE to an exact immutable image reference}
+    cpus: 0.50
+    mem_limit: 128m
+    pids_limit: 128
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - target: 8080
+        published: ${OUR_LEDGER_ORIGIN_PORT:?set OUR_LEDGER_ORIGIN_PORT}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - application
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+    stop_signal: SIGQUIT
+    stop_grace_period: 30s
+
+  api:
+    image: ${OUR_LEDGER_API_IMAGE:?set OUR_LEDGER_API_IMAGE to an exact immutable image reference}
+    cpus: 1.50
+    mem_limit: 1g
+    pids_limit: 256
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?set POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      CLOUDFLARE_ACCESS_ISSUER: ${CLOUDFLARE_ACCESS_ISSUER:?set CLOUDFLARE_ACCESS_ISSUER}
+      CLOUDFLARE_ACCESS_JWK_SET_URI: ${CLOUDFLARE_ACCESS_JWK_SET_URI:?set CLOUDFLARE_ACCESS_JWK_SET_URI}
+      CLOUDFLARE_ACCESS_AUDIENCE: ${CLOUDFLARE_ACCESS_AUDIENCE:?set CLOUDFLARE_ACCESS_AUDIENCE}
+      OUR_LEDGER_BOOTSTRAP_ENABLED: "false"
+      OUR_LEDGER_RECURRING_SCHEDULER_ENABLED: "true"
+      OUR_LEDGER_RECURRING_INITIAL_DELAY_MS: ${OUR_LEDGER_RECURRING_INITIAL_DELAY_MS:-0}
+      OUR_LEDGER_RECURRING_POLL_DELAY_MS: ${OUR_LEDGER_RECURRING_POLL_DELAY_MS:-60000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    healthcheck:
+      test: ["CMD", "java", "-cp", "/opt/healthcheck", "HttpHealthCheck", "http://127.0.0.1:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+
+  api-migration:
+    profiles:
+      - migration
+    image: ${OUR_LEDGER_API_IMAGE:?set OUR_LEDGER_API_IMAGE to an exact immutable image reference}
+    cpus: 1.50
+    mem_limit: 1g
+    pids_limit: 256
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SPRING_PROFILES_ACTIVE: production,migration
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?set POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      OUR_LEDGER_BOOTSTRAP_ENABLED: "false"
+      OUR_LEDGER_RECURRING_SCHEDULER_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    restart: "no"
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+
+  postgres:
+    image: postgres:18.6-alpine3.23@sha256:697c180dbf244d3ce4a8f4cbc0156cde840af055c1bf8b76aebe422a4822086f
+    cpus: 1.00
+    mem_limit: 512m
+    pids_limit: 256
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - database
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      - /var/run/postgresql:rw,noexec,nosuid,size=16m,mode=3775
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+
+networks:
+  application:
+  database:
+    internal: true
+
+volumes:
+  postgres-data:

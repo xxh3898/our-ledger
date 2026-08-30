@@ -1,0 +1,58 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  main:
+    banner-mode: "off"
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        operations:
+          include: recurringScheduler
+          show-components: always
+          show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+server:
+  error:
+    include-binding-errors: never
+    include-exception: false
+    include-message: never
+    include-stacktrace: never
+  forward-headers-strategy: framework
+  shutdown: graceful
+
+logging:
+  level:
+    root: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+
+our-ledger:
+  auth:
+    cloudflare:
+      issuer: ${CLOUDFLARE_ACCESS_ISSUER}
+      jwk-set-uri: ${CLOUDFLARE_ACCESS_JWK_SET_URI}
+      audience: ${CLOUDFLARE_ACCESS_AUDIENCE}
+  bootstrap:
+    enabled: false
+  recurring:
+    scheduler:
+      enabled: true

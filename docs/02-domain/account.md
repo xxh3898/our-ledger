@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-29
 related:
   - 03-data/transaction-ledger-rules.md
   - 06-security/privacy-model.md
@@ -22,7 +22,7 @@ related:
 - `ASSET`: 잔액 증가가 순자산 증가
 - `LIABILITY`: 잔액 증가가 순자산 감소
 
-일반적으로 CREDIT_CARD는 LIABILITY다.
+`CREDIT_CARD`의 nature는 반드시 `LIABILITY`다. Service validation과 database CHECK가 같은 규칙을 강제한다.
 
 ## Ownership
 
@@ -41,6 +41,8 @@ current_balance = opening_balance + 유효 Account Entry의 balance_delta 합
 - LIABILITY 카드 사용: delta 양수
 - LIABILITY 납부: delta 음수
 
+현재 잔액 조회는 `opening_balance`와 `deleted_at IS NULL`인 Transaction의 Entry만 합산한다. Entry row는 논리삭제된 Transaction에도 보존하되 잔액에서는 제외한다.
+
 ## 저축 표시
 
 `savings_enabled=true`인 ASSET Account를 저축 목적 계좌로 본다. Account 사이 이동을 저축으로 집계할 때 source와 destination의 savings 속성을 함께 본다.
@@ -52,3 +54,15 @@ current_balance = opening_balance + 유효 Account Entry의 balance_delta 합
 ## 보관
 
 거래가 연결된 Account는 물리삭제하지 않고 archive한다. archive 이후 새 거래 선택에서는 제외하되 과거 조회와 잔액 검산에는 남긴다.
+
+Goal에 이미 연결된 Account도 archive 자체를 막지 않는다. 새 Goal 연결만 active Account로 제한하고 기존 link는 사용자가 해제할 때까지 현재 잔액과 archived 상태를 Goal에 제공한다. Goal 연결 snapshot과 posting은 같은 Account row lock을 사용한다.
+
+## Slice 3 계약
+
+- Account는 current Household에 속하고 PERSONAL owner는 같은 HouseholdMember여야 한다.
+- `currency` 입력은 `KRW`, `last_four`는 nullable 숫자 4자리다. 전체 계좌번호나 카드번호는 받지 않는다.
+- `savings_enabled=true`는 ASSET Account에만 허용한다.
+- INCOME은 active ASSET, 일반 EXPENSE는 active ASSET 또는 CREDIT_CARD/LIABILITY에만 posting한다.
+- TRANSFER source는 active ASSET, destination은 active ASSET 또는 LIABILITY다. OTHER/LIABILITY는 destination으로 허용하지만 카드 EXPENSE Account로는 허용하지 않는다.
+- Entry가 연결된 뒤에는 기존 delta 의미를 바꾸는 ASSET/CREDIT_CARD-LIABILITY/기타 LIABILITY posting 분류 변경을 거부한다. 이름·보관과 같은 분류 비영향 수정은 허용한다.
+- 목록은 active-only가 기본이고 `includeArchived=true`일 때 보관 Account를 함께 반환한다.

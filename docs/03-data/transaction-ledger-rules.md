@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-27
+version: 0.4
+last_updated: 2026-08-28
 related:
   - ADR-002
   - 02-domain/account.md
@@ -46,6 +46,8 @@ related:
 - 원 지출의 계좌 효과를 반대로 적용
 - ASSET 환불: `+amount`
 - LIABILITY 환불: `-amount`
+- Account, Scope, Owner, Payer, Category는 valid 원 NORMAL EXPENSE에서 파생
+- 원 거래 Account/Category가 이후 보관돼도 기존 지출 reversal은 허용
 
 ### TRANSFER
 
@@ -59,6 +61,37 @@ related:
 
 Transaction과 모든 Entry는 하나의 DB transaction에서 저장한다. 일부 Entry만 저장된 상태가 발생하면 안 된다.
 
+## Recurring generated Transaction
+
+- Recurring rule은 원장이 아니라 미래 posting template과 cursor다.
+- due occurrence는 기존 INCOME/EXPENSE/TRANSFER validation과 expected Entry 계산을 그대로 사용해 일반 Transaction/Entry로 저장한다.
+- generated row는 `generated_from_recurring_id`, `recurrence_date` provenance를 가지며 나머지 금융 의미와 조회·수정·논리삭제는 일반 NORMAL Transaction과 같다.
+- generation transaction은 rule row lock 뒤 due/active/cursor를 다시 확인하고 Transaction/Entry와 다음 cursor를 함께 commit한다.
+- generated 거래의 수정은 lineage를 보존하고 rule을 변경하지 않는다. 논리삭제도 occurrence unique를 해제하지 않는다.
+- template change는 기존 generated Transaction/Entry를 재작성하지 않고 이후 occurrence부터 적용한다.
+
 ## 수정
 
 거래 수정 시 기존 Entry를 임의 누적하지 않는다. 계산된 expected entry set으로 교체하거나 명확한 갱신 전략을 사용하고, 변경 전후 잔액 회귀를 테스트한다.
+
+Slice 3는 기존 Entry set을 제거한 뒤 계산한 expected Entry set을 다시 저장한다. 이전 delta를 새 delta에 더하지 않으며 `(transaction_id, entry_role)` unique가 역할 중복을 차단한다.
+
+## Slice 3 실행 범위
+
+- INCOME: active ASSET Account에 PRIMARY 1개, `balance_delta=+amount`
+- EXPENSE NORMAL: active ASSET Account에 PRIMARY 1개, `balance_delta=-amount`
+- CREDIT_CARD/LIABILITY EXPENSE NORMAL: PRIMARY 1개, `balance_delta=+amount`
+- ASSET→ASSET TRANSFER: SOURCE `-amount`, DESTINATION `+amount`
+- ASSET→LIABILITY TRANSFER: SOURCE `-amount`, DESTINATION `-amount`
+- LIABILITY source는 후속 Slice까지 생성하지 않는다. REFUND는 Pre-Statistics Correctness Gate의 전용 original 하위 resource에서만 생성한다.
+- Transaction과 Entry insert/update는 하나의 Spring transaction이다. 참조 검증이 실패하면 Transaction과 모든 Entry가 남지 않는다.
+- 논리삭제는 Transaction의 `deleted_at/deleted_by`를 기록하고 Entry는 검산 근거로 보존한다. 잔액 query는 삭제된 Transaction의 Entry를 제외한다.
+
+## Refund 동시성 및 lineage
+
+- original Transaction row에 `PESSIMISTIC_WRITE` lock을 획득한 뒤 같은 original의 active REFUND amount 합을 읽는다.
+- `0 < refund.amount <= original.amount - activeRefundTotal`일 때만 저장한다.
+- Refund Transaction과 반대 부호 PRIMARY Entry는 하나의 Spring transaction에서 원자 저장한다.
+- Refund 삭제도 original lock을 획득해 create/delete race를 같은 순서로 직렬화한다.
+- active Refund가 있는 original의 금융 필드 변경과 logical delete는 차단한다.
+- 누적 합계 cache column이나 별도 materialized aggregate를 두지 않는다.

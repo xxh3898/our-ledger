@@ -1,0 +1,11 @@
+package io.github.xxh3898.ourledger.recurring;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@Configuration
+@EnableScheduling
+@Profile("!migration")
+public class RecurringSchedulingConfiguration {
+}

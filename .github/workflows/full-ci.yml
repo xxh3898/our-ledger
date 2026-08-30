@@ -8,8 +8,8 @@ on:
   push:
     branches:
       - dev
-      - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 저장소 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 저장소 구조 검사
         run: ./scripts/check-repo.sh
@@ -30,8 +30,81 @@ jobs:
       - name: Flyway migration 검사
         run: ./scripts/check-migrations.sh
 
+      - name: Docker Compose 검사
+        run: ./scripts/verify-compose.sh
+
   backend:
     uses: ./.github/workflows/backend-ci.yml
 
   frontend:
     uses: ./.github/workflows/frontend-ci.yml
+
+  production-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Production runtime 검증
+        run: ./scripts/verify-production-runtime.sh
+
+  host-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Host state/shared operation lock 검증
+        run: ./scripts/verify-host-state.sh
+
+  host-deploy-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Restricted host deployment transaction 검증
+        run: ./scripts/verify-host-deploy-transaction.sh
+
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Backup/Restore 검증
+        run: ./scripts/verify-backup-restore.sh
+
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Observability/status 검증
+        run: ./scripts/verify-observability.sh
+
+  monitor-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Monitor policy/HomeOps 검증
+        run: ./scripts/verify-monitor-policy.sh
+
+  release-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Release/Deploy source 검증
+        run: ./scripts/verify-release-transport.sh

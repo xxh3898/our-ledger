@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: our-ledger-backend
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        operations:
+          include: recurringScheduler
+          show-components: always
+          show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+server:
+  shutdown: graceful
+
+our-ledger:
+  auth:
+    cloudflare:
+      issuer: ${CLOUDFLARE_ACCESS_ISSUER:}
+      jwk-set-uri: ${CLOUDFLARE_ACCESS_JWK_SET_URI:}
+      audience: ${CLOUDFLARE_ACCESS_AUDIENCE:}
+  bootstrap:
+    enabled: ${OUR_LEDGER_BOOTSTRAP_ENABLED:false}
+    household-name: ${OUR_LEDGER_BOOTSTRAP_HOUSEHOLD_NAME:}
+    owner:
+      email: ${OUR_LEDGER_BOOTSTRAP_OWNER_EMAIL:}
+      display-name: ${OUR_LEDGER_BOOTSTRAP_OWNER_DISPLAY_NAME:}
+    member:
+      email: ${OUR_LEDGER_BOOTSTRAP_MEMBER_EMAIL:}
+      display-name: ${OUR_LEDGER_BOOTSTRAP_MEMBER_DISPLAY_NAME:}
+  recurring:
+    scheduler:
+      enabled: ${OUR_LEDGER_RECURRING_SCHEDULER_ENABLED:true}
+      initial-delay-ms: ${OUR_LEDGER_RECURRING_INITIAL_DELAY_MS:0}
+      poll-delay-ms: ${OUR_LEDGER_RECURRING_POLL_DELAY_MS:60000}
+      batch-size: ${OUR_LEDGER_RECURRING_BATCH_SIZE:100}

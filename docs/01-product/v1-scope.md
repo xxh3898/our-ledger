@@ -1,9 +1,10 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-08-27
 related:
   - 00-overview/roadmap.md
+  - ADR-008
 ---
 
 # V1 범위
@@ -12,7 +13,7 @@ related:
 
 | 영역 | 기능 |
 |---|---|
-| 인증 | 두 사용자 로그인, 세션 유지, 로그아웃 |
+| 인증 | Cloudflare Access 허용 사용자 2명, Access JWT 검증, 내부 User 매핑 |
 | Household | 단일 2인 재무 공간, 구성원 조회 |
 | 거래 | 수입·지출·이체, 수정, 논리삭제 |
 | 귀속 | 개인 Owner, 공동 Scope, 지출 Payer |
