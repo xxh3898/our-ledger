@@ -169,6 +169,17 @@ related:
 - local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
 - Hosted Full CI가 exact PR HEAD에서 신규 `fresh-host-bootstrap`을 포함한 12개 job 전체를 통과한다. actual production path, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
+### Slice 10D-3B0 Exact-SHA GHCR Publish-only Source Gate
+
+- `.github/workflows/publish-release.yml`은 `workflow_dispatch`만 허용하며 `release_sha`와 해당 SHA의 successful Release Source Harness `validation_run_id`를 입력받는다.
+- dispatch source와 candidate는 모두 같은 live `main` exact HEAD여야 한다. candidate는 lowercase non-zero 40자리 commit이고 validation run은 same repository/main/SHA, expected workflow name/path, completed/success와 push/manual event를 모두 만족해야 한다.
+- publish job만 `actions: read`, `contents: read`, `packages: write`를 사용하고 production concurrency `our-ledger-production`, `cancel-in-progress: false`와 exact-pinned third-party action을 재사용한다. Actions read는 입력된 validation run 조회에만 사용한다.
+- candidate source는 trusted workflow checkout과 분리하고 API/Web/runtime-config를 동일 exact SHA, `linux/arm64`, OCI source/revision/version으로 digest-first publish한다. runtime-config build arg도 같은 revision이다.
+- 세 package metadata에 candidate digest가 정확히 하나 있어야 한다. exact tag가 없으면 create, 같은 digest면 reuse하며 다른 digest, duplicate/ambiguous/malformed metadata는 세 final tag write 전 fail closed한다.
+- repository-owned writer는 shared concurrency로 직렬화하고 tag 생성 뒤 세 exact tag가 candidate digest를 가리키는지 다시 확인한다. GHCR의 documented conditional tag-create 부재 때문에 workflow 밖 registry admin의 동시 retag를 원자적으로 차단한다고 주장하지 않는다.
+- `OUR_LEDGER_DEPLOY_ENABLED`, Tailscale, SSH, deployment permission, Production environment, Mac mini command와 Cloudflare 경로가 source에 없고 token은 validation/package API와 login 외 argument·artifact·log에 기록하지 않는다.
+- local/PR/Hosted source gate는 helper와 workflow를 synthetic하게 검증할 뿐 GHCR login/push 또는 production resource를 사용하지 않는다. actual manual publish와 Issue #59 production preparation 재개는 source의 별도 Release 이후 운영 승인 대상이다.
+
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
 - production worker의 app root는 `/Users/homeserver/Server/apps/our-ledger`로 고정하고 production CLI/environment에 `--root`, `--app-dir`, state/Compose path override 또는 public lock bypass를 노출하지 않는다.

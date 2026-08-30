@@ -37,6 +37,7 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10D-2B2. Host Deployment Transaction | restricted wrapper, backup/migration/cutover/readiness/recovery 조합 | pure/synthetic source gate 검증, 실제 설치는 10D-3B |
 | 10D-3A1. Production Household Bootstrap One-shot Gate | same-image no-HTTP exact-state bootstrap protocol | 합성 DB에서 create/verify/fail-closed source 검증 |
 | 10D-3A2. Fresh-host Bootstrap Transaction Source | owner-only input, fixed ingress, migration/bootstrap/backup durable transaction | 실제 값 없는 fresh-host source 검증 |
+| 10D-3B0. Exact-SHA GHCR Publish-only Source | main/run authority, digest-first artifact, exact tag conflict gate | deploy와 분리된 수동 publish source 검증 |
 | 10D-3B. Public Production Activation | Cloudflare, secret, 실제 User, schedule/replication | 허용된 두 사용자의 실제 운영 시작 |
 
 ## Slice 3 구현 경계
@@ -107,9 +108,10 @@ Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 �
 - **10D-2B2 Host Deployment Transaction**: B1 lock/state authority 아래 restricted host wrapper, stdin-only registry token, exact artifact 검증, writer quiesce, verified backup, 10D-2A migration, same-SHA cutover, readiness, schema-aware rollback과 HomeOps lifecycle을 source로 조합하고 pure/synthetic gate로 검증한다.
 - **10D-3A1 Production Household Bootstrap One-shot Gate**: 동일 candidate API image의 `production,bootstrap` profile이 Flyway/Web/recurring/local identity 없이 JPA validate 뒤 최대 8 KiB exact JSON stdin을 한 번 처리한다. empty DB는 exact 2 User/1 Household/OWNER·MEMBER를 생성하고 동일 입력은 state/ID 변화 없이 검증하며 partial/mismatch/extra 상태와 입력·profile·DB/schema 오류는 fail closed한다. actual production input/DB는 사용하지 않는다.
 - **10D-3A2 Fresh-host Bootstrap Transaction Source**: repository 밖 owner-only one-time input, pre-current fixed ingress와 immutable runtime staging을 B1 lock 아래 `fresh PostgreSQL → migration → bootstrap → normal readiness → first verified backup → durable current/state`로 조합한다. 실제 값·host 실행은 여전히 제외한다.
+- **10D-3B0 Exact-SHA GHCR Publish-only Source**: live `main` exact HEAD와 같은 repository의 성공한 Release Source Harness run에 결합된 같은 SHA만 입력받는다. API/Web/runtime-config를 ARM64 digest-first로 발행하고 세 exact tag의 absent/same/conflict preflight와 postflight를 수행하되 Tailscale/SSH/deploy/Production environment와 kill switch를 사용하지 않는다. source PR과 Hosted CI에서는 실제 GHCR workflow를 실행하지 않는다.
 - **10D-3B Public Production Activation**: actual GHCR/Tailscale/SSH credential, Cloudflare/도메인/secret/User, backup schedule·retention·외부 암호화 복제와 public smoke를 각각 승인한 뒤 운영을 시작한다.
 
-10D-2B2 완료는 restricted transaction source와 crash/recovery 분류가 local/Hosted synthetic gate에서 검증됐다는 뜻이다. actual forced-command, GHCR/Tailscale/SSH credential과 Mac mini 설치가 없으므로 artifact publish, production status/backup/migration/reporter 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
+10D-2B2와 10D-3B0 완료는 restricted transaction과 publish-only source가 local/Hosted synthetic gate에서 검증됐다는 뜻이다. publish-only workflow의 실제 실행, forced-command, Tailscale/SSH credential과 Mac mini 설치가 없으므로 artifact publish, production status/backup/migration/reporter 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
 
 ## Release Gate
 

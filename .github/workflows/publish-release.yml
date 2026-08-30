@@ -1,0 +1,355 @@
+name: Publish exact release artifacts
+
+run-name: Publish exact release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact lowercase main release commit SHA
+        required: true
+        type: string
+      validation_run_id:
+        description: Successful Release Source Harness run ID for the exact SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: our-ledger-production
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish exact ARM64 artifacts only
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    env:
+      API_IMAGE_NAME: ghcr.io/xxh3898/our-ledger-api
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RUNTIME_CONFIG_IMAGE_NAME: ghcr.io/xxh3898/our-ledger-runtime-config
+      VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
+      WEB_IMAGE_NAME: ghcr.io/xxh3898/our-ledger-web
+
+    steps:
+      - name: Reject non-main dispatch source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" != workflow_dispatch \
+            || "${GITHUB_REF}" != refs/heads/main ]]; then
+            printf 'Publish source authority validation failed\n' >&2
+            exit 64
+          fi
+
+      - name: Check out live main authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+
+      - name: Validate exact publish authority
+        id: authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+
+          python3 ./scripts/release_tools/release_contract.py \
+            validate-publish-request \
+            --revision "${RELEASE_SHA}" \
+            --validation-run-id "${VALIDATION_RUN_ID}" \
+            >/dev/null
+
+          checked_out_main="$(git rev-parse HEAD)"
+          remote_main_line="$(
+            git ls-remote \
+              --exit-code \
+              "https://github.com/${GITHUB_REPOSITORY}.git" \
+              refs/heads/main
+          )"
+          read -r live_main live_ref extra <<<"${remote_main_line}"
+          if [[ "${checked_out_main}" != "${GITHUB_SHA}" \
+            || "${live_main}" != "${GITHUB_SHA}" \
+            || "${live_ref}" != refs/heads/main \
+            || -n "${extra}" ]]; then
+            printf 'Publish source authority validation failed\n' >&2
+            exit 64
+          fi
+          if [[ "${RELEASE_SHA}" != "${live_main}" ]] \
+            || ! git cat-file -e "${RELEASE_SHA}^{commit}" \
+            || ! git merge-base --is-ancestor "${RELEASE_SHA}" "${live_main}"; then
+            printf 'Publish candidate authority validation failed\n' >&2
+            exit 64
+          fi
+
+          run_json="$(mktemp "${RUNNER_TEMP}/release-run.XXXXXX.json")"
+          run_lookup_succeeded=false
+          for attempt in 1 2 3; do
+            if timeout 30s gh api \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "/repos/${GITHUB_REPOSITORY}/actions/runs/${VALIDATION_RUN_ID}" \
+              >"${run_json}" 2>/dev/null; then
+              run_lookup_succeeded=true
+              break
+            fi
+            if (( attempt < 3 )); then
+              sleep 2
+            fi
+          done
+          if [[ "${run_lookup_succeeded}" != true ]]; then
+            printf 'Release validation authority lookup failed\n' >&2
+            exit 69
+          fi
+          python3 ./scripts/release_tools/release_contract.py \
+            validate-publish-authority \
+            --revision "${RELEASE_SHA}" \
+            --validation-run-id "${VALIDATION_RUN_ID}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-json-file "${run_json}" \
+            >/dev/null
+
+          candidate_dir="${RUNNER_TEMP}/our-ledger-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ -e "${candidate_dir}" ]]; then
+            printf 'Release candidate workspace already exists\n' >&2
+            exit 73
+          fi
+          git worktree add --detach "${candidate_dir}" "${RELEASE_SHA}" >/dev/null
+          printf 'candidate_dir=%s\n' "${candidate_dir}" >>"${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build API by digest
+        id: build-api
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ steps.authority.outputs.candidate_dir }}
+          file: ${{ steps.authority.outputs.candidate_dir }}/infra/docker/api.Dockerfile
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.API_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=our-ledger-api-arm64
+          cache-to: type=gha,mode=max,scope=our-ledger-api-arm64
+
+      - name: Build Web by digest
+        id: build-web
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ steps.authority.outputs.candidate_dir }}
+          file: ${{ steps.authority.outputs.candidate_dir }}/infra/docker/web.Dockerfile
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.WEB_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=our-ledger-web-arm64
+          cache-to: type=gha,mode=max,scope=our-ledger-web-arm64
+
+      - name: Build runtime config by digest
+        id: build-runtime-config
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ steps.authority.outputs.candidate_dir }}
+          file: ${{ steps.authority.outputs.candidate_dir }}/runtime-config.Dockerfile
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.RUNTIME_CONFIG_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            REVISION=${{ env.RELEASE_SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_SHA }}
+          cache-from: type=gha,scope=our-ledger-runtime-config-arm64
+          cache-to: type=gha,mode=max,scope=our-ledger-runtime-config-arm64
+
+      - name: Preflight and finalize exact tags
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.build-api.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNTIME_CONFIG_DIGEST: ${{ steps.build-runtime-config.outputs.digest }}
+          WEB_DIGEST: ${{ steps.build-web.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+
+          verify_live_main() {
+            local remote_main_line live_main live_ref extra
+
+            remote_main_line="$(
+              git ls-remote \
+                --exit-code \
+                "https://github.com/${GITHUB_REPOSITORY}.git" \
+                refs/heads/main
+            )"
+            read -r live_main live_ref extra <<<"${remote_main_line}"
+            if [[ "${live_main}" != "${GITHUB_SHA}" \
+              || "${live_ref}" != refs/heads/main \
+              || -n "${extra}" ]]; then
+              printf 'Publish source drifted during artifact build\n' >&2
+              return 64
+            fi
+          }
+
+          verify_live_main
+
+          python3 ./scripts/release_tools/release_contract.py \
+            validate-publish \
+            --revision "${RELEASE_SHA}" \
+            --api-digest "${API_DIGEST}" \
+            --web-digest "${WEB_DIGEST}" \
+            --mode update \
+            --runtime-config-digest "${RUNTIME_CONFIG_DIGEST}" \
+            >/dev/null
+
+          metadata_dir="$(mktemp -d "${RUNNER_TEMP}/package-metadata.XXXXXX")"
+          artifacts=(
+            "api|our-ledger-api|${API_IMAGE_NAME}|${API_DIGEST}"
+            "web|our-ledger-web|${WEB_IMAGE_NAME}|${WEB_DIGEST}"
+            "runtime-config|our-ledger-runtime-config|${RUNTIME_CONFIG_IMAGE_NAME}|${RUNTIME_CONFIG_DIGEST}"
+          )
+          api_mode=
+          web_mode=
+          runtime_config_mode=
+
+          query_tag_mode() {
+            local package_name="$1"
+            local digest="$2"
+            local destination="$3"
+
+            timeout 30s gh api \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --paginate \
+              --slurp \
+              "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package_name}/versions?per_page=100" \
+              >"${destination}" 2>/dev/null \
+              && python3 ./scripts/release_tools/release_contract.py \
+                classify-package-tag \
+                --revision "${RELEASE_SHA}" \
+                --digest "${digest}" \
+                --versions-json-file "${destination}" \
+                2>/dev/null
+          }
+
+          wait_for_preflight() {
+            local package_name="$1"
+            local digest="$2"
+            local destination="$3"
+            local attempt mode
+
+            for attempt in 1 2 3 4 5; do
+              if mode="$(query_tag_mode "${package_name}" "${digest}" "${destination}")"; then
+                printf '%s\n' "${mode}"
+                return 0
+              fi
+              if (( attempt < 5 )); then
+                sleep 3
+              fi
+            done
+            return 1
+          }
+
+          wait_for_reuse() {
+            local package_name="$1"
+            local digest="$2"
+            local destination="$3"
+            local attempt mode
+
+            for attempt in 1 2 3 4 5; do
+              if mode="$(query_tag_mode "${package_name}" "${digest}" "${destination}")" \
+                && [[ "${mode}" == reuse ]]; then
+                return 0
+              fi
+              if (( attempt < 5 )); then
+                sleep 3
+              fi
+            done
+            return 1
+          }
+
+          for record in "${artifacts[@]}"; do
+            IFS='|' read -r role package_name image digest <<<"${record}"
+            if ! mode="$(
+              wait_for_preflight \
+                "${package_name}" \
+                "${digest}" \
+                "${metadata_dir}/${role}-pre.json"
+            )"; then
+              printf 'Package tag preflight failed\n' >&2
+              exit 69
+            fi
+            case "${role}" in
+              api) api_mode="${mode}" ;;
+              web) web_mode="${mode}" ;;
+              runtime-config) runtime_config_mode="${mode}" ;;
+              *)
+                printf 'Package role validation failed\n' >&2
+                exit 64
+                ;;
+            esac
+          done
+
+          verify_live_main
+
+          for record in "${artifacts[@]}"; do
+            IFS='|' read -r role package_name image digest <<<"${record}"
+            case "${role}" in
+              api) mode="${api_mode}" ;;
+              web) mode="${web_mode}" ;;
+              runtime-config) mode="${runtime_config_mode}" ;;
+              *)
+                printf 'Package role validation failed\n' >&2
+                exit 64
+                ;;
+            esac
+            if [[ "${mode}" == create ]]; then
+              docker buildx imagetools create \
+                --prefer-index=false \
+                --tag "${image}:${RELEASE_SHA}" \
+                "${image}@${digest}" \
+                >/dev/null
+            fi
+          done
+
+          for record in "${artifacts[@]}"; do
+            IFS='|' read -r role package_name image digest <<<"${record}"
+            if ! wait_for_reuse \
+              "${package_name}" \
+              "${digest}" \
+              "${metadata_dir}/${role}-post.json"; then
+              printf 'Published package verification failed\n' >&2
+              exit 69
+            fi
+          done
+
+          {
+            printf '### Exact release artifact publication\n\n'
+            printf -- '- revision: `%s`\n' "${RELEASE_SHA}"
+            printf -- '- API: `%s` (%s)\n' "${API_DIGEST}" "${api_mode}"
+            printf -- '- Web: `%s` (%s)\n' "${WEB_DIGEST}" "${web_mode}"
+            printf -- '- runtime-config: `%s` (%s)\n' \
+              "${RUNTIME_CONFIG_DIGEST}" \
+              "${runtime_config_mode}"
+          } >>"${GITHUB_STEP_SUMMARY}"

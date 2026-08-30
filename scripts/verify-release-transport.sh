@@ -20,8 +20,20 @@ if ! command -v docker >/dev/null 2>&1 \
   exit 1
 fi
 
-image_tag="our-ledger-runtime-config:issue-43-${git_head:0:12}-$$"
-container_name="our-ledger-runtime-config-issue-43-$$"
+cleanup_task="${GITHUB_HEAD_REF:-}"
+if [[ -z "$cleanup_task" ]]; then
+  cleanup_task="$(git -C "$ROOT_DIR" branch --show-current)"
+fi
+if [[ -z "$cleanup_task" ]]; then
+  cleanup_task="release-transport-${git_head:0:12}"
+fi
+if [[ ! "$cleanup_task" =~ ^[A-Za-z0-9._/-]{1,128}$ ]]; then
+  printf 'Release source gate cleanup task 식별자가 유효하지 않습니다.\n' >&2
+  exit 1
+fi
+
+image_tag="our-ledger-runtime-config:release-transport-${git_head:0:12}-$$"
+container_name="our-ledger-runtime-config-release-transport-$$"
 
 if docker container inspect "$container_name" >/dev/null 2>&1 \
   || docker image inspect "$image_tag" >/dev/null 2>&1; then
@@ -64,7 +76,7 @@ trap 'exit 130' HUP INT TERM
 cleanup_labels=(
   --label io.homeserver.cleanup.environment=development
   --label io.homeserver.cleanup.project=our-ledger
-  --label io.homeserver.cleanup.task=issue-43-host-deploy-transaction
+  --label "io.homeserver.cleanup.task=$cleanup_task"
   --label io.homeserver.cleanup.lifecycle=task
   --label io.homeserver.cleanup.retain=false
   --label "io.homeserver.cleanup.git-head=$git_head"
