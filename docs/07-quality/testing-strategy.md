@@ -347,7 +347,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - Couple-first section 순서와 실제 Member 이름
 - ALL/각 Member/SHARED의 월 요약·선택일 동일 적용
 - transfer-only 무지출과 future Paw 제외
-- 날짜 선택 URL/API, popstate 동기화
+- 날짜 선택 URL/API, listener 등록 뒤 popstate의 month/Member/date 복원과 추가 history entry 없음
 - 선택 날짜 전달과 current user PERSONAL 기본값
 - numeric autofocus, ESC close, opener focus 복귀
 - 중복 submit 방지, 500ms 성공 feedback, 같은 context 갱신
