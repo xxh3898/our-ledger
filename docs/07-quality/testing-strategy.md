@@ -276,6 +276,17 @@ Restricted Host Deployment Transaction Harness는 다음을 추가로 검증한�
 
 `scripts/verify-host-deploy-transaction.sh`는 32개 Python synthetic regression과 source/shell gate만 실행한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`를 사용하지 않으므로 생성할 disposable container/network/volume/image도 없고 residue는 0이다. local `verify.sh`와 Hosted Full CI의 독립 `host-deploy-transaction` job에서 실행한다.
 
+Fresh-host Bootstrap Transaction Harness는 다음을 추가로 검증한다.
+
+- exact `bootstrap-our-ledger-v1 <sha> <digest> <actor>` grammar, stdin token bound/zeroization과 root/env/input/backup/Compose/image/skip/force override 부재
+- current/state 및 normal/foreign/corrupt fresh pending 교차 소비 거부, shared operation lock, owner-only input symlink/hardlink/mode/size 경계
+- exact API/Web/runtime candidate와 immutable stage, initial `created`와 recovery `verified`, exact 2/1/2 Household authority
+- 10개 durable phase 전부의 crash/re-entry, current/state write 중간 crash, schema/backup/runtime/input authority mismatch operator intervention
+- PostgreSQL only startup, same-image V1→V8 migration, normal API/Web readiness, first verified backup, input unlink/fsync, B2-compatible final state와 success rerun 차단
+- token/password/raw bootstrap JSON/email/name/Household/User/Member ID 비노출과 destructive volume/domain/schema rollback 부재
+
+`scripts/verify-fresh-host-bootstrap.sh`는 위 pure matrix 뒤 local API/Web/runtime-config image와 owner-only temp host/env/input/backup을 만든다. 고유 cleanup label의 single disposable Compose project에서 migration 직후 synthetic crash와 forward recovery, Household bootstrap, normal readiness, custom backup, input 제거, final commit과 rerun data 불변을 검증한다. 실제 GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare, public network와 `/Users/homeserver/Server`를 사용하지 않고 cleanup 뒤 container/network/volume/image residue 0을 요구한다. local `verify.sh`와 Hosted Full CI의 독립 `fresh-host-bootstrap` job에서 실행한다.
+
 CSV Export Slice는 추가로 다음을 실제 PostgreSQL과 byte-level assertion으로 검증한다.
 
 - 필수/parse/역전 날짜와 3,653일 허용·3,654일 거부 stable code
@@ -457,4 +468,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 14개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 11개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 15개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 12개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

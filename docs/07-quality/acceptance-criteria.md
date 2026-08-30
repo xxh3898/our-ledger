@@ -121,14 +121,14 @@ related:
 - `main` push와 controlled manual dispatch가 같은 재사용 Full CI를 먼저 실행하며 production concurrency는 `our-ledger-production`, `cancel-in-progress: false`로 직렬화된다.
 - `OUR_LEDGER_DEPLOY_ENABLED`가 없거나 정확히 `true`가 아니면 validation만 실행되고 GHCR login/publish, Tailscale, SSH와 production environment job은 시작하지 않는다.
 - API와 Web은 같은 exact 40자리 commit SHA tag, `linux/arm64`, OCI source/revision/version label로만 publish하도록 정의하며 `latest`와 임의 image/tag를 허용하지 않는다.
-- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 host owner/directory mode는 10D-2B1 state primitive와 10D-3A2 설치 단계가 강제한다.
+- runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 B1/A2 source가 host owner/directory mode를 검증하고 실제 설치는 10D-3B에서 수행한다.
 - last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
 - restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
 - GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
 - publish/deploy privileged job의 모든 third-party action ref는 exact 40자리 commit SHA다.
 - local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
-- 10D-1 완료는 transport source contract만 뜻한다. B1 lock/state와 B2 restricted transaction source가 후속 gate로 추가됐어도 actual host install/bootstrap, credential·Cloudflare·schedule·public activation은 10D-3A2/3B 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
+- 10D-1 완료는 transport source contract만 뜻한다. B1 lock/state, B2 restricted transaction과 A2 fresh-bootstrap source가 후속 gate로 추가됐어도 actual host ingress/install/bootstrap, credential·Cloudflare·schedule·public activation은 10D-3B 별도 승인 전까지 존재하거나 활성화됐다고 간주하지 않는다.
 
 ### Slice 10D-2A Candidate Migration/Validation Gate
 
@@ -154,7 +154,20 @@ related:
 - 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
 - actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
 - local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
-- Hosted Full CI가 exact PR HEAD에서 신규 `production-bootstrap`을 포함한 11개 job 전체를 통과하며 actual production input/DB, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`과 A2 `fresh-host-bootstrap`을 포함한 현재 12개 job 전체를 통과하며 actual production input/DB, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+
+### Slice 10D-3A2 Fresh-host Bootstrap Transaction Source Gate
+
+- pre-current ingress는 normal B2 `current` source와 분리되고 production app/env/input/backup/Docker/project/loopback authority를 source에 고정한다. caller는 exact SHA, runtime digest, bounded actor와 stdin token 외 root/path/image/skip/force/reset 값을 제공할 수 없다.
+- current/state, normal/foreign/malformed pending, unknown production project resource, invalid env/input 또는 non-empty initial backup authority는 lock 내부 DB mutation 전에 fail closed한다.
+- API/Web/runtime-config는 exact candidate identity, linux/arm64와 OCI label/digest를 검증하고 ingress content와 candidate runtime exact allowlist가 같을 때만 immutable release를 stage한다.
+- normal deployment와 같은 non-stealing operation lock 아래 PostgreSQL only start, same-image V1→V8/JPA validate, same-image Household bootstrap created/exact 2/1/2, normal API/Web readiness, first verified backup, input unlink/fsync, current/state commit을 순서대로 수행한다.
+- `FRESH_BOOTSTRAP` pending은 normal B2와 교차 소비되지 않는 exact schema와 10개 durable phase, candidate/actor/time/post-schema/backup marker hash만 저장한다. token/password/raw input/PII/ID는 state와 output에 포함하지 않는다.
+- 모든 phase와 current/state commit 중간 crash는 동일 request/candidate/observed authority로만 forward resume한다. initial `verified`, ambiguous schema/bootstrap/resource/backup은 operator intervention이며 volume/row/history 삭제·restore·reverse migration을 자동 실행하지 않는다.
+- first verified backup 이후에만 one-time input을 unlink하고 parent fsync하며, `INPUT_CONSUMED` 이후에는 input 없이 exact authority를 재검증해 commit할 수 있다.
+- 최종 state는 existing B2 formatVersion 2, previous null과 exact candidate current를 사용한다. 성공 후 fresh ingress rerun은 nonzero이고 data/schema/backup authority가 바뀌지 않는다.
+- local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
+- Hosted Full CI가 exact PR HEAD에서 신규 `fresh-host-bootstrap`을 포함한 12개 job 전체를 통과한다. actual production path, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
@@ -168,7 +181,7 @@ related:
 - pending 존재 중 새 stage/transaction은 거부하고 crash 뒤 pending을 보존한다. candidate 성공을 추측하지 않으며 explicit abandoned pending clear는 current/state가 previous에서 변하지 않은 경우만 허용한다.
 - local `verify-host-state.sh`와 synthetic backup/restore gate는 temp app root/disposable Compose만 사용해 lock contention, release reuse/collision, corruption/path escape, pending/crash와 internal core 호출을 검증한다.
 - runtime-config Dockerfile, change detector, exported file/mode gate와 Hosted Full CI 독립 `host-state` job이 동기화되고 actual `/Users/homeserver/Server`, GHCR/Tailscale/SSH/HomeOps/production resource를 읽거나 쓰지 않는다.
-- 10D-2B1 primitive는 B2/3A2 transaction에서 재사용하며 actual host install/dry run과 activation은 10D-3A2/3B 전까지 수행하지 않는다.
+- 10D-2B1 primitive는 B2/3A2 transaction에서 재사용하며 actual host ingress/install/dry run과 activation은 10D-3B 전까지 수행하지 않는다.
 
 ### Slice 10D-2B2 Restricted Host Deployment Transaction Gate
 
@@ -195,7 +208,7 @@ related:
 - 별도 환경에서 restore drill 1회 성공
 - health check와 승인된 운영 monitor 확인
 
-위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User/bootstrap input, production status/backup/migration/bootstrap/restore/HomeOps reporter와 LaunchAgent는 10D-3A1 완료 기준이 아니다. B2/3A1은 host transaction/bootstrap protocol source의 합성 검증까지만 제공하며 install·fresh-host transaction은 10D-3A2, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3B 또는 별도 HomeOps extension에서 승인한다.
+위 운영 항목 중 Mac mini deploy, 실제 artifact publish, Access/Tunnel, production DB/secret/User/bootstrap input, production status/backup/migration/bootstrap/restore/HomeOps reporter와 LaunchAgent는 10D-3A2 완료 기준이 아니다. B2/3A1/A2는 deployment/application bootstrap/fresh-host transaction source의 합성 검증까지만 제공하며 actual ingress/install, credential·public route·schedule·retention 삭제·age/iCloud 외부복제·production restore는 10D-3B 또는 별도 HomeOps extension에서 승인한다.
 
 ## 문서
 

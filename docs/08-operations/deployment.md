@@ -12,7 +12,7 @@ related:
 
 ## 현재 구현 경계
 
-Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. Slice 10D-2B2는 이 authority 위에 restricted wrapper, exact artifact 검증, backup/migration/cutover/readiness와 crash recovery를 조합한 source를 추가한다. Slice 10D-3A1은 같은 candidate API image의 production Household bootstrap stdin protocol과 deterministic no-HTTP lifecycle만 source/synthetic gate로 고정한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/bootstrap/monitor/HomeOps reporter, forced-command 설치, actual bootstrap input, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
+Slice 10C-1은 아래 목표 구조 중 Mac mini origin의 immutable Web/API image, Nginx, Spring `production` profile, PostgreSQL Compose와 disposable smoke를 구현했다. Slice 10C-2A/B는 backup/restore, read-only status와 monitor policy source gate를 추가했다. Slice 10D-1은 `main` exact HEAD의 reusable Full CI, default-off Release workflow, linux/arm64 API/Web/runtime-config artifact와 restricted SSH intent의 source contract를 추가한다. Slice 10D-2A는 normal API의 schema mutation 권한을 제거하고 동일 candidate image의 명시적 one-shot migration/JPA validation lifecycle을 disposable PostgreSQL에서 고정한다. Slice 10D-2B1은 fixed host root, shared project operation lock과 digest-derived runtime-config release/current/pending/state primitive를 source와 temp-host gate로 고정한다. Slice 10D-2B2는 이 authority 위에 restricted wrapper, exact artifact 검증, backup/migration/cutover/readiness와 crash recovery를 조합한 source를 추가한다. Slice 10D-3A1은 같은 candidate API image의 production Household bootstrap stdin protocol과 deterministic no-HTTP lifecycle을 고정하고, Slice 10D-3A2는 current가 없는 host만 허용하는 별도 ingress와 durable forward recovery transaction을 source/disposable gate로 조합한다. 실제 image registry push, Tailscale/SSH, Mac mini production Compose/state/status/backup/migration/bootstrap/monitor/HomeOps reporter, forced-command/pre-current ingress 설치, actual bootstrap input, Cloudflare Access/Tunnel, secret/User/DB, schedule·retention 삭제·외부복제와 production restore는 실행하거나 설치하지 않았다.
 
 ## 목표 구조
 
@@ -94,7 +94,7 @@ normal `api`는 `production` profile에서 Flyway를 비활성화하고 JPA `ddl
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   run --rm --no-deps api-migration
 ```
@@ -107,18 +107,18 @@ normal `api`는 `OUR_LEDGER_BOOTSTRAP_ENABLED=false`를 강제하고 env overrid
 
 입력은 CLI argument, Compose environment 또는 workflow input이 아니라 최대 8 KiB UTF-8 exact JSON object 하나를 stdin으로만 전달한다. owner/member email은 기존 normalizer를 사용하며 unknown/duplicate/missing/null/wrong-type/trailing data를 거부한다. 성공하면 `household-bootstrap: created` 또는 `household-bootstrap: verified` 한 줄 뒤 context를 닫아 exit 0으로 끝나고 failure는 raw JSON/PII/ID 없이 nonzero다.
 
-향후 10D-3A2 host transaction이 owner-only one-time input과 shared lock을 확정한 뒤 사용할 canonical shape는 다음과 같다. 현재 문서는 실제 production input 생성·전송 또는 DB 실행 승인이 아니다.
+10D-3A2 host transaction이 owner-only one-time input과 shared lock 아래 호출하는 application-level canonical shape는 다음과 같다. 현재 문서는 실제 production input 생성·전송 또는 DB 실행 승인이 아니다.
 
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   --profile bootstrap \
   run --rm -T --no-deps api-bootstrap < <owner-only-bootstrap-input>
 ```
 
-empty migrated DB에서만 exact 2 User/1 Household/OWNER·MEMBER를 생성한다. 같은 input은 state/ID 변화 없이 verify하고 partial/mismatch/extra state를 자동 repair·delete·overwrite하지 않는다. migration과 bootstrap을 한 mode로 합치지 않으며 10D-3A2가 `fresh DB → migration → bootstrap → normal readiness → first verified backup → durable commit`의 host ordering과 crash recovery를 별도로 제공한다.
+empty migrated DB에서만 exact 2 User/1 Household/OWNER·MEMBER를 생성한다. 같은 input은 state/ID 변화 없이 verify하고 partial/mismatch/extra state를 자동 repair·delete·overwrite하지 않는다. migration과 bootstrap을 한 mode로 합치지 않으며 아래 10D-3A2가 `fresh DB → migration → bootstrap → normal readiness → first verified backup → durable commit`의 host ordering과 crash recovery를 별도로 제공한다.
 
 ## Nginx same-origin 계약
 
@@ -180,7 +180,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1 source는 release/state/current의 owner/mode를 강제하고 실제 Mac mini app root와 bootstrap 설치는 10D-3A2가 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작하며 production Compose, Nginx 설정, backup/status/monitor와 검증 helper의 공개 source allowlist만 포함한다. `.env`, credential, private key, backup dump, marker, monitor state와 host-specific path는 포함하지 않는다. artifact contract는 각 regular file의 exact `0600`/`0700` mode와 예상 directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1/A2 source는 release/state/current와 fresh ingress의 owner/mode를 검증하고 실제 Mac mini app root와 bootstrap ingress 설치는 10D-3B에서 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 이 allowlist가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 
@@ -256,9 +256,43 @@ restricted command parse + stdin token
 
 `./scripts/verify-host-deploy-transaction.sh`는 fake adapter/reporter와 owner-only temp state로 32개 command/token/artifact/order/failure/crash/recovery/privacy regression을 수행한다. 실제 Docker daemon, GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에는 접근하지 않는다. Hosted Full CI의 독립 `host-deploy-transaction` job도 같은 source gate만 실행한다.
 
-## 10D-3A2/3B activation boundary
+## 10D-3A2 fresh-host bootstrap transaction source
 
-B2와 3A1 완료는 deployment/bootstrap source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. owner-only actual bootstrap input, pre-current ingress, fresh-host transaction/install은 10D-3A2, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, Cloudflare/secret/User, schedule·replication, public smoke와 kill switch 활성화는 10D-3B 별도 승인 대상이다. one-shot migration/bootstrap architecture가 실제 schema나 2인 Household 의미와 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+`scripts/bootstrap-production.sh`는 normal B2의 verified-current-only ingress와 분리된 최초 activation 전용 source다. production 설치 경로는 `/Users/homeserver/Server/apps/our-ledger/bootstrap-ingress`, env는 app root의 `.env`, one-time input은 app root의 `household-bootstrap.json`, backup은 `/Users/homeserver/Server/backups/our-ledger/data`, Compose project는 `our-ledger-production`, loopback은 `127.0.0.1:18080`으로 고정한다. 이 경로와 파일을 실제 host에 설치하거나 생성하는 일은 10D-3B 전까지 수행하지 않는다.
+
+restricted grammar는 다음 하나뿐이며 GHCR token은 stdin으로만 받는다.
+
+```text
+bootstrap-our-ledger-v1 <exact-40-sha> <sha256:64-lowercase-hex> <bounded-actor>
+```
+
+root, env/input/backup/Compose/image/reporter path, skip/force/repair/reset/delete option과 PII를 argument·environment에 받지 않는다. ingress 전체는 candidate runtime-config와 같은 exact allowlist/content여야 하며 owner regular file, no symlink/hardlink와 artifact mode를 다시 검증한다. env/input은 owner-only `0600`, input은 최대 8 KiB다. current/state가 있거나 normal deployment/foreign pending, unknown production project resource, non-empty initial backup authority가 있으면 DB mutation 전에 fail closed한다.
+
+normal deployment와 같은 `operations/lock` 아래 다음 순서를 사용한다.
+
+```text
+exact API/Web/runtime-config artifact + ingress content 검증
+→ immutable releases/<digesthex> stage
+→ FRESH_BOOTSTRAP pending ARTIFACTS_VERIFIED
+→ PostgreSQL only start
+→ MIGRATION_STARTED → same-image V1→V8/JPA validate → schema authority
+→ BOOTSTRAP_STARTED → same-image Household created/exact 2/1/2
+→ normal API/Web + PostgreSQL/loopback/readiness/schema 재검증
+→ first verified backup + marker SHA-256 authority
+→ one-time input unlink + parent directory fsync
+→ INPUT_CONSUMED → COMMITTING
+→ relative current → existing formatVersion 2 deployment state(previous null) → pending 제거
+```
+
+fresh pending은 `transactionKind: FRESH_BOOTSTRAP` exact schema와 `ARTIFACTS_VERIFIED`, `POSTGRES_STARTED`, `MIGRATION_STARTED`, `MIGRATION_VERIFIED`, `BOOTSTRAP_STARTED`, `BOOTSTRAP_VERIFIED`, `READINESS_VERIFIED`, `BACKUP_VERIFIED`, `INPUT_CONSUMED`, `COMMITTING` phase를 사용한다. candidate/actor/start, post-schema와 backup marker hash만 저장하며 token, password, raw input, email/name/ID는 저장하지 않는다. normal B2 parser와 fresh parser는 서로의 pending exact schema를 거부한다. 최종 state는 기존 B2-compatible formatVersion 2를 그대로 사용한다.
+
+DB mutation 뒤 실패에는 volume/User/Household/Flyway history를 삭제하거나 reverse migration/restore하지 않는다. 동일 request/candidate/pending만 observed schema, exact Household, runtime readiness, verified backup과 input 존재 여부를 재확인해 forward resume한다. 최초 uninterrupted bootstrap은 `created`만 허용하고 `BOOTSTRAP_STARTED`가 durable한 recovery에서는 같은 input의 exact `verified`도 허용한다. `INPUT_CONSUMED` 이후에는 input 없이 authority를 재검증해 commit할 수 있다. 성공 후 ingress 재실행은 current/state 때문에 항상 nonzero이며 이후 release는 normal B2만 사용한다.
+
+`./scripts/verify-fresh-host-bootstrap.sh`는 pure phase/crash/cross-pending/privacy matrix와 고유 cleanup label의 disposable Docker project를 사용한다. local candidate API/Web/runtime artifact, fresh PostgreSQL, migration, migration 직후 crash/re-entry, bootstrap, normal readiness, verified backup, input 제거, B2-compatible commit과 rerun 차단/data 불변을 검증하고 container/network/volume/image residue 0을 요구한다. actual GHCR login, Tailscale, SSH, HomeOps, Cloudflare, public network와 `/Users/homeserver/Server`는 사용하지 않는다.
+
+## 10D-3B activation boundary
+
+B2, 3A1과 3A2 완료는 deployment/application bootstrap/fresh transaction source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. owner-only actual env/input, pre-current ingress 설치, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, Cloudflare/secret/User, actual production DB/migration/bootstrap/backup, schedule·replication, public smoke와 kill switch 활성화는 10D-3B 별도 승인 대상이다. one-shot migration/bootstrap architecture가 실제 schema나 2인 Household 의미와 맞지 않거나 기존 ADR/재무 계약을 바꿔야 하면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -273,7 +307,7 @@ B2와 3A1 완료는 deployment/bootstrap source와 synthetic recovery·exact-sta
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, host state 설치, actual bootstrap input/DB write, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3B 운영 결정이다.
+10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1/A2 source/CI 통과는 artifact publish, Tailscale/SSH, production deploy, ingress/host state 설치, actual bootstrap input/DB write, status/monitor 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 10D-3B 운영 결정이다.
 
 ## 롤백
 

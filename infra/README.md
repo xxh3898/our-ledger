@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate, Slice 10D-2B1 host state/shared operation lock, Slice 10D-2B2 restricted deployment transaction과 Slice 10D-3A1 production Household bootstrap source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`/`api-bootstrap`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 synthetic transaction/bootstrap harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini host install/deploy/status/backup/migration/bootstrap/restore/monitor/HomeOps reporter, forced-command 설치, actual bootstrap input, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate, Slice 10D-2B1 host state/shared operation lock, Slice 10D-2B2 restricted deployment transaction과 Slice 10D-3A1/A2 production Household/fresh-host bootstrap source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`/`api-bootstrap`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 synthetic transaction/bootstrap harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini ingress/host install/deploy/status/backup/migration/bootstrap/restore/monitor/HomeOps reporter, forced-command 설치, actual bootstrap input, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -19,7 +19,7 @@ infra/
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. normal `api`와 profile-gated `api-migration`/`api-bootstrap`은 같은 `${OUR_LEDGER_API_IMAGE}`를 사용하며 production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
-repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public backup wrapper와 artifact/internal core는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock/deployment worker와 test-only adapter는 `scripts/host_tools/`에 있다. restricted entrypoint는 `scripts/deploy-production.sh`, status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, host transaction, restore, policy와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-host-deploy-transaction.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 deploy/backup/status/monitor service나 host backup bind mount를 추가하지 않는다.
+repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public backup wrapper와 artifact/internal core는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock/deployment/fresh-bootstrap worker와 test-only adapter는 `scripts/host_tools/`에 있다. restricted entrypoint는 `scripts/deploy-production.sh`, `scripts/bootstrap-production.sh`, status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, host/deploy/fresh-bootstrap transaction, restore, policy와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-host-deploy-transaction.sh`, `scripts/verify-fresh-host-bootstrap.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 deploy/bootstrap/backup/status/monitor service나 host backup/input bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -51,7 +51,7 @@ deploy-our-ledger-v1 <sha> keep <actor>
 deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
 ```
 
-GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. B2 source의 `deploy-production.sh`는 이 exact intent와 stdin token을 fixed transaction에 연결하지만 Mac mini forced-command, actual credential과 runtime source는 설치하지 않았다. 따라서 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. bootstrap host transaction/install은 10D-3A2, public route/secret/User/schedule와 kill switch 활성화는 10D-3B의 별도 승인 대상이다.
+GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. B2 source의 `deploy-production.sh`는 이 exact intent와 stdin token을 fixed transaction에 연결하지만 Mac mini forced-command, actual credential과 runtime source는 설치하지 않았다. 따라서 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. fresh-bootstrap transaction source는 10D-3A2에 포함되지만 actual pre-current ingress/host install과 public route/secret/User/schedule 및 kill switch 활성화는 10D-3B의 별도 승인 대상이다.
 
 local source 검증은 다음 command다.
 
@@ -59,7 +59,7 @@ local source 검증은 다음 command다.
 ./scripts/verify-release-transport.sh
 ```
 
-이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1 source와 10D-3A2 host install이 강제한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
+이 gate는 helper/unit와 workflow source를 확인하고 amd64 host에서도 `scratch` runtime-config를 `--platform linux/arm64 --network none`으로 build/create/export해 exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, label, forbidden material 부재, script help와 Compose render를 검증한다. BuildKit이 자동 생성한 parent directory mode는 고정하지 않으며 실제 host release directory owner/mode는 B1/A2 source가 강제하고 actual install은 10D-3B가 담당한다. 고유 development label의 image/container만 사용하고 cleanup 뒤 residue 0을 요구하며 registry login/push, Tailscale, SSH, production resource를 사용하지 않는다.
 
 ## Host state/shared operation lock source
 
@@ -73,7 +73,7 @@ release directory는 exact digest에서만 정하고 같은 digest의 다른 con
 ./scripts/verify-host-state.sh
 ```
 
-이 gate와 backup/restore의 test-only adapter는 owner-only temp root/disposable Compose만 사용한다. actual fixed root, GHCR/Tailscale/SSH/HomeOps와 production resource를 읽거나 쓰지 않으며 실제 host bootstrap/install은 10D-3A2다.
+이 gate와 backup/restore의 test-only adapter는 owner-only temp root/disposable Compose만 사용한다. actual fixed root, GHCR/Tailscale/SSH/HomeOps와 production resource를 읽거나 쓰지 않으며 실제 host bootstrap/install은 10D-3B다.
 
 ## Restricted host deployment transaction source
 
@@ -96,9 +96,27 @@ HomeOps reporter는 existing `report-homeops-event.py deployments`를 compact JS
 
 이 gate는 32개 pure/synthetic test로 command/token, artifact identity, strict ordering, failure, formatVersion 2 crash/recovery, reporter/privacy와 cleanup을 검증한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에 접근하지 않아 production mutation과 Docker residue는 0이다. source 준비는 forced-command/runtime install, credential, host dry run, backup/migration/deploy 또는 kill switch 활성화를 뜻하지 않는다.
 
+## Fresh-host bootstrap transaction source
+
+`scripts/bootstrap-production.sh`는 current가 없는 최초 activation만 위한 별도 ingress다. fixed production source는 app root `/Users/homeserver/Server/apps/our-ledger`, pre-current ingress `bootstrap-ingress`, env `.env`, one-time input `household-bootstrap.json`, backup `/Users/homeserver/Server/backups/our-ledger/data`, Compose project `our-ledger-production`, Docker `/usr/local/bin/docker`, loopback `127.0.0.1:18080`을 caller가 바꿀 수 없게 고정한다.
+
+```text
+bootstrap-our-ledger-v1 <sha> <sha256:64hex> <actor>
+```
+
+token은 stdin으로만 전달하며 root/env/input/Compose/image/reporter/skip/force/reset/delete option은 없다. ingress tree는 pulled runtime-config와 exact content/allowlist가 같아야 하고, current/state·foreign pending·unknown project resource·invalid owner-only input 또는 initial backup artifact가 있으면 fresh PostgreSQL을 만들기 전에 거부한다.
+
+same shared lock 안에서 `artifact stage → PostgreSQL → migration → bootstrap → API/Web readiness → first backup → input unlink/fsync → current/state commit`을 수행한다. `FRESH_BOOTSTRAP` pending의 10개 phase는 normal deploy pending과 교차 소비되지 않고, crash 후 same request/candidate와 schema/Household/runtime/backup/input authority를 관찰해 forward resume한다. 자동 volume 삭제, domain repair, reverse migration/restore는 없다. 최종 state는 B2가 읽는 formatVersion 2이며 previous는 null이다.
+
+```bash
+./scripts/verify-fresh-host-bootstrap.sh
+```
+
+이 gate는 temp host와 synthetic input/credential, 고유 cleanup label의 disposable Compose만 사용해 migration 뒤 crash/re-entry, exact 2/1/2 bootstrap, readiness, custom backup, input 제거, final commit과 rerun 차단/data 불변을 검증한다. actual production root, GHCR login/publish, Tailscale/SSH/HomeOps/Cloudflare/public network를 사용하지 않으며 cleanup 뒤 resource residue 0을 요구한다. 실제 ingress/env/input 설치와 activation은 10D-3B다.
+
 ## 환경변수
 
-`.env.production.example`은 변수 이름과 무해한 placeholder만 제공한다. 실제 값은 Git 밖의 exact production env file에서 관리한다.
+`.env.production.example`은 변수 이름과 무해한 placeholder만 제공한다. fixed worker의 실제 production file authority는 app root의 owner-only `.env` 하나이며 Git 밖에서 관리한다. `.env.production` fallback이나 symlink alias는 지원하지 않는다.
 
 | 변수 | secret | 목적 |
 |---|---:|---|
@@ -118,18 +136,18 @@ HomeOps reporter는 existing `report-homeops-event.py deployments`를 compact JS
 
 ## Render와 실행 명령
 
-아래 명령의 `.env.production`은 저장소 밖 실제 운영 파일을 가리키는 예시다. production 실행은 별도 운영 승인, exact image SHA, 정상 backup, rollback 확인 뒤에만 수행한다.
+아래 명령은 fixed worker와 같은 `/Users/homeserver/Server/apps/our-ledger/.env` authority를 설명한다. production 실행은 별도 운영 승인, exact image SHA, 정상 backup, rollback 확인 뒤에만 수행한다.
 
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   config --quiet
 
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   up --detach --wait
 ```
@@ -139,19 +157,19 @@ normal `up`은 schema를 변경하지 않는다. 10D-2B2 transaction은 B1 share
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   run --rm --no-deps api-migration
 ```
 
 one-shot은 host port와 장기 restart가 없고 application/database network에서 healthy existing PostgreSQL을 사용한다. Flyway/JPA 성공 뒤 `migration-validation: success`를 한 번 기록하고 exit 0, DB/history/schema/profile 설정이 잘못되면 nonzero다. 별도 migration image, host SQL checkout, mutable tag와 `migration` 단독 profile은 허용하지 않는다.
 
-production Household bootstrap source gate의 canonical shape는 다음과 같다. `api-bootstrap`은 database network만 사용하고 stdin의 최대 8 KiB exact JSON object를 처리해 `created|verified` marker 뒤 종료한다. 이 명령은 향후 10D-3A2 fixed host worker가 owner-only input과 operation lock을 제공한 뒤에만 실제 production에서 사용할 수 있다.
+production Household bootstrap application-level shape는 다음과 같다. `api-bootstrap`은 database network만 사용하고 stdin의 최대 8 KiB exact JSON object를 처리해 `created|verified` marker 뒤 종료한다. 10D-3A2 fixed worker가 이 call을 source로 조합하지만 실제 production input/DB 실행은 10D-3B 승인 전에는 사용할 수 없다.
 
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   --profile bootstrap \
   run --rm -T --no-deps api-bootstrap < <owner-only-bootstrap-input>
@@ -166,13 +184,13 @@ docker compose \
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   ps
 
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   logs --tail=200 web api postgres
 ```
@@ -261,21 +279,22 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
 ```bash
 docker compose \
   --project-name our-ledger-production \
-  --env-file .env.production \
+  --env-file /Users/homeserver/Server/apps/our-ledger/.env \
   --file compose.prod.yaml \
   down --remove-orphans
 ```
 
-`--volumes`를 production 중지에 사용하지 않는다. image rollback은 `.env.production`의 API/Web image를 검증된 previous exact SHA로 바꾼 뒤 같은 `up --detach --wait` 명령을 실행한다. migration이 이전 image와 호환되는지 먼저 확인하며, production DB rollback이나 restore는 별도 runbook/승인 없이는 실행하지 않는다.
+`--volumes`를 production 중지에 사용하지 않는다. image rollback은 app root `.env`의 API/Web image를 검증된 previous exact SHA로 바꾼 뒤 같은 `up --detach --wait` 명령을 실행한다. migration이 이전 image와 호환되는지 먼저 확인하며, production DB rollback이나 restore는 별도 runbook/승인 없이는 실행하지 않는다.
 
 ## Disposable smoke
 
 ```bash
 ./scripts/verify-production-runtime.sh
 ./scripts/verify-production-bootstrap.sh
+./scripts/verify-fresh-host-bootstrap.sh
 ```
 
-runtime smoke는 고유 Compose project, Docker가 할당한 loopback port, 합성 DB/Cloudflare 값, disposable volume을 사용한다. clean image build, config fail-closed, unmigrated normal API의 schema mutation 없는 failure, same-image V1→V8/JPA one-shot, idempotent rerun, Flyway/JPA/DB/profile failure, HTTP/bootstrap/scheduler 부재, static/SPA/cache, API 401, forged local identity 401, actuator 차단, hardening, normal restart와 graceful stop을 검사한다. bootstrap smoke는 별도 고유 labeled project와 합성 identity로 unmigrated→migration→created→verified→normal API lifecycle, strict input/profile/state/schema/DB failure, privacy와 V1~V8 불변을 검사한다. 각 `trap`은 성공·실패 시 해당 project의 container/network/volume과 검증 image tag만 제거하고 residue가 있으면 실패한다. 실제 production resource와 `/Users/homeserver/Server`는 참조하지 않는다.
+runtime smoke는 고유 Compose project, Docker가 할당한 loopback port, 합성 DB/Cloudflare 값, disposable volume을 사용한다. clean image build, config fail-closed, unmigrated normal API의 schema mutation 없는 failure, same-image V1→V8/JPA one-shot, idempotent rerun, Flyway/JPA/DB/profile failure, HTTP/bootstrap/scheduler 부재, static/SPA/cache, API 401, forged local identity 401, actuator 차단, hardening, normal restart와 graceful stop을 검사한다. bootstrap smoke는 별도 고유 labeled project와 합성 identity로 unmigrated→migration→created→verified→normal API lifecycle, strict input/profile/state/schema/DB failure, privacy와 V1~V8 불변을 검사한다. fresh-host smoke는 temp host와 별도 labeled project에서 migration crash/re-entry, first backup, input 소비와 final commit/rerun 차단을 검사한다. 각 `trap`은 성공·실패 시 해당 project의 container/network/volume과 검증 image tag만 제거하고 residue가 있으면 실패한다. 실제 production resource와 `/Users/homeserver/Server`는 참조하지 않는다.
 
 Backup/Restore drill은 별도 entrypoint다.
 
