@@ -237,6 +237,20 @@ Monitor/Alert Policy Harness는 추가로 다음을 검증한다.
 
 `scripts/verify-monitor-policy.sh`는 Python pure/unit, synthetic external reporter와 plist parser만 사용하고 Docker, actual status/backup/HomeOps reporter·spool·API/LaunchAgent를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `monitor-policy` job에서 실행한다.
 
+Encrypted Offsite Backup Source Gate는 추가로 다음을 검증한다.
+
+- strict `last-success.json`과 exact verified bundle만 source로 선택하고 처리 전후 file set/stat/content authority가 같은지 확인
+- plaintext tar/dump staging 없이 tar stdout을 age public-recipient encryption으로 직접 연결
+- owner-only ciphertext staging fsync/hash, target `.partial` copy/fsync/hash, final rename/reverify와 atomic marker ordering
+- same latest marker/final exact match의 `NO_OP`, newer source advance와 기존 final 보존
+- unsafe config/path/symlink/hardlink/mode/overlap, invalid source, collision과 tar/age/timeout/fsync/copy/hash/rename/marker failure의 fail-closed preservation
+- 8시간 `FRESH|STALE` boundary와 missing/invalid privacy-safe read-only status
+- `00:50/06:50/12:50/18:50`, no `KeepAlive`/private identity LaunchAgent example
+- official SHA-256로 pin한 age v1.3.1 actual encrypt/decrypt round-trip과 decrypted tar exact source hash
+- repository bytecode, plaintext staging, target partial과 temporary identity residue 0
+
+`scripts/verify-offsite-backup.sh`는 owner-only temporary root만 사용하고 actual production backup/config/state/iCloud/recipient/LaunchAgent/DB/Compose에 접근하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `offsite-backup` job에서 실행한다.
+
 Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 
 - release helper의 exact 40자리 SHA, `sha256:` digest, bounded actor와 keep/update restricted command grammar
@@ -468,4 +482,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 15개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 12개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 16개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 13개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

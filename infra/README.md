@@ -1,6 +1,6 @@
 # Infra
 
-Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate, Slice 10D-2B1 host state/shared operation lock, Slice 10D-2B2 restricted deployment transaction과 Slice 10D-3A1/A2 production Household/fresh-host bootstrap source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`/`api-bootstrap`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 synthetic transaction/bootstrap harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini ingress/host install/deploy/status/backup/migration/bootstrap/restore/monitor/HomeOps reporter, forced-command 설치, actual bootstrap input, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
+Slice 10C의 immutable production origin, backup/restore, operational status/monitor source, Slice 10D-1의 immutable Release/Deploy source harness, Slice 10D-2A candidate migration gate, Slice 10D-2B1 host state/shared operation lock, Slice 10D-2B2 restricted deployment transaction, Slice 10D-3A1/A2 production Household/fresh-host bootstrap과 Slice 10D-3B3A encrypted offsite source를 관리한다. 현재 구현은 image build, non-root Nginx, normal `production` API, profile-gated `api-migration`/`api-bootstrap`, `web`/`api`/`postgres` Compose, host 운영 source, reusable Full CI, default-off release workflow, secret-free runtime-config artifact와 synthetic transaction/bootstrap/offsite harness까지다. 실제 GHCR publish, Tailscale/SSH, Mac mini ingress/host install/deploy/status/backup/migration/bootstrap/offsite/restore/monitor/HomeOps reporter, forced-command 설치, actual bootstrap input/recipient/iCloud target, Cloudflare Tunnel/Access 설정, production secret/User/DB, LaunchAgent, retention 삭제·외부복제와 alert activation은 포함하지 않는다.
 
 ## 구조
 
@@ -19,7 +19,7 @@ infra/
 
 repository root의 `compose.prod.yaml`은 이미 build/push된 exact API/Web image를 실행한다. normal `api`와 profile-gated `api-migration`/`api-bootstrap`은 같은 `${OUR_LEDGER_API_IMAGE}`를 사용하며 production Compose 자체는 host source를 build하거나 bind mount하지 않는다.
 
-repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public backup wrapper와 artifact/internal core는 `scripts/backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock/deployment/fresh-bootstrap worker와 test-only adapter는 `scripts/host_tools/`에 있다. restricted entrypoint는 `scripts/deploy-production.sh`, `scripts/bootstrap-production.sh`, status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, host/deploy/fresh-bootstrap transaction, restore, policy와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-host-deploy-transaction.sh`, `scripts/verify-fresh-host-bootstrap.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-release-transport.sh`다. production Compose에 deploy/bootstrap/backup/status/monitor service나 host backup/input bind mount를 추가하지 않는다.
+repository root의 `runtime-config.Dockerfile`은 Compose/Nginx와 공개 host script의 exact allowlist를 `scratch` artifact로 패키징한다. public local/offsite backup wrapper와 worker는 `scripts/backup-production.sh`, `scripts/offsite-backup-production.sh`, `scripts/backup_tools/`에 있고 fixed host state/lock/deployment/fresh-bootstrap worker와 test-only adapter는 `scripts/host_tools/`에 있다. restricted entrypoint는 `scripts/deploy-production.sh`, `scripts/bootstrap-production.sh`, status/monitor command는 `scripts/production-status.sh`, `scripts/monitor-production.sh`다. release contract와 runtime config detector는 `scripts/release_tools/`, `scripts/detect-runtime-config-change.sh`에 있다. host state, host/deploy/fresh-bootstrap transaction, restore, policy, offsite와 release 검증 진입점은 `scripts/verify-host-state.sh`, `scripts/verify-host-deploy-transaction.sh`, `scripts/verify-fresh-host-bootstrap.sh`, `scripts/verify-backup-restore.sh`, `scripts/verify-monitor-policy.sh`, `scripts/verify-offsite-backup.sh`, `scripts/verify-release-transport.sh`다. production Compose에 deploy/bootstrap/backup/offsite/status/monitor service나 host backup/input bind mount를 추가하지 않는다.
 
 ## Image 계약
 
@@ -272,7 +272,15 @@ python3 scripts/backup_tools/backup_artifact.py retention-plan \
   --backup-dir /absolute/dedicated/our-ledger-backups
 ```
 
-`pruneCandidates`를 포함해 어떤 artifact도 삭제하지 않는다. backup plist example은 `00:35/06:35/12:35/18:35` fixed external bootstrap과 `KeepAlive` 부재만 고정한다. 실제 prune, schedule, age/iCloud destination/암호화 복제와 production restore는 10D 승인 전까지 활성화하지 않는다.
+`pruneCandidates`를 포함해 어떤 artifact도 삭제하지 않는다. backup plist example은 `00:35/06:35/12:35/18:35`, offsite plist example은 `00:50/06:50/12:50/18:50` fixed external bootstrap과 `KeepAlive` 부재만 고정한다.
+
+Encrypted offsite source는 committed latest bundle 전체의 tar stdout만 public age recipient로 암호화하고 owner-only local ciphertext → iCloud `.partial` → final → atomic local marker 순서로 게시한다. production CLI는 `run|status`, fixed paths와 `/opt/homebrew/bin/age`, `/usr/bin/bsdtar`만 사용하며 private identity와 plaintext tar/dump offsite copy를 허용하지 않는다. `status`는 final/marker를 read-only 검증해 8시간 freshness만 privacy-safe하게 반환한다.
+
+```bash
+./scripts/verify-offsite-backup.sh
+```
+
+이 gate는 pinned age v1.3.1과 temporary identity/directory로 encrypt/decrypt round-trip 및 failure preservation을 검증한다. 실제 prune, schedule, production config/recipient/iCloud directory/외부복제와 restore는 10D-3B 승인 전까지 생성하거나 활성화하지 않는다.
 
 ## 중지와 rollback
 
