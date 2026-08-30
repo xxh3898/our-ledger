@@ -117,6 +117,16 @@ for name, value in payloads.items():
     path = root / name
     path.write_text(value, encoding="utf-8")
     path.chmod(0o600)
+canonical_json = json.dumps(valid, ensure_ascii=False)
+for name, encoding in (
+    ("utf-16le.json", "utf-16-le"),
+    ("utf-16be.json", "utf-16-be"),
+    ("utf-32le.json", "utf-32-le"),
+    ("utf-32be.json", "utf-32-be"),
+):
+    path = root / name
+    path.write_bytes(canonical_json.encode(encoding))
+    path.chmod(0o600)
 (root / "oversize.json").write_bytes(b" " * 8193)
 (root / "oversize.json").chmod(0o600)
 (root / "invalid-utf8.json").write_bytes(bytes((0xC3, 0x28)))
@@ -434,7 +444,8 @@ fi
 
 printf '\n[bootstrap 7/12] strict stdin failure matrix\n'
 for input_name in \
-  empty malformed oversize unknown duplicate missing null wrong-type trailing same-email invalid-utf8; do
+  empty malformed oversize unknown duplicate missing null wrong-type trailing same-email invalid-utf8 \
+  utf-16le utf-16be utf-32le utf-32be; do
   expect_failure \
     "bootstrap input $input_name" \
     "$runtime_temp_dir/input-$input_name.log" \

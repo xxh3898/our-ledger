@@ -7,6 +7,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 
 public final class ProductionBootstrapInputParser {
 
@@ -22,7 +25,12 @@ public final class ProductionBootstrapInputParser {
             byte[] bytes = input.readNBytes(MAX_INPUT_BYTES + 1);
             require(bytes.length > 0 && bytes.length <= MAX_INPUT_BYTES);
 
-            JsonNode root = JSON_MAPPER.readTree(bytes);
+            String json = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+            JsonNode root = JSON_MAPPER.readTree(json);
             require(root != null && root.isObject() && root.size() == 4);
             requireFormatVersion(root.get("formatVersion"));
             String householdName = requireText(root.get("householdName"));

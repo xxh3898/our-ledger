@@ -182,7 +182,7 @@ Production Household Bootstrap One-shot Gate는 별도 actual PostgreSQL/contain
 - unmigrated DB nonzero와 table mutation 0, same-image V1→V8 migration의 bootstrap row 0
 - migrated empty DB의 exact 2 User/1 Household/2 Membership·OWNER/MEMBER·KRW·Asia/Seoul 생성
 - 같은 input `verified` rerun 전후 row/identity sequence와 Flyway history fingerprint 불변
-- empty/malformed/oversize/invalid UTF-8/unknown/duplicate/missing/null/wrong-type/trailing/same-email stdin failure
+- empty/malformed/oversize/invalid UTF-8, valid UTF-16LE/BE·UTF-32LE/BE, unknown/duplicate/missing/null/wrong-type/trailing/same-email stdin failure
 - partial User, swapped role, extra User의 nonzero와 자동 repair 없는 state fingerprint 불변
 - normal production bootstrap override, migration/local/test/unknown profile 혼합, JPA schema damage와 unreachable DB fail-closed
 - bootstrap success marker exact 1회, raw JSON/PII/credential/ID/JDBC URL 비노출, one-shot container residue 0

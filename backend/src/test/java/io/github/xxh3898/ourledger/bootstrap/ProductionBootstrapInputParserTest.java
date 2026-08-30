@@ -3,6 +3,7 @@ package io.github.xxh3898.ourledger.bootstrap;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +69,25 @@ class ProductionBootstrapInputParserTest {
 
         for (byte[] input : new byte[][]{oversized, invalidUtf8}) {
             assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(input)))
+                    .isExactlyInstanceOf(ProductionBootstrapInputException.class)
+                    .hasMessage("bootstrap stdin 계약이 유효하지 않습니다.");
+        }
+    }
+
+    @Test
+    void should_rejectInput_when_validJsonUsesNonUtf8UnicodeEncoding() {
+        String[] nonUtf8Encodings = {
+                "UTF-16LE",
+                "UTF-16BE",
+                "UTF-32LE",
+                "UTF-32BE"
+        };
+
+        for (String encoding : nonUtf8Encodings) {
+            byte[] input = VALID_JSON.getBytes(Charset.forName(encoding));
+
+            assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(input)))
+                    .as("encoding=%s", encoding)
                     .isExactlyInstanceOf(ProductionBootstrapInputException.class)
                     .hasMessage("bootstrap stdin 계약이 유효하지 않습니다.");
         }

@@ -57,7 +57,7 @@ local/default의 `our-ledger.bootstrap.enabled`는 기본 `false`다. 개발 환
 
 local sample은 `OUR_LEDGER_BOOTSTRAP_*`에 `example.test` identity만 제공한다. 최초 provision 뒤 enabled를 다시 `false`로 둔다.
 
-production은 generic runner를 등록하지 않는다. 동일 candidate image의 `production,bootstrap` mode만 최대 8 KiB exact JSON object 하나를 stdin에서 받아 JPA schema validation 뒤 `HouseholdBootstrapService`를 한 번 호출한다. Flyway, Web/HTTP, recurring scheduling, Cloudflare/local/test identity는 비활성이고 성공 시 `household-bootstrap: created|verified` marker 한 줄 뒤 context를 닫아 exit 0으로 끝난다. empty/malformed/oversize/unknown/duplicate/missing/null/wrong-type/trailing 입력, profile/flag override, DB/schema 실패와 partial/mismatch/extra 상태는 PII를 출력하지 않고 nonzero다. 실제 production input과 실행은 이 source gate 범위 밖이다.
+production은 generic runner를 등록하지 않는다. 동일 candidate image의 `production,bootstrap` mode만 최대 8 KiB raw byte를 먼저 제한하고 strict UTF-8로 디코딩한 exact JSON object 하나를 stdin에서 받아 JPA schema validation 뒤 `HouseholdBootstrapService`를 한 번 호출한다. Flyway, Web/HTTP, recurring scheduling, Cloudflare/local/test identity는 비활성이고 성공 시 `household-bootstrap: created|verified` marker 한 줄 뒤 context를 닫아 exit 0으로 끝난다. empty/malformed/oversize/invalid UTF-8, UTF-16/UTF-32 encoded JSON, unknown/duplicate/missing/null/wrong-type/trailing 입력, profile/flag override, DB/schema 실패와 partial/mismatch/extra 상태는 PII를 출력하지 않고 nonzero다. 실제 production input과 실행은 이 source gate 범위 밖이다.
 
 ## 실행
 
