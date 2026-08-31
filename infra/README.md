@@ -53,7 +53,7 @@ deploy-our-ledger-v1 <sha> keep <actor>
 deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>
 ```
 
-GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. B2 source의 `deploy-production.sh`는 이 exact intent와 stdin token을 fixed transaction에 연결하지만 Mac mini forced-command, actual credential과 runtime source는 설치하지 않았다. 따라서 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. fresh-bootstrap transaction source는 10D-3A2에 포함되지만 actual pre-current ingress/host install과 public route/secret/User/schedule 및 kill switch 활성화는 10D-3B의 별도 승인 대상이다.
+GHCR token은 command argument가 아니라 SSH 표준 입력으로만 전달된다. B2 source의 `deploy-production.sh`는 validated actor/token으로 request-owned private Docker `config.json`을 직접 materialize하고 exact `--config` pull만 사용하므로 `docker login/logout`, credential helper, macOS Keychain, global Docker config에 의존하지 않는다. auth config는 owner-only `0600`으로 fsync되고 transaction cleanup에서 temp root와 함께 제거된다. 이 source는 Mac mini forced-command, actual credential과 runtime source를 설치하지 않으므로 kill switch를 활성화하거나 GHCR/Tailscale/SSH/production을 호출하지 않는다. fresh-bootstrap transaction source는 같은 helper-free auth materializer를 재사용하지만 actual pre-current ingress/host install과 public route/secret/User/schedule 및 kill switch 활성화는 10D-3B의 별도 승인 대상이다.
 
 local source 검증은 다음 command다.
 
@@ -102,7 +102,7 @@ HomeOps reporter는 existing `report-homeops-event.py deployments`를 compact JS
 ./scripts/verify-host-deploy-transaction.sh
 ```
 
-이 gate는 32개 pure/synthetic test로 command/token, artifact identity, strict ordering, failure, formatVersion 2 crash/recovery, reporter/privacy와 cleanup을 검증한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에 접근하지 않아 production mutation과 Docker residue는 0이다. source 준비는 forced-command/runtime install, credential, host dry run, backup/migration/deploy 또는 kill switch 활성화를 뜻하지 않는다.
+이 gate는 38개 pure/synthetic test로 command/token, helper-free private auth config, artifact identity, strict ordering, failure, formatVersion 2 crash/recovery, reporter/privacy와 cleanup을 검증한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에 접근하지 않아 production mutation과 Docker residue는 0이다. source 준비는 forced-command/runtime install, credential, host dry run, backup/migration/deploy 또는 kill switch 활성화를 뜻하지 않는다.
 
 ## Fresh-host bootstrap transaction source
 

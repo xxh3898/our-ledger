@@ -31,6 +31,7 @@ from scripts.host_tools.production_deploy import (
     PROJECT_NAME,
     ProductionDeploymentAdapter,
     _candidate_environment,
+    _materialize_private_registry_auth,
     _read_env_value,
     _read_private_bytes,
     _replace_env_images,
@@ -126,19 +127,7 @@ class ProductionFreshBootstrapAdapter(ProductionDeploymentAdapter):
         self._temporary_root = _create_private_temporary_root()
         self._docker_config = self._temporary_root / "docker-config"
         self._docker_config.mkdir(mode=0o700)
-        self._run(
-            [
-                str(DOCKER),
-                "--config",
-                str(self._docker_config),
-                "login",
-                "ghcr.io",
-                "--username",
-                request.actor,
-                "--password-stdin",
-            ],
-            input_bytes=bytes(token),
-        )
+        _materialize_private_registry_auth(self._docker_config, request.actor, token)
 
         api_reference = f"{API_REPOSITORY}:{request.revision}"
         web_reference = f"{WEB_REPOSITORY}:{request.revision}"

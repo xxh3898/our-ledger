@@ -260,7 +260,7 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - `main` validation의 재사용 Full CI 단일 authority, production concurrency와 default-off kill switch
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
 - publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
-- GHCR token stdin-only restricted SSH boundary와 token/secret의 command argument·artifact 비포함
+- GHCR token stdin-only restricted SSH boundary, helper-free private `config.json`의 exact JSON/owner/mode/nlink/fsync/lifetime과 token/base64 auth의 command argument·environment·report·exception 비포함
 - `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
@@ -300,7 +300,7 @@ Restricted Host Deployment Transaction Harness는 다음을 추가로 검증한�
 - external HomeOps reporter의 exact executable plus `deployments`, compact JSON stdin, actual `RUNNING/SUCCESS/FAILED/ROLLED_BACK` lifecycle, generic nonzero/timeout과 reporter degradation 독립
 - exact env image key만 atomic replacement, runtime tar symlink/nonregular/unexpected material 거부, private temp/config cleanup과 금지 command/source override 부재
 
-`scripts/verify-host-deploy-transaction.sh`는 32개 Python synthetic regression과 source/shell gate만 실행한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`를 사용하지 않으므로 생성할 disposable container/network/volume/image도 없고 residue는 0이다. local `verify.sh`와 Hosted Full CI의 독립 `host-deploy-transaction` job에서 실행한다.
+`scripts/verify-host-deploy-transaction.sh`는 38개 Python synthetic regression과 source/shell gate만 실행한다. login/logout/credential helper 없이 request-owned auth config를 사용하는지와 collision·write/fsync·pull failure cleanup을 고정한다. Docker/GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`를 사용하지 않으므로 생성할 disposable container/network/volume/image도 없고 residue는 0이다. local `verify.sh`와 Hosted Full CI의 독립 `host-deploy-transaction` job에서 실행한다.
 
 Fresh-host Bootstrap Transaction Harness는 다음을 추가로 검증한다.
 

@@ -124,7 +124,7 @@ related:
 - runtime config는 `scratch` 기반 secret-free artifact이며 `compose.prod.yaml`, Nginx 설정과 공개 host-side 운영 script의 exact allowlist를 regular file별 `0600`/`0700` mode로 포함한다. 자동 생성 parent directory mode는 artifact contract가 아니며 B1/A2 source가 host owner/directory mode를 검증하고 실제 설치는 10D-3B에서 수행한다.
 - last successful Production revision과 candidate의 runtime source diff가 없으면 `keep`, 변경·첫 bootstrap·명시적 force면 `update`를 반환하고 missing/non-ancestor/invalid range는 fail closed한다.
 - restricted transport command는 `deploy-our-ledger-v1 <sha> keep <actor>` 또는 `deploy-our-ledger-v1 <sha> update <sha256:64hex> <actor>` 두 grammar만 허용하고 caller가 shell, path, image name 또는 추가 argument를 주입할 수 없다.
-- GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다.
+- GHCR token은 restricted SSH command의 표준 입력으로만 전달되고 command argument, environment 확장 값, log 또는 runtime-config artifact에 포함되지 않는다. production artifact pull은 validated actor/token으로 request-owned owner-only `config.json`을 fsync해 exact `--config`로만 사용하며 login/logout, credential helper, Keychain, global Docker config 의존이 0이다.
 - publish/deploy privileged job의 모든 third-party action ref는 exact 40자리 commit SHA다.
 - local source gate가 helper unit test, detector range, workflow kill switch/permissions/grammar와 secret-free runtime-config file tree/mode/label/Compose render를 synthetic하게 검증한다.
 - Hosted Full CI가 PR exact HEAD에서 release-transport gate를 통과하며 actual GHCR, Tailscale, SSH, Mac mini, production backup/migration/deploy 또는 secret을 사용하지 않는다.
@@ -229,7 +229,7 @@ related:
 - schema authority가 같을 때만 previous image pair를 복구하고 exact image env 두 key만 file fsync→atomic replace→parent fsync로 갱신한다. `down --volumes`, broad prune, caller shell/path/image와 public smoke는 사용하지 않는다.
 - pending formatVersion 2 phase는 skipped transition을 거부한다. pre-migration, post-migration, cutover, readiness와 current/state/pending commit crash를 observed runtime/schema/readiness와 함께 deterministic하게 복구하거나 fail closed한다.
 - HomeOps에는 actual receiver vocabulary `RUNNING`, `SUCCESS`, `FAILED`, `ROLLED_BACK`와 bounded non-sensitive lifecycle만 `[reporter, "deployments"]` JSON stdin으로 전달한다. reporter nonzero/timeout은 application outcome을 바꾸지 않고 secret/origin/HMAC/spool을 직접 다루지 않는다.
-- `verify-host-deploy-transaction.sh`의 32개 synthetic test는 실제 GHCR, Docker daemon, Tailscale, SSH, Mac mini, production path/service/backup/migration, HomeOps 또는 public network를 호출하지 않는다.
+- `verify-host-deploy-transaction.sh`의 38개 synthetic test는 helper-free auth JSON/ownership/mode/nlink/durability, failure cleanup과 기존 transaction 계약을 검증하며 실제 GHCR, Docker daemon, Tailscale, SSH, Mac mini, production path/service/backup/migration, HomeOps 또는 public network를 호출하지 않는다.
 - Hosted Full CI가 PR exact HEAD에서 독립 `host-deploy-transaction` job과 기존 전체 gate를 통과한다. 이 완료는 source 검증일 뿐 install, credential, kill switch 활성화, release/deploy 또는 public acceptance가 아니다.
 
 ## 운영
