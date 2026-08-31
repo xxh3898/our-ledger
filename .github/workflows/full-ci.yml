@@ -79,6 +79,16 @@ jobs:
       - name: Host state/shared operation lock 검증
         run: ./scripts/verify-host-state.sh
 
+  runtime-config-evolution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Runtime-config evolution bridge 검증
+        run: ./scripts/verify-runtime-config-evolution.sh
+
   host-deploy-transaction:
     runs-on: ubuntu-latest
     timeout-minutes: 10

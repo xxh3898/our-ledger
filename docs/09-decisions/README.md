@@ -19,6 +19,7 @@ related:
 | [ADR-005](ADR-005-recurring-generation.md) | 반복규칙이 실제 Transaction 생성 |
 | [ADR-006](ADR-006-goal-account-model.md) | Goal을 실제 Account와 연결 |
 | [ADR-008](ADR-008-cloudflare-access-authentication.md) | Cloudflare Access 기반 외부 인증 + Spring 내부 인가 |
+| [ADR-009](ADR-009-runtime-config-evolution.md) | Legacy V1 bridge를 통한 Manifested Runtime V2 전환 |
 
 ## Superseded ADR
 

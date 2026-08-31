@@ -41,10 +41,6 @@ RUNTIME_FILES = {
         "0600",
         "/runtime/scripts/backup_tools/backup_core.sh",
     ),
-    "scripts/backup_tools/offsite_backup.py": (
-        "0600",
-        "/runtime/scripts/backup_tools/offsite_backup.py",
-    ),
     "scripts/deploy-production.sh": (
         "0700",
         "/runtime/scripts/deploy-production.sh",
@@ -78,10 +74,6 @@ RUNTIME_FILES = {
         "/runtime/scripts/host_tools/production_host.py",
     ),
     "scripts/monitor-production.sh": ("0700", "/runtime/scripts/monitor-production.sh"),
-    "scripts/offsite-backup-production.sh": (
-        "0700",
-        "/runtime/scripts/offsite-backup-production.sh",
-    ),
     "scripts/production-status.sh": ("0700", "/runtime/scripts/production-status.sh"),
     "scripts/release_tools/release_contract.py": (
         "0700",
@@ -100,7 +92,11 @@ RUNTIME_FILES = {
         "/runtime/scripts/status_tools/production_status.py",
     ),
 }
-RUNTIME_SOURCES = set(RUNTIME_FILES)
+RUNTIME_ARTIFACT_SOURCES = set(RUNTIME_FILES)
+DORMANT_V2_SOURCES = {
+    "scripts/backup_tools/offsite_backup.py",
+    "scripts/offsite-backup-production.sh",
+}
 
 
 class ReleaseContractTest(unittest.TestCase):
@@ -717,16 +713,20 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn('io.chochiho.runtime-config.project="our-ledger"', dockerfile)
         self.assertNotRegex(dockerfile, r"(?m)^COPY\s+(?:--\S+\s+)*\.\s")
         self.assertNotRegex(dockerfile, r"(?i)\.env|private|secret|\.pem|\.key")
-        for source in RUNTIME_SOURCES:
+        for source in RUNTIME_ARTIFACT_SOURCES | DORMANT_V2_SOURCES:
             self.assertTrue((ROOT / source).is_file(), source)
 
-    def test_detector_and_artifact_sources_stay_in_sync(self) -> None:
+    def test_detector_tracks_bridge_and_dormant_v2_sources(self) -> None:
         detector = DETECTOR.read_text(encoding="utf-8")
         dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
 
-        for source in sorted(RUNTIME_SOURCES):
+        for source in sorted(RUNTIME_ARTIFACT_SOURCES):
             self.assertIn(source, detector)
             self.assertIn(source, dockerfile)
+        for source in sorted(DORMANT_V2_SOURCES):
+            self.assertIn(source, detector)
+            self.assertNotIn(source, dockerfile)
+        self.assertNotIn("runtime-manifest.json", dockerfile)
         self.assertIn("runtime-config.Dockerfile", detector)
 
     def test_release_gate_uses_only_synthetic_local_boundaries(self) -> None:
