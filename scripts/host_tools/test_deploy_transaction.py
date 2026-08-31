@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "scripts" / "deploy-production.sh"
 PRODUCTION_HOST = ROOT / "scripts" / "host_tools" / "production_host.py"
 PRODUCTION_DEPLOY = ROOT / "scripts" / "host_tools" / "production_deploy.py"
+PRODUCTION_FRESH_BOOTSTRAP = (
+    ROOT / "scripts" / "host_tools" / "production_fresh_bootstrap.py"
+)
 FULL_CI = ROOT / ".github" / "workflows" / "full-ci.yml"
 REVISION_ONE = "1" * 40
 REVISION_TWO = "2" * 40
@@ -736,6 +740,323 @@ class ProductionSourceBoundaryTest(unittest.TestCase):
         self.assertNotIn("DB restore", source)
         self.assertNotIn("reverse migration", source)
         self.assertNotIn("urllib.request", source)
+
+    def test_registry_auth_config_is_exact_private_and_helper_free(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            root.chmod(0o700)
+            config_directory = root / "docker-config"
+            config_directory.mkdir(mode=0o700)
+            token = bytearray(b"synthetic-token")
+
+            config_path = production_deploy._materialize_private_registry_auth(
+                config_directory,
+                "release_actor",
+                token,
+            )
+
+            expected_auth = base64.b64encode(
+                b"release_actor:synthetic-token"
+            )
+            self.assertEqual(
+                config_path.read_bytes(),
+                b'{"auths":{"ghcr.io":{"auth":"'
+                + expected_auth
+                + b'"}}}',
+            )
+            parsed = json.loads(config_path.read_bytes())
+            self.assertEqual(set(parsed), {"auths"})
+            self.assertEqual(set(parsed["auths"]), {"ghcr.io"})
+            self.assertEqual(set(parsed["auths"]["ghcr.io"]), {"auth"})
+            self.assertEqual(
+                base64.b64decode(parsed["auths"]["ghcr.io"]["auth"]),
+                b"release_actor:synthetic-token",
+            )
+            details = os.lstat(config_path)
+            self.assertTrue(stat.S_ISREG(details.st_mode))
+            self.assertEqual(details.st_uid, os.geteuid())
+            self.assertEqual(stat.S_IMODE(details.st_mode), 0o600)
+            self.assertEqual(details.st_nlink, 1)
+            self.assertEqual(config_path.resolve(strict=True), config_path)
+            self.assertEqual(stat.S_IMODE(config_directory.stat().st_mode), 0o700)
+            self.assertEqual(token, bytearray(b"synthetic-token"))
+
+        for source_path in (PRODUCTION_DEPLOY, PRODUCTION_FRESH_BOOTSTRAP):
+            source = source_path.read_text(encoding="utf-8")
+            for forbidden in (
+                '"login"',
+                '"logout"',
+                "--password-stdin",
+                "docker-credential-",
+                "DOCKER_CONFIG",
+                "Keychain",
+                '"security"',
+            ):
+                self.assertNotIn(forbidden, source)
+
+    def test_registry_auth_rejects_invalid_actor_or_token_before_file_creation(self) -> None:
+        invalid = (
+            ("", bytearray(b"token")),
+            ("bad actor", bytearray(b"token")),
+            ("a" * 65, bytearray(b"token")),
+            ("release_actor", bytearray()),
+            ("release_actor", bytearray(b"line\nfeed")),
+            ("release_actor", bytearray(b"nul\0byte")),
+            (
+                "release_actor",
+                bytearray(b"x" * (deploy_transaction.MAX_TOKEN_BYTES + 1)),
+            ),
+        )
+        for index, (actor, token) in enumerate(invalid):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                root.chmod(0o700)
+                config_directory = root / "docker-config"
+                config_directory.mkdir(mode=0o700)
+
+                with self.assertRaisesRegex(
+                    deploy_transaction.DeploymentError,
+                    "private registry auth input is invalid",
+                ):
+                    production_deploy._materialize_private_registry_auth(
+                        config_directory,
+                        actor,
+                        token,
+                    )
+
+                self.assertFalse(os.path.lexists(config_directory / "config.json"))
+
+    def test_registry_auth_collision_symlink_and_nonregular_targets_fail_closed(self) -> None:
+        for kind in ("regular", "symlink", "directory", "fifo"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                root.chmod(0o700)
+                config_directory = root / "docker-config"
+                config_directory.mkdir(mode=0o700)
+                config_path = config_directory / "config.json"
+                protected = root / "protected"
+                protected.write_bytes(b"protected-existing-bytes")
+                protected.chmod(0o600)
+                if kind == "regular":
+                    config_path.write_bytes(b"existing-config")
+                    config_path.chmod(0o600)
+                elif kind == "symlink":
+                    config_path.symlink_to(protected)
+                elif kind == "directory":
+                    config_path.mkdir(mode=0o700)
+                else:
+                    os.mkfifo(config_path, 0o600)
+                protected_before = protected.stat()
+                config_before = os.lstat(config_path)
+
+                with self.assertRaisesRegex(
+                    deploy_transaction.DeploymentError,
+                    "private registry auth materialization failed",
+                ):
+                    production_deploy._materialize_private_registry_auth(
+                        config_directory,
+                        "release_actor",
+                        bytearray(b"synthetic-token"),
+                    )
+
+                config_after = os.lstat(config_path)
+                self.assertEqual(
+                    (config_after.st_dev, config_after.st_ino),
+                    (config_before.st_dev, config_before.st_ino),
+                )
+                self.assertEqual(protected.read_bytes(), b"protected-existing-bytes")
+                protected_after = protected.stat()
+                self.assertEqual(
+                    (protected_after.st_dev, protected_after.st_ino),
+                    (protected_before.st_dev, protected_before.st_ino),
+                )
+
+    def test_registry_auth_write_or_fsync_failure_is_generic_and_cleanup_owned(self) -> None:
+        failures = (
+            (
+                "write",
+                mock.patch.object(production_deploy.os, "write", side_effect=OSError()),
+            ),
+            ("zero-write", mock.patch.object(production_deploy.os, "write", return_value=0)),
+            (
+                "file-fsync",
+                mock.patch.object(production_deploy.os, "fsync", side_effect=OSError()),
+            ),
+            (
+                "directory-fsync",
+                mock.patch.object(host_state, "_fsync_directory", side_effect=OSError()),
+            ),
+        )
+        for name, patcher in failures:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                parent = Path(temporary).resolve()
+                private_root = parent / "our-ledger-deploy-synthetic"
+                private_root.mkdir(mode=0o700)
+                config_directory = private_root / "docker-config"
+                config_directory.mkdir(mode=0o700)
+                adapter = self._production_adapter(
+                    host_state.HostPaths(parent / "host"), private_root
+                )
+
+                with patcher, self.assertRaisesRegex(
+                    deploy_transaction.DeploymentError,
+                    "private registry auth materialization failed",
+                ) as raised:
+                    production_deploy._materialize_private_registry_auth(
+                        config_directory,
+                        "release_actor",
+                        bytearray(b"private-synthetic-token"),
+                    )
+
+                self.assertNotIn("private-synthetic-token", str(raised.exception))
+                adapter.cleanup()
+                self.assertFalse(private_root.exists())
+
+    def test_prepare_artifacts_scopes_every_pull_to_private_config_without_token_process_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            private_root = parent / "our-ledger-deploy-synthetic"
+            private_root.mkdir(mode=0o700)
+            adapter = self._production_adapter(
+                host_state.HostPaths(parent / "host"), private_root
+            )
+            runtime_source = parent / "runtime"
+            runtime_source.mkdir(mode=0o700)
+            adapter._extract_runtime = mock.Mock(return_value=runtime_source)
+            adapter._validate_image = mock.Mock()
+            adapter._validate_candidate_compose = mock.Mock()
+            adapter._run = mock.Mock(
+                return_value=subprocess.CompletedProcess([], 0, b"", b"")
+            )
+            request = deploy_transaction.DeploymentRequest(
+                REVISION_TWO,
+                "update",
+                "release_actor",
+                DIGEST_TWO,
+            )
+            previous = host_state.ReleaseIdentity(
+                REVISION_ONE,
+                DIGEST_ONE,
+                REVISION_ONE,
+                "c" * 64,
+            )
+            token = bytearray(b"private-synthetic-token")
+
+            with mock.patch.object(
+                production_deploy,
+                "_create_private_temporary_root",
+                return_value=private_root,
+            ), mock.patch.object(production_deploy, "_require_current_images_match"):
+                candidate = adapter.prepare_artifacts(request, token, previous)
+
+            self.assertEqual(candidate.revision, REVISION_TWO)
+            config_directory = private_root / "docker-config"
+            commands = [call.args[0] for call in adapter._run.call_args_list]
+            self.assertEqual(len(commands), 3)
+            self.assertEqual(
+                [command[-1] for command in commands],
+                [
+                    f"{deploy_transaction.API_REPOSITORY}:{REVISION_TWO}",
+                    f"{deploy_transaction.WEB_REPOSITORY}:{REVISION_TWO}",
+                    f"{deploy_transaction.RUNTIME_CONFIG_REPOSITORY}@{DIGEST_TWO}",
+                ],
+            )
+            for call, command in zip(adapter._run.call_args_list, commands):
+                self.assertEqual(
+                    command[:4],
+                    [
+                        str(production_deploy.DOCKER),
+                        "--config",
+                        str(config_directory),
+                        "pull",
+                    ],
+                )
+                self.assertNotIn("input_bytes", call.kwargs)
+            encoded = base64.b64encode(b"release_actor:private-synthetic-token")
+            process_boundary = repr(adapter._run.call_args_list).encode("utf-8")
+            self.assertNotIn(b"private-synthetic-token", process_boundary)
+            self.assertNotIn(encoded, process_boundary)
+            process_environment = production_deploy._safe_process_environment()
+            self.assertEqual(set(process_environment), {"LANG", "LC_ALL", "PATH"})
+            self.assertNotIn(b"private-synthetic-token", repr(process_environment).encode())
+            self.assertNotIn(encoded, repr(process_environment).encode())
+            self.assertEqual(token, bytearray(b"private-synthetic-token"))
+
+            adapter.cleanup()
+            self.assertFalse(private_root.exists())
+            self.assertEqual(adapter._run.call_count, 3)
+
+    def test_pull_or_identity_failure_is_generic_and_removes_private_auth(self) -> None:
+        for failure in ("pull", "identity"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                parent = Path(temporary).resolve()
+                private_root = parent / "our-ledger-deploy-synthetic"
+                private_root.mkdir(mode=0o700)
+                adapter = self._production_adapter(
+                    host_state.HostPaths(parent / "host"), private_root
+                )
+                adapter._run = mock.Mock(
+                    return_value=subprocess.CompletedProcess([], 0, b"", b"")
+                )
+                adapter._validate_image = mock.Mock()
+                if failure == "pull":
+                    adapter._run.side_effect = deploy_transaction.DeploymentError(
+                        "fixed production command failed"
+                    )
+                else:
+                    adapter._validate_image.side_effect = deploy_transaction.DeploymentError(
+                        "fixed production command failed"
+                    )
+                request = deploy_transaction.DeploymentRequest(
+                    REVISION_TWO,
+                    "keep",
+                    "release_actor",
+                    None,
+                )
+                previous = host_state.ReleaseIdentity(
+                    REVISION_ONE,
+                    DIGEST_ONE,
+                    REVISION_ONE,
+                    "c" * 64,
+                )
+
+                with mock.patch.object(
+                    production_deploy,
+                    "_create_private_temporary_root",
+                    return_value=private_root,
+                ), mock.patch.object(production_deploy, "_require_current_images_match"):
+                    with self.assertRaisesRegex(
+                        deploy_transaction.DeploymentError,
+                        "fixed production command failed",
+                    ) as raised:
+                        adapter.prepare_artifacts(
+                            request,
+                            bytearray(b"private-synthetic-token"),
+                            previous,
+                        )
+
+                self.assertNotIn("private-synthetic-token", str(raised.exception))
+                self.assertTrue((private_root / "docker-config" / "config.json").is_file())
+                adapter.cleanup()
+                self.assertFalse(private_root.exists())
+
+    @staticmethod
+    def _production_adapter(
+        paths: host_state.HostPaths,
+        private_root: Path,
+    ) -> production_deploy.ProductionDeploymentAdapter:
+        adapter = object.__new__(production_deploy.ProductionDeploymentAdapter)
+        adapter.paths = paths
+        adapter.runtime_root = ROOT
+        adapter._reporter = None
+        adapter._docker_config = private_root / "docker-config"
+        adapter._temporary_root = private_root
+        adapter._runtime_container = None
+        adapter._previous = None
+        adapter._candidate = None
+        adapter._candidate_release = None
+        adapter._migration_started = False
+        return adapter
 
     def test_reporter_boundary_uses_exact_executable_argument_and_stdin(self) -> None:
         source = PRODUCTION_DEPLOY.read_text(encoding="utf-8")
