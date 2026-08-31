@@ -189,7 +189,7 @@ deploy-our-ledger-v1 <exact-40-sha> keep <bounded-actor>
 deploy-our-ledger-v1 <exact-40-sha> update <sha256:64-lowercase-hex> <bounded-actor>
 ```
 
-helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. B2 `deploy-production.sh`도 `SSH_ORIGINAL_COMMAND`와 최대 8 KiB stdin token 외 caller override를 받지 않으며 token을 argument/environment/state/report에 넣지 않고 종료 시 mutable buffer를 비운다. source가 존재해도 forced-command와 credential이 설치되지 않았으므로 kill switch를 활성화할 운영 근거는 아직 없다.
+helper는 이 grammar 외 extra argument, shell fragment, arbitrary path/image name과 invalid digest를 거부한다. workflow는 GHCR token을 command argument에 넣지 않고 restricted SSH process의 표준 입력으로만 전달한다. B2 `deploy-production.sh`도 `SSH_ORIGINAL_COMMAND`와 최대 8 KiB stdin token 외 caller override를 받지 않으며 token을 argument/environment/state/report에 넣지 않고 종료 시 mutable buffer를 비운다. production artifact worker는 `docker login/logout`, credential helper, macOS Keychain, global `~/.docker`와 ambient `DOCKER_CONFIG`를 사용하지 않는다. validated actor와 token으로 request-owned `0700` Docker config 아래 `config.json`을 exclusive-create해 exact minimal `auths.ghcr.io.auth`만 mode `0600`, current owner, nlink 1로 file/directory fsync하고 모든 registry pull에 exact `docker --config <private-config>`를 사용한다. config와 base64 auth는 secret이며 transaction `finally`에서 private temp root와 함께 제거한다. source가 존재해도 forced-command와 credential이 설치되지 않았으므로 kill switch를 활성화할 운영 근거는 아직 없다.
 
 ## 10D-3B0 exact-SHA GHCR publish-only source
 
@@ -253,6 +253,7 @@ future execution은 다음 순서를 건너뛰지 않는다.
 
 ```text
 restricted command parse + stdin token
+→ helper-free private GHCR auth config materialization
 → fixed host/source authority
 → project operation lock
 → current runtime identity check
@@ -267,7 +268,7 @@ restricted command parse + stdin token
 → PostgreSQL/API/Web + loopback readiness
 → exact image env + current/state durable commit
 → HomeOps deployment lifecycle
-→ private Docker config/container/temp cleanup + token zeroization
+→ private Docker config/container/temp cleanup + token/auth buffer zeroization
 ```
 
 - API/Web candidate는 requested 40자리 SHA tag, valid image ID/repository digest, linux/arm64와 OCI source/revision/version이 모두 일치해야 한다. runtime-config update는 command exact digest의 image를 owner-only `/private/tmp` 아래로 export하고 allowlist/mode/symlink·hardlink·size를 다시 검증한다. keep은 verified current identity를 그대로 재사용하며 fresh host는 두 mode 모두 거부한다.
@@ -278,7 +279,7 @@ restricted command parse + stdin token
 - HomeOps reporter는 `[canonical_reporter, "deployments"]`, `shell=False`, compact JSON stdin으로 actual vocabulary `RUNNING/SUCCESS/FAILED/ROLLED_BACK`만 받는다. event에는 branch `main`, candidate/previous SHA, bounded actor/stage/summary와 rollback 여부만 포함하며 endpoint/secret/HMAC/spool, path, token과 사용자·금융 data는 포함하지 않는다. reporter 장애는 application transaction 결과를 바꾸지 않는다.
 - `down --volumes`, broad Docker prune, automatic DB rollback과 caller shell/Compose path/image를 금지한다. public Cloudflare smoke는 B2가 호출하지 않는다.
 
-`./scripts/verify-host-deploy-transaction.sh`는 fake adapter/reporter와 owner-only temp state로 32개 command/token/artifact/order/failure/crash/recovery/privacy regression을 수행한다. 실제 Docker daemon, GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에는 접근하지 않는다. Hosted Full CI의 독립 `host-deploy-transaction` job도 같은 source gate만 실행한다.
+`./scripts/verify-host-deploy-transaction.sh`는 fake adapter/reporter와 owner-only temp state로 38개 command/token/private auth config/artifact/order/failure/crash/recovery/privacy regression을 수행한다. exact helper-free JSON, owner/mode/nlink/durability, collision·write/fsync·pull failure cleanup과 login/logout/credential helper 부재를 고정한다. 실제 Docker daemon, GHCR/Tailscale/SSH/HomeOps/public network와 `/Users/homeserver/Server`에는 접근하지 않는다. Hosted Full CI의 독립 `host-deploy-transaction` job도 같은 source gate만 실행한다.
 
 ## 10D-3A2 fresh-host bootstrap transaction source
 

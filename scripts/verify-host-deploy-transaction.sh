@@ -25,4 +25,12 @@ if grep -R -n -E -- \
   exit 1
 fi
 
+if grep -R -n -E -- \
+  '"(login|logout)"|--password-stdin|docker-credential-|DOCKER_CONFIG|Keychain|"security"' \
+  "$ROOT_DIR/scripts/host_tools/production_deploy.py" \
+  "$ROOT_DIR/scripts/host_tools/production_fresh_bootstrap.py"; then
+  printf 'Production artifact auth가 helper 또는 global credential state에 의존합니다.\n' >&2
+  exit 1
+fi
+
 printf 'Restricted host deployment transaction 검증을 통과했습니다.\n'

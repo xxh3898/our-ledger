@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import http.client
 import json
@@ -18,6 +19,7 @@ from scripts.backup_tools import backup_artifact
 from scripts.host_tools import host_state
 from scripts.host_tools.deploy_transaction import (
     API_REPOSITORY,
+    MAX_TOKEN_BYTES,
     RUNTIME_CONFIG_REPOSITORY,
     WEB_REPOSITORY,
     CandidateArtifacts,
@@ -33,6 +35,7 @@ from scripts.host_tools.host_state import (
     ReleaseIdentity,
     SchemaAuthority,
 )
+from scripts.release_tools import release_contract
 from scripts.status_tools import monitor_worker
 
 
@@ -125,19 +128,7 @@ class ProductionDeploymentAdapter:
         self._temporary_root = _create_private_temporary_root()
         self._docker_config = self._temporary_root / "docker-config"
         self._docker_config.mkdir(mode=0o700)
-        self._run(
-            [
-                str(DOCKER),
-                "--config",
-                str(self._docker_config),
-                "login",
-                "ghcr.io",
-                "--username",
-                request.actor,
-                "--password-stdin",
-            ],
-            input_bytes=bytes(token),
-        )
+        _materialize_private_registry_auth(self._docker_config, request.actor, token)
 
         api_reference = f"{API_REPOSITORY}:{request.revision}"
         web_reference = f"{WEB_REPOSITORY}:{request.revision}"
@@ -459,20 +450,6 @@ class ProductionDeploymentAdapter:
             except (OSError, subprocess.SubprocessError):
                 failed = True
             self._runtime_container = None
-        if self._docker_config is not None:
-            try:
-                result = subprocess.run(
-                    [str(DOCKER), "--config", str(self._docker_config), "logout", "ghcr.io"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    shell=False,
-                    timeout=PROCESS_TIMEOUT_SECONDS,
-                    env=_safe_process_environment(),
-                )
-                failed = failed or result.returncode != 0
-            except (OSError, subprocess.SubprocessError):
-                failed = True
         if self._temporary_root is not None and self._temporary_root.exists():
             try:
                 shutil.rmtree(self._temporary_root)
@@ -752,6 +729,101 @@ def _create_private_temporary_root(parent: Path = TEMPORARY_PARENT) -> Path:
         shutil.rmtree(created)
         raise DeploymentError("deployment temporary root overlaps fixed app root")
     return created
+
+
+def _materialize_private_registry_auth(
+    config_directory: Path,
+    actor: str,
+    token: bytearray,
+) -> Path:
+    try:
+        release_contract.validate_actor(actor)
+    except release_contract.ContractError as error:
+        raise DeploymentError("private registry auth input is invalid") from error
+    if (
+        not isinstance(token, bytearray)
+        or not token
+        or len(token) > MAX_TOKEN_BYTES
+        or any(value in token for value in (0, 10, 13))
+    ):
+        raise DeploymentError("private registry auth input is invalid")
+    if not config_directory.is_absolute() or config_directory.name != "docker-config":
+        raise DeploymentError("private registry auth directory differs")
+    try:
+        parent = config_directory.parent
+        _require_private_directory(parent, 0o700)
+        _require_private_directory(config_directory, 0o700)
+        if (
+            parent.resolve(strict=True) != parent
+            or config_directory.resolve(strict=True) != config_directory
+        ):
+            raise DeploymentError("private registry auth directory differs")
+    except OSError as error:
+        raise DeploymentError("private registry auth directory differs") from error
+
+    config_path = config_directory / "config.json"
+    credential = bytearray(actor.encode("ascii"))
+    credential.extend(b":")
+    credential.extend(token)
+    encoded_auth = bytearray(base64.b64encode(credential))
+    payload = bytearray(b'{"auths":{"ghcr.io":{"auth":"')
+    payload.extend(encoded_auth)
+    payload.extend(b'"}}}')
+    descriptor: int | None = None
+    opened: os.stat_result | None = None
+    payload_view: memoryview | None = None
+    try:
+        descriptor = os.open(
+            config_path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.fchmod(descriptor, 0o600)
+        offset = 0
+        payload_view = memoryview(payload)
+        while offset < len(payload):
+            write_view = payload_view[offset:]
+            try:
+                written = os.write(descriptor, write_view)
+            finally:
+                write_view.release()
+            if written <= 0:
+                raise OSError("private registry auth write made no progress")
+            offset += written
+        os.fsync(descriptor)
+        opened = os.fstat(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        actual = _require_private_file(config_path, 0o600)
+        if (
+            opened is None
+            or (opened.st_dev, opened.st_ino) != (actual.st_dev, actual.st_ino)
+            or actual.st_size != len(payload)
+            or config_path.parent != config_directory
+        ):
+            raise DeploymentError("private registry auth file differs")
+        host_state._fsync_directory(config_directory)
+        return config_path
+    except (OSError, DeploymentError) as error:
+        raise DeploymentError("private registry auth materialization failed") from error
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        try:
+            if payload_view is not None:
+                payload_view.release()
+        finally:
+            for sensitive in (credential, encoded_auth, payload):
+                for index in range(len(sensitive)):
+                    sensitive[index] = 0
+                sensitive.clear()
 
 
 def _require_private_file(path: Path, mode: int) -> os.stat_result:
