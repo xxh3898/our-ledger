@@ -16,6 +16,9 @@ PROJECT = "our-ledger"
 FORMAT_VERSION = 2
 PRODUCTION_APP_ROOT = Path("/Users/homeserver/Server/apps/our-ledger")
 MAX_RELEASE_FILE_SIZE = 2 * 1024 * 1024
+MAX_RUNTIME_MANIFEST_SIZE = 64 * 1024
+MAX_RUNTIME_MANIFEST_FILES = 256
+RUNTIME_MANIFEST = "runtime-manifest.json"
 FORBIDDEN_RELEASE_MARKERS = (
     b"-----BEGIN " + b"PRIVATE KEY-----",
     b"-----BEGIN " + b"RSA PRIVATE KEY-----",
@@ -28,14 +31,13 @@ DIGEST_PATTERN = re.compile(r"^sha256:([0-9a-f]{64})$")
 ZERO_DIGEST = "sha256:" + ("0" * 64)
 STAGE_PATTERN = re.compile(r"^\.stage-([0-9a-f]{32})$")
 
-RELEASE_FILES: Mapping[str, int] = {
+LEGACY_RELEASE_FILES: Mapping[str, int] = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
     "scripts/backup-production.sh": 0o700,
     "scripts/bootstrap-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
-    "scripts/backup_tools/offsite_backup.py": 0o600,
     "scripts/deploy-production.sh": 0o700,
     "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/fresh_bootstrap_state.py": 0o600,
@@ -45,7 +47,6 @@ RELEASE_FILES: Mapping[str, int] = {
     "scripts/host_tools/production_fresh_bootstrap.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
-    "scripts/offsite-backup-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
@@ -53,12 +54,19 @@ RELEASE_FILES: Mapping[str, int] = {
     "scripts/status_tools/production_status.py": 0o600,
 }
 
-RELEASE_DIRECTORIES = frozenset(
+LEGACY_RELEASE_DIRECTORIES = frozenset(
     str(parent)
-    for relative in RELEASE_FILES
+    for relative in LEGACY_RELEASE_FILES
     for parent in PurePosixPath(relative).parents
     if str(parent) != "."
 )
+
+# Compatibility names remain available to the existing V1-only callers and tests.
+RELEASE_FILES = LEGACY_RELEASE_FILES
+RELEASE_DIRECTORIES = LEGACY_RELEASE_DIRECTORIES
+
+MANIFEST_KEYS = frozenset({"formatVersion", "project", "files"})
+MANIFEST_FILE_KEYS = frozenset({"path", "mode"})
 
 STATE_KEYS = frozenset({"formatVersion", "project", "current", "previous"})
 PENDING_KEYS = frozenset(
@@ -109,6 +117,27 @@ class ContractError(RuntimeError):
 
 class LockBusyError(ContractError):
     pass
+
+
+@dataclass(frozen=True)
+class RuntimeReleaseProfile:
+    format_version: int
+    files: tuple[tuple[str, int], ...]
+    manifest_bytes: bytes | None = None
+
+    @property
+    def file_modes(self) -> dict[str, int]:
+        return dict(self.files)
+
+    @property
+    def all_file_modes(self) -> dict[str, int]:
+        if self.format_version == 1:
+            return self.file_modes
+        return {RUNTIME_MANIFEST: 0o600, **self.file_modes}
+
+    @property
+    def directories(self) -> frozenset[str]:
+        return _directories_for(self.all_file_modes)
 
 
 @dataclass(frozen=True)
@@ -239,6 +268,59 @@ class ReleaseIdentity:
         )
 
 
+def legacy_release_profile() -> RuntimeReleaseProfile:
+    return RuntimeReleaseProfile(
+        format_version=1,
+        files=tuple(LEGACY_RELEASE_FILES.items()),
+    )
+
+
+def parse_runtime_manifest(payload: bytes) -> RuntimeReleaseProfile:
+    if not isinstance(payload, bytes) or not payload or len(payload) > MAX_RUNTIME_MANIFEST_SIZE:
+        raise ContractError("runtime config manifest size is invalid")
+    if any(marker in payload for marker in FORBIDDEN_RELEASE_MARKERS):
+        raise ContractError("runtime config contains private key material")
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ContractError("runtime config manifest is invalid") from error
+    if not isinstance(value, dict) or set(value) != MANIFEST_KEYS:
+        raise ContractError("runtime config manifest schema is invalid")
+    if type(value["formatVersion"]) is not int or value["formatVersion"] != 2:
+        raise ContractError("runtime config manifest version is invalid")
+    if value["project"] != PROJECT:
+        raise ContractError("runtime config manifest project is invalid")
+    file_values = value["files"]
+    if (
+        not isinstance(file_values, list)
+        or not file_values
+        or len(file_values) > MAX_RUNTIME_MANIFEST_FILES
+    ):
+        raise ContractError("runtime config manifest files are invalid")
+
+    files: list[tuple[str, int]] = []
+    for file_value in file_values:
+        if not isinstance(file_value, dict) or set(file_value) != MANIFEST_FILE_KEYS:
+            raise ContractError("runtime config manifest file schema is invalid")
+        relative = _require_manifest_path(file_value["path"])
+        mode_value = file_value["mode"]
+        if not isinstance(mode_value, str) or mode_value not in {"0600", "0700"}:
+            raise ContractError("runtime config manifest file mode is invalid")
+        files.append((relative, int(mode_value, 8)))
+
+    paths = [relative for relative, _ in files]
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise ContractError("runtime config manifest paths are not sorted and unique")
+    return RuntimeReleaseProfile(
+        format_version=2,
+        files=tuple(files),
+        manifest_bytes=payload,
+    )
+
+
 def production_paths() -> HostPaths:
     return HostPaths(PRODUCTION_APP_ROOT)
 
@@ -338,11 +420,12 @@ def stage_release(
     if _abandoned_stages(paths):
         raise ContractError("runtime config staging recovery is required")
     source_root = _require_release_root(source_root)
+    source_profile = _validate_release(source_root)
     if source_root.is_relative_to(paths.app_root) or paths.app_root.is_relative_to(
         source_root
     ):
         raise ContractError("runtime config source and host root must be disjoint")
-    source_content = release_content_sha256(source_root)
+    source_content = _release_content_sha256(source_root, source_profile)
     identity = ReleaseIdentity(
         application_revision=application_revision,
         runtime_config_digest=runtime_config_digest,
@@ -360,17 +443,35 @@ def stage_release(
     stage = paths.releases / f".stage-{uuid.uuid4().hex}"
     try:
         os.mkdir(stage, 0o700)
-        for relative in sorted(RELEASE_DIRECTORIES, key=lambda item: item.count("/")):
+        if source_profile.format_version == 2:
+            _copy_regular_file(
+                source_root / RUNTIME_MANIFEST,
+                stage / RUNTIME_MANIFEST,
+                0o600,
+            )
+        for relative in sorted(
+            source_profile.directories,
+            key=lambda item: item.count("/"),
+        ):
             os.mkdir(stage / relative, 0o700)
-        for relative, mode in RELEASE_FILES.items():
+        for relative, mode in source_profile.files:
             _copy_regular_file(source_root / relative, stage / relative, mode)
-        _fsync_release_directories(stage)
-        _validate_release(stage)
+        _fsync_release_directories(stage, source_profile.directories)
+        staged_profile = _validate_release(stage)
+        final_source_profile = _validate_release(source_root)
+        if (
+            staged_profile != source_profile
+            or final_source_profile != source_profile
+            or _release_content_sha256(stage, staged_profile) != source_content
+            or _release_content_sha256(source_root, final_source_profile)
+            != source_content
+        ):
+            raise ContractError("runtime config source changed during staging")
         os.rename(stage, destination)
         _fsync_directory(paths.releases)
     except BaseException:
         if os.path.lexists(stage):
-            _remove_owned_stage(stage)
+            _remove_owned_stage(stage, source_profile)
             _fsync_directory(paths.releases)
         raise
 
@@ -379,9 +480,24 @@ def stage_release(
 
 
 def release_content_sha256(release_root: Path) -> str:
-    _validate_release(release_root)
+    profile = _validate_release(release_root)
+    return _release_content_sha256(release_root, profile)
+
+
+def _release_content_sha256(
+    release_root: Path,
+    profile: RuntimeReleaseProfile,
+) -> str:
     digest = hashlib.sha256()
-    for relative, mode in RELEASE_FILES.items():
+    if profile.format_version == 2:
+        assert profile.manifest_bytes is not None
+        digest.update(b"our-ledger-runtime-config\0manifest-v2\0")
+        digest.update(RUNTIME_MANIFEST.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(b"0600\0")
+        digest.update(profile.manifest_bytes)
+        digest.update(b"\0")
+    for relative, mode in profile.files:
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update(f"{mode:04o}".encode("ascii"))
@@ -690,10 +806,20 @@ def _validate_layout_entries(paths: HostPaths) -> None:
         _require_directory_empty(paths.lock)
 
 
-def _validate_release(root: Path) -> None:
+def _validate_release(root: Path) -> RuntimeReleaseProfile:
+    if os.path.lexists(root / RUNTIME_MANIFEST):
+        profile = parse_runtime_manifest(_read_runtime_manifest(root / RUNTIME_MANIFEST))
+    else:
+        profile = legacy_release_profile()
+    _validate_release_profile(root, profile)
+    return profile
+
+
+def _validate_release_profile(root: Path, profile: RuntimeReleaseProfile) -> None:
     _require_directory(root, 0o700)
     actual_directories: set[str] = set()
     actual_files: set[str] = set()
+    expected_files = profile.all_file_modes
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
         current_path = Path(current)
         relative_current = current_path.relative_to(root)
@@ -708,15 +834,34 @@ def _validate_release(root: Path) -> None:
         for name in files:
             candidate = current_path / name
             relative = candidate.relative_to(root).as_posix()
-            expected_mode = RELEASE_FILES.get(relative)
+            expected_mode = expected_files.get(relative)
             if expected_mode is None:
                 raise ContractError("runtime config release contains an unexpected file")
             candidate_stat = _require_regular_file(candidate, expected_mode)
-            if candidate_stat.st_size > MAX_RELEASE_FILE_SIZE:
+            size_limit = (
+                MAX_RUNTIME_MANIFEST_SIZE
+                if relative == RUNTIME_MANIFEST
+                else MAX_RELEASE_FILE_SIZE
+            )
+            if candidate_stat.st_size > size_limit:
                 raise ContractError("runtime config file is too large")
             actual_files.add(relative)
-    if actual_directories != RELEASE_DIRECTORIES or actual_files != set(RELEASE_FILES):
+    if actual_directories != profile.directories or actual_files != set(expected_files):
         raise ContractError("runtime config release allowlist differs")
+
+
+def _read_runtime_manifest(path: Path) -> bytes:
+    path_stat = _require_regular_file(path, 0o600)
+    if path_stat.st_size <= 0 or path_stat.st_size > MAX_RUNTIME_MANIFEST_SIZE:
+        raise ContractError("runtime config manifest size is invalid")
+    try:
+        with _open_regular_nofollow(path, 0o600) as source:
+            payload = source.read(MAX_RUNTIME_MANIFEST_SIZE + 1)
+    except OSError as error:
+        raise ContractError("runtime config manifest is unavailable") from error
+    if len(payload) != path_stat.st_size:
+        raise ContractError("runtime config manifest changed during read")
+    return payload
 
 
 def _require_release_root(root: Path) -> Path:
@@ -1036,10 +1181,13 @@ def _abandoned_stages(paths: HostPaths) -> list[str]:
     return sorted(stages)
 
 
-def _remove_owned_stage(stage: Path) -> None:
+def _remove_owned_stage(
+    stage: Path,
+    profile: RuntimeReleaseProfile | None = None,
+) -> None:
     if not STAGE_PATTERN.fullmatch(stage.name):
         raise ContractError("runtime config stage path is invalid")
-    _validate_partial_stage(stage)
+    _validate_partial_stage(stage, profile)
     for current, directories, files in os.walk(stage, topdown=False, followlinks=False):
         current_path = Path(current)
         for name in files:
@@ -1049,8 +1197,26 @@ def _remove_owned_stage(stage: Path) -> None:
     os.rmdir(stage)
 
 
-def _validate_partial_stage(root: Path) -> None:
+def _validate_partial_stage(
+    root: Path,
+    profile: RuntimeReleaseProfile | None = None,
+) -> None:
     _require_directory(root, 0o700)
+    if profile is None:
+        if os.path.lexists(root / RUNTIME_MANIFEST):
+            try:
+                profile = parse_runtime_manifest(
+                    _read_runtime_manifest(root / RUNTIME_MANIFEST)
+                )
+            except ContractError:
+                profile = RuntimeReleaseProfile(
+                    format_version=2,
+                    files=(),
+                    manifest_bytes=b"",
+                )
+        else:
+            profile = legacy_release_profile()
+    expected_files = profile.all_file_modes
     actual_directories: set[str] = set()
     actual_files: set[str] = set()
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
@@ -1067,21 +1233,33 @@ def _validate_partial_stage(root: Path) -> None:
         for name in files:
             candidate = current_path / name
             relative = candidate.relative_to(root).as_posix()
-            expected_mode = RELEASE_FILES.get(relative)
+            expected_mode = expected_files.get(relative)
             if expected_mode is None:
                 raise ContractError("runtime config stage contains an unexpected file")
             candidate_stat = _require_regular_file(candidate, expected_mode)
-            if candidate_stat.st_size > MAX_RELEASE_FILE_SIZE:
+            size_limit = (
+                MAX_RUNTIME_MANIFEST_SIZE
+                if relative == RUNTIME_MANIFEST
+                else MAX_RELEASE_FILE_SIZE
+            )
+            if candidate_stat.st_size > size_limit:
                 raise ContractError("runtime config stage file is too large")
             actual_files.add(relative)
-    if not actual_directories.issubset(RELEASE_DIRECTORIES):
+    if not actual_directories.issubset(profile.directories):
         raise ContractError("runtime config stage directory allowlist differs")
-    if not actual_files.issubset(RELEASE_FILES):
+    if not actual_files.issubset(expected_files):
         raise ContractError("runtime config stage file allowlist differs")
 
 
-def _fsync_release_directories(root: Path) -> None:
-    for relative in sorted(RELEASE_DIRECTORIES, key=lambda item: item.count("/"), reverse=True):
+def _fsync_release_directories(
+    root: Path,
+    directories: frozenset[str],
+) -> None:
+    for relative in sorted(
+        directories,
+        key=lambda item: item.count("/"),
+        reverse=True,
+    ):
         _fsync_directory(root / relative)
     _fsync_directory(root)
 
@@ -1167,6 +1345,39 @@ def _require_allowed_entries(directory: Path, allowed: set[str]) -> None:
     unexpected = actual - allowed
     if unexpected:
         raise ContractError("managed host directory contains an unexpected entry")
+
+
+def _directories_for(files: Mapping[str, int]) -> frozenset[str]:
+    return frozenset(
+        str(parent)
+        for relative in files
+        for parent in PurePosixPath(relative).parents
+        if str(parent) != "."
+    )
+
+
+def _require_manifest_path(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or "\\" in value
+        or value == RUNTIME_MANIFEST
+    ):
+        raise ContractError("runtime config manifest path is invalid")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or not (
+            value == "compose.yaml"
+            or value.startswith("infra/")
+            or value.startswith("scripts/")
+        )
+    ):
+        raise ContractError("runtime config manifest path is invalid")
+    return value
 
 
 def _require_revision(value: str) -> str:

@@ -154,7 +154,7 @@ related:
 - 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
 - actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
 - local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
-- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`과 encrypted `offsite-backup`을 포함한 현재 13개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`, encrypted `offsite-backup`과 `runtime-config-evolution`을 포함한 현재 14개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
 
 ### Slice 10D-3A2 Fresh-host Bootstrap Transaction Source Gate
 
@@ -167,7 +167,7 @@ related:
 - first verified backup 이후에만 one-time input을 unlink하고 parent fsync하며, `INPUT_CONSUMED` 이후에는 input 없이 exact authority를 재검증해 commit할 수 있다.
 - 최종 state는 existing B2 formatVersion 2, previous null과 exact candidate current를 사용한다. 성공 후 fresh ingress rerun은 nonzero이고 data/schema/backup authority가 바뀌지 않는다.
 - local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
-- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`과 encrypted `offsite-backup`을 포함한 13개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`, encrypted `offsite-backup`과 `runtime-config-evolution`을 포함한 14개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
 ### Slice 10D-3B0 Exact-SHA GHCR Publish-only Source Gate
 
@@ -192,14 +192,25 @@ related:
 - read-only status는 final/marker를 쓰지 않고 검증하여 `MISSING|INVALID|FRESH|STALE`, age와 8시간 grace만 privacy-safe JSON으로 노출한다. HomeOps unsupported signal을 만들거나 다른 type으로 위장하지 않는다.
 - LaunchAgent example은 backup windows 뒤 `00:50/06:50/12:50/18:50`, fixed external bootstrap, no `KeepAlive`/private identity environment만 고정한다. actual install/load/start는 OUT이다.
 - `verify-offsite-backup.sh`는 pinned age v1.3.1 actual encrypt/decrypt round-trip, decrypted exact bundle hash, no plaintext staging, idempotency/freshness/failure/privacy/residue를 disposable path에서 검증한다. Hosted Full CI 독립 `offsite-backup` job은 actual production/iCloud/recipient/LaunchAgent/DB/Compose를 사용하지 않는다.
-- runtime-config Dockerfile, host release allowlist, change detector와 export mode gate에 wrapper `0700`, worker `0600`만 추가하며 config, marker, identity, ciphertext는 artifact에 포함하지 않는다.
+- offsite wrapper/worker source와 독립 gate는 repository에 유지한다. 다만 10D-3B3C bridge Docker artifact는 old production worker 호환을 위해 두 파일을 일시 제외하며 config, marker, identity, ciphertext도 계속 포함하지 않는다. 후속 Manifested V2 artifact Gate에서만 다시 운반한다.
+
+### Slice 10D-3B3C Runtime-config Evolution Bridge Source Gate
+
+- production `9dd350b...` worker가 accept하는 manifest 없는 Legacy V1 exact 20-file/mode/directory profile과 기존 path→mode→content hash byte stream을 동결한다.
+- bridge `runtime-config.Dockerfile`은 Legacy V1 shape라서 offsite 두 file과 `runtime-manifest.json`을 포함하지 않으며 actual linux/arm64 build/export를 independent frozen old-worker profile로 검증한다.
+- bridge `host_state.py`는 manifest 부재를 V1으로, `runtime-manifest.json` 존재를 strict V2로 분류한다. V2는 exact top-level/entry keys, integer version 2, project, bounded non-empty sorted unique canonical POSIX paths, `0600|0700`과 exact implied directory/file set만 허용한다.
+- V2 content hash는 domain marker, exact manifest bytes, payload path/mode/content를 포함하고 V1 hash namespace와 분리한다. `ReleaseIdentity`와 current/state/pending formatVersion 2 JSON schema는 변경하지 않는다.
+- candidate archive는 exact digest/OCI linux/arm64 검증 뒤 runtime subtree를 read-only 분류하고 traversal, duplicate, symlink/hardlink/device/FIFO/socket, missing/extra/mode/size/private-key material을 추출 전에 거부한다. `extractall`을 사용하지 않고 extracted tree를 host validator로 다시 검증한다.
+- stage는 source profile의 owner-only tree만 복사·fsync하고 copy 전후 source/profile/hash 및 staged hash가 같을 때만 immutable release를 publish한다. failure는 기존 release/current/state를 보존하고 invocation-owned stage만 제거한다.
+- `verify-runtime-config-evolution.sh`는 frozen V1 acceptance/hash/state, V1→synthetic V2 archive/extract/stage/current transition, failure matrix와 actual bridge image residue 0을 검증한다. production/GHCR/Cloudflare/iCloud/LaunchAgent/Secret/DB를 사용하지 않는다.
+- `558f92e...` full offsite runtime artifact의 direct production update는 HOLD다. bridge Release/publish와 old V1→bridge V1 host update, 후속 V2 artifact 활성화는 각각 별도 Gate다.
 
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
 - production worker의 app root는 `/Users/homeserver/Server/apps/our-ledger`로 고정하고 production CLI/environment에 `--root`, `--app-dir`, state/Compose path override 또는 public lock bypass를 노출하지 않는다.
 - `operations/lock`은 current owner mode `0700` atomic directory 하나이며 첫 holder만 성공하고 두 번째 holder, stale directory, symlink, unexpected lock entry는 즉시 fail closed한다. PID 기반 stale cleanup과 lock stealing은 없다.
 - public standalone backup wrapper와 B2 deploy transaction이 같은 project lock authority를 사용하고, lock을 가진 deploy가 non-executable internal backup core를 직접 호출할 수 있어 nested self-deadlock이 없다.
-- runtime-config release path는 exact `sha256:<64 lowercase hex>`에서만 `releases/<digesthex>`로 파생하고 exact regular-file/directory allowlist, `0600`/`0700`, current owner와 hardlink/symlink/nonregular/unexpected entry 금지를 검증한다.
+- runtime-config release path는 exact `sha256:<64 lowercase hex>`에서만 `releases/<digesthex>`로 파생하고 frozen Legacy V1 또는 strict Manifested V2 profile의 exact regular-file/directory allowlist, `0600`/`0700`, current owner와 hardlink/symlink/nonregular/unexpected entry 금지를 검증한다.
 - 같은 digest와 같은 content는 reuse하고 같은 digest의 다른 content는 overwrite하지 않는다. source path가 release destination을 정하거나 immutable release를 교체할 수 없다.
 - `current`는 verified release를 향하는 relative symlink만 허용하고 temp symlink→atomic replace→directory fsync로 갱신한다. absolute/external/dangling/corrupt target은 fail closed한다.
 - `state/deployment.json`과 `pending/transaction.json`은 B2 phase/schema evidence를 포함한 formatVersion 2 exact schema, mode `0600`, secret/PII 부재, temp write→file fsync→atomic replace→directory fsync를 지킨다. production activation 전 source이므로 formatVersion 1 compatibility shim이나 migration은 제공하지 않고 구버전을 fail closed한다.
