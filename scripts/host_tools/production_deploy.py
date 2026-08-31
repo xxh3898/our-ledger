@@ -901,15 +901,26 @@ def _replace_env_images(path: Path, api_reference: str, web_reference: str) -> N
 
 
 def _extract_verified_runtime(archive: Path, destination: Path) -> None:
-    destination.mkdir(mode=0o700)
     members: dict[str, tarfile.TarInfo] = {}
     directories: set[str] = set()
+    runtime_root_seen = False
     with tarfile.open(archive, "r") as bundle:
         for member in bundle.getmembers():
             path = PurePosixPath(member.name)
-            if path.is_absolute() or ".." in path.parts or not path.parts:
+            normalized_name = member.name[:-1] if member.name.endswith("/") else member.name
+            if (
+                path.is_absolute()
+                or ".." in path.parts
+                or not path.parts
+                or normalized_name != path.as_posix()
+            ):
                 raise DeploymentError("runtime config archive path is unsafe")
-            if path.parts[0] != "runtime" or len(path.parts) == 1:
+            if path.parts[0] != "runtime":
+                continue
+            if len(path.parts) == 1:
+                if runtime_root_seen or not member.isdir():
+                    raise DeploymentError("runtime config archive root is invalid")
+                runtime_root_seen = True
                 continue
             relative = PurePosixPath(*path.parts[1:]).as_posix()
             if relative in members or relative in directories:
@@ -922,22 +933,62 @@ def _extract_verified_runtime(archive: Path, destination: Path) -> None:
                 members[relative] = member
             else:
                 raise DeploymentError("runtime config archive contains non-regular material")
-        if directories != host_state.RELEASE_DIRECTORIES or set(members) != set(
-            host_state.RELEASE_FILES
-        ):
+        if not runtime_root_seen:
+            raise DeploymentError("runtime config archive root is missing")
+
+        manifest_member = members.get(host_state.RUNTIME_MANIFEST)
+        if manifest_member is None:
+            profile = host_state.legacy_release_profile()
+        else:
+            if (
+                stat.S_IMODE(manifest_member.mode) != 0o600
+                or manifest_member.size <= 0
+                or manifest_member.size > host_state.MAX_RUNTIME_MANIFEST_SIZE
+            ):
+                raise DeploymentError("runtime config manifest metadata differs")
+            manifest_source = bundle.extractfile(manifest_member)
+            if manifest_source is None:
+                raise DeploymentError("runtime config manifest is unavailable")
+            with manifest_source:
+                manifest_payload = manifest_source.read(
+                    host_state.MAX_RUNTIME_MANIFEST_SIZE + 1
+                )
+            if len(manifest_payload) != manifest_member.size:
+                raise DeploymentError("runtime config manifest content differs")
+            try:
+                profile = host_state.parse_runtime_manifest(manifest_payload)
+            except host_state.ContractError as error:
+                raise DeploymentError("runtime config manifest is invalid") from error
+
+        expected_files = profile.all_file_modes
+        if directories != profile.directories or set(members) != set(expected_files):
             raise DeploymentError("runtime config archive allowlist differs")
-        for relative in sorted(directories, key=lambda item: item.count("/")):
-            (destination / relative).mkdir(mode=0o700)
-        for relative, expected_mode in host_state.RELEASE_FILES.items():
-            member = members[relative]
-            if stat.S_IMODE(member.mode) != expected_mode:
+        for relative, expected_mode in expected_files.items():
+            if stat.S_IMODE(members[relative].mode) != expected_mode:
                 raise DeploymentError("runtime config archive mode differs")
+
+        try:
+            destination.mkdir(mode=0o700)
+            destination.chmod(0o700)
+        except OSError as error:
+            raise DeploymentError("runtime config extraction root is unavailable") from error
+        for relative in sorted(directories, key=lambda item: item.count("/")):
+            target_directory = destination / relative
+            target_directory.mkdir(mode=0o700)
+            target_directory.chmod(0o700)
+        for relative, expected_mode in expected_files.items():
+            member = members[relative]
             source = bundle.extractfile(member)
             if source is None:
                 raise DeploymentError("runtime config archive content is unavailable")
             target = destination / relative
             with source, target.open("xb") as output:
-                shutil.copyfileobj(source, output)
+                copied = 0
+                while chunk := source.read(1024 * 1024):
+                    output.write(chunk)
+                    copied += len(chunk)
+            if copied != member.size:
+                raise DeploymentError("runtime config archive content differs")
             target.chmod(expected_mode)
     host_state.release_content_sha256(destination)
 
