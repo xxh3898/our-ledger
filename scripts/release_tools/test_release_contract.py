@@ -41,6 +41,10 @@ RUNTIME_FILES = {
         "0600",
         "/runtime/scripts/backup_tools/backup_core.sh",
     ),
+    "scripts/backup_tools/offsite_backup.py": (
+        "0600",
+        "/runtime/scripts/backup_tools/offsite_backup.py",
+    ),
     "scripts/deploy-production.sh": (
         "0700",
         "/runtime/scripts/deploy-production.sh",
@@ -74,6 +78,10 @@ RUNTIME_FILES = {
         "/runtime/scripts/host_tools/production_host.py",
     ),
     "scripts/monitor-production.sh": ("0700", "/runtime/scripts/monitor-production.sh"),
+    "scripts/offsite-backup-production.sh": (
+        "0700",
+        "/runtime/scripts/offsite-backup-production.sh",
+    ),
     "scripts/production-status.sh": ("0700", "/runtime/scripts/production-status.sh"),
     "scripts/release_tools/release_contract.py": (
         "0700",
@@ -583,6 +591,8 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertNotIn("      - main\n", push_block)
         self.assertIn("  release-transport:\n", workflow)
         self.assertIn("run: ./scripts/verify-release-transport.sh", workflow)
+        self.assertIn("  offsite-backup:\n", workflow)
+        self.assertIn("run: ./scripts/verify-offsite-backup.sh", workflow)
 
     def test_deploy_workflow_is_inert_by_default_and_serialized(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")

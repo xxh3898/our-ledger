@@ -99,6 +99,16 @@ jobs:
       - name: Backup/Restore 검증
         run: ./scripts/verify-backup-restore.sh
 
+  offsite-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Encrypted offsite backup source 검증
+        run: ./scripts/verify-offsite-backup.sh
+
   observability:
     runs-on: ubuntu-latest
     timeout-minutes: 45

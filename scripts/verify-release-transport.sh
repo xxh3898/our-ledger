@@ -147,6 +147,7 @@ expected_files = {
     "scripts/bootstrap-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/backup_tools/offsite_backup.py": 0o600,
     "scripts/deploy-production.sh": 0o700,
     "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/fresh_bootstrap_state.py": 0o600,
@@ -156,6 +157,7 @@ expected_files = {
     "scripts/host_tools/production_fresh_bootstrap.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
+    "scripts/offsite-backup-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
@@ -226,6 +228,7 @@ bash -n \
   "$runtime_dir/scripts/backup_tools/backup_core.sh" \
   "$runtime_dir/scripts/deploy-production.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
+  "$runtime_dir/scripts/offsite-backup-production.sh" \
   "$runtime_dir/scripts/production-status.sh"
 (
   cd "$runtime_dir"
@@ -234,6 +237,7 @@ bash -n \
   SSH_ORIGINAL_COMMAND=invalid python3 -B -m scripts.host_tools.production_fresh_bootstrap </dev/null >/dev/null 2>&1 || true
   python3 -B -m scripts.status_tools.production_status --help >/dev/null
   python3 -B -m scripts.status_tools.monitor_worker --help >/dev/null
+  python3 -B -m scripts.backup_tools.offsite_backup --help >/dev/null
 )
 
 docker compose \
