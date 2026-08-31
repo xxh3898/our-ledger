@@ -49,6 +49,39 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
             LEGACY_REFERENCE_SHA256,
         )
 
+    def test_repository_manifest_exact_bytes_match_v2_profile(self) -> None:
+        manifest_path = ROOT / host_state.RUNTIME_MANIFEST
+        manifest_value = {
+            "formatVersion": 2,
+            "project": "our-ledger",
+            "files": [
+                {"path": relative, "mode": f"{mode:04o}"}
+                for relative, mode in sorted(V2_FILES.items())
+            ],
+        }
+        expected_bytes = (
+            json.dumps(manifest_value, ensure_ascii=True, indent=2).encode("utf-8")
+            + b"\n"
+        )
+
+        self.assertEqual(manifest_path.read_bytes(), expected_bytes)
+        profile = host_state.parse_runtime_manifest(expected_bytes)
+        self.assertEqual(profile.format_version, 2)
+        self.assertEqual(profile.file_modes, V2_FILES)
+        self.assertEqual(len(profile.file_modes), 22)
+        self.assertEqual(
+            profile.directories,
+            {
+                "infra",
+                "infra/nginx",
+                "scripts",
+                "scripts/backup_tools",
+                "scripts/host_tools",
+                "scripts/release_tools",
+                "scripts/status_tools",
+            },
+        )
+
     def test_legacy_state_and_inspect_remain_byte_compatible_and_read_only(self) -> None:
         source = self._legacy_release("legacy-state")
         with host_state.OperationLock(self.paths) as lock:
@@ -205,14 +238,18 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
                     any(path.name.startswith(".stage-") for path in self.paths.releases.iterdir())
                 )
 
-    def test_source_change_during_stage_fails_and_cleans_only_owned_stage(self) -> None:
+    def test_post_extract_v2_tamper_during_stage_fails_and_cleans_owned_stage(self) -> None:
         committed_source = self._legacy_release("stable")
         with host_state.OperationLock(self.paths) as lock:
             committed = self._stage(lock, committed_source, DIGEST_ONE, REVISION_ONE)
             host_state.begin_pending(self.paths, lock, committed)
             host_state.commit_pending(self.paths, lock)
         before = self._tree_fingerprint(self.paths.runtime_root)
-        candidate = self._legacy_release("changing")
+        candidate_source = self._v2_release("changing-source")
+        archive = self.temp / "changing-v2.tar"
+        self._write_archive(candidate_source, archive)
+        candidate = self.temp / "changing-extracted"
+        production_deploy._extract_verified_runtime(archive, candidate)
         original_copy = host_state._copy_regular_file
         changed = False
 
@@ -257,6 +294,7 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
     def test_archive_failure_matrix_rejects_without_extraction(self) -> None:
         source = self._v2_release("archive")
         cases: dict[str, dict[str, object]] = {
+            "missing-manifest": {"omit": {host_state.RUNTIME_MANIFEST}},
             "missing-payload": {"omit": {"compose.yaml"}},
             "extra-payload": {"extra_file": "scripts/extra.py"},
             "mode-mismatch": {"mode_override": {"compose.yaml": 0o700}},
@@ -267,9 +305,21 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
             "device": {"type_override": {"compose.yaml": tarfile.CHRTYPE}},
             "fifo": {"type_override": {"compose.yaml": tarfile.FIFOTYPE}},
             "socket": {"type_override": {"compose.yaml": b"s"}},
+            "manifest-symlink": {
+                "type_override": {host_state.RUNTIME_MANIFEST: tarfile.SYMTYPE}
+            },
+            "manifest-fifo": {
+                "type_override": {host_state.RUNTIME_MANIFEST: tarfile.FIFOTYPE}
+            },
             "oversize-file": {
                 "size_override": {
                     "compose.yaml": host_state.MAX_RELEASE_FILE_SIZE + 1
+                }
+            },
+            "oversize-manifest": {
+                "size_override": {
+                    host_state.RUNTIME_MANIFEST: host_state.MAX_RUNTIME_MANIFEST_SIZE
+                    + 1
                 }
             },
             "invalid-manifest": {

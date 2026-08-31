@@ -51,6 +51,7 @@ if git diff --quiet \
   compose.prod.yaml \
   infra/nginx/nginx.conf \
   runtime-config.Dockerfile \
+  runtime-manifest.json \
   scripts/backup-production.sh \
   scripts/bootstrap-production.sh \
   scripts/backup_tools/backup_artifact.py \

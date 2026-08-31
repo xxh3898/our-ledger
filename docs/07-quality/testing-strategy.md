@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.8
-last_updated: 2026-08-30
+version: 1.9
+last_updated: 2026-09-01
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -261,21 +261,22 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
 - publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
 - GHCR token stdin-only restricted SSH boundary, helper-free private `config.json`의 exact JSON/owner/mode/nlink/fsync/lifetime과 token/base64 auth의 command argument·environment·report·exception 비포함
-- `scratch` runtime-config artifact의 source별 single COPY, exact regular-file allowlist와 `0600`/`0700` mode, expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
+- `scratch` runtime-config artifact의 manifest+22 payload source별 single COPY, exact 23 regular-file allowlist와 `0600`/`0700` mode, 7개 expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
-`scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 Legacy V1 bridge runtime-config source만 build/extract한다. 합성 `.env.production.example`로 Compose render와 bridge에 포함된 공개 script help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.
+`scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 Manifested Runtime V2 source를 build/create/export하고 bridge extractor와 host validator로 exact manifest/payload를 확인한다. 합성 `.env.production.example`로 Compose render와 공개 local/offsite script syntax/Python help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.
 
-Runtime-config Evolution Bridge Harness는 다음을 추가로 검증한다.
+Runtime-config Evolution / Manifested V2 Harness는 다음을 추가로 검증한다.
 
 - production `9dd350b...`의 manifest 없는 20-file Legacy V1 profile과 independent old reference content hash
-- candidate branch의 actual `runtime-config.Dockerfile` linux/arm64 build/export 결과가 manifest/offsite file 없이 frozen old-worker file/mode/directory set과 일치함
+- repository `runtime-manifest.json` exact bytes/schema와 sorted 22 payload, Dockerfile single COPY와 detector source allowlist 동기화
+- candidate branch의 actual `runtime-config.Dockerfile` linux/arm64 build/export 결과가 manifest+22 payload/7 directory와 OCI source/revision/version identity에 일치함
 - 기존 V1 release/current/state parse와 read-only inspect, V1/V2 release 공존, V1→V2 archive classify/safe extract/stage/pending/current transition
 - V2 exact manifest bytes를 포함한 domain-separated hash와 strict duplicate key/path, sorted path, namespace, mode, file count/size schema
 - missing/extra/mixed payload, unsafe path, symlink/hardlink/device/FIFO/socket, mode/size/private-key marker, source-copy race의 fail-closed 및 prior state/stage residue 보존
 - 고유 cleanup label의 disposable image/container/temp cleanup과 production/GHCR/Cloudflare/iCloud/LaunchAgent/Secret/DB 접근 0
 
-`scripts/verify-runtime-config-evolution.sh`는 Python failure matrix 뒤 Docker `--platform linux/arm64 --network none`으로 actual bridge image를 build/create/export하고 independent frozen Legacy V1 profile로 검증한다. local `verify.sh`와 Hosted Full CI의 독립 `runtime-config-evolution` job에서 실행한다.
+`scripts/verify-runtime-config-evolution.sh`는 Python failure matrix 뒤 Docker `--platform linux/arm64 --network none`으로 actual Manifested V2 image를 build/create/export한다. bridge extractor로 archive를 preflight·member별 추출하고 host validator로 re-read한 뒤 temp host에 stage/current commit하여 exact content hash를 다시 확인한다. frozen Legacy V1 profile/reference hash와 state 호환 regression은 계속 독립적으로 실행한다. local `verify.sh`와 Hosted Full CI의 독립 `runtime-config-evolution` job에서 실행한다.
 
 Host State / Shared Operation Lock Harness는 다음을 추가로 검증한다.
 

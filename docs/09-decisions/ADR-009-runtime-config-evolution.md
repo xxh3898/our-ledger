@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.1
-last_updated: 2026-08-31
+version: 0.2
+last_updated: 2026-09-01
 related:
   - 00-overview/roadmap.md
   - 07-quality/acceptance-criteria.md
@@ -31,7 +31,7 @@ runtime-config file-set 전환은 Legacy Runtime V1 bridge와 Manifested Runtime
 - production `9dd350b...` worker가 아는 20개 file, mode와 그 parent directory set을 exact profile로 동결한다.
 - unknown, missing, extra file/directory와 symlink, hardlink, 비정규 entry를 거부한다.
 - `runtimeConfigContentSha256`은 기존 path, NUL, four-digit mode, NUL, file bytes, NUL iteration byte stream을 그대로 사용한다.
-- bridge Docker artifact 자체는 이 V1 shape를 사용하며 offsite 두 파일과 manifest를 포함하지 않는다.
+- 전환 첫 단계의 bridge Docker artifact는 이 V1 shape를 사용하며 offsite 두 파일과 manifest를 포함하지 않는다.
 
 ### Manifested Runtime V2
 
@@ -55,10 +55,12 @@ runtime-config file-set 전환은 Legacy Runtime V1 bridge와 Manifested Runtime
 
 1. Legacy V1 shape이면서 dual-format worker를 포함한 bridge source를 release/publish한다.
 2. production old V1 worker로 bridge V1 artifact를 update한다.
-3. 별도 source Gate에서 V2 manifest artifact와 offsite 두 파일을 활성화한다.
+3. 별도 source Gate에서 V2 manifest artifact와 offsite 두 파일을 활성화한다. Issue #93이 이 source 단계를 완료한다.
 4. V2를 release/publish한 뒤 bridge worker로 production update한다.
 
 각 release, publish와 production update는 별도 승인 Gate다. 이번 결정 자체는 production 또는 GHCR mutation을 승인하지 않는다.
+
+Issue #93의 source 결과는 root `runtime-manifest.json` mode `0600`, manifest가 선언한 exact 22개 payload와 7개 parent directory를 `scratch` linux/arm64 artifact로 구성한다. actual build/export archive는 bridge extractor로 preflight·member별 추출하고 동일 host validator로 re-read한 뒤 immutable stage/content hash까지 합성 경로에서 검증한다. 이는 전환 3단계의 source/CI 완료일 뿐 4단계의 GHCR release/publish, Mac mini pull/stage/current 전환 또는 encrypted offsite 실행을 뜻하지 않는다.
 
 ## Consequences
 
@@ -72,7 +74,7 @@ runtime-config file-set 전환은 Legacy Runtime V1 bridge와 Manifested Runtime
 ### 비용과 위험
 
 - bridge와 최종 V2를 각각 release/publish/update해야 하므로 전환 단계가 늘어난다.
-- bridge artifact에는 offsite 실행 파일이 없어 실제 encrypted offsite activation이 후속 V2까지 지연된다.
+- V2 source artifact에는 offsite 실행 파일이 포함되지만 실제 encrypted offsite activation은 별도 V2 release/publish/host update와 운영 설정 승인까지 지연된다.
 - exact manifest bytes를 hash하므로 의미가 같은 formatting 변경도 새 content identity가 된다.
 - manifest는 artifact digest를 대체하지 않으며 registry/host transition의 각 검증을 계속 유지해야 한다.
 
@@ -92,4 +94,4 @@ artifact digest, content identity와 atomic stage 계약 밖의 mutation이 되�
 
 ## Migration / Rollback
 
-source 단계의 rollback은 bridge/dual-validator commit을 revert해 기존 fixed V1 코드로 돌아간다. bridge가 production에 설치된 뒤에는 current V1 release와 state hash가 그대로 유효하다. V2 전환 전 rollback은 verified previous V1 identity를 사용하고, V2가 current가 된 뒤의 host rollback은 candidate schema와 transaction authority를 별도 검토한다. 자동 DB restore, reverse migration, runtime directory 삭제는 이 ADR 범위가 아니다.
+source 단계의 rollback은 Manifested V2 source commit을 revert해 V1 bridge Dockerfile과 gate로 돌아간다. frozen V1 validator/reference hash와 current/state schema는 계속 유효하다. V2 release/publish 또는 host update는 이 source Gate에서 실행하지 않았으며, 이후 V2가 current가 된 뒤의 host rollback은 candidate schema와 transaction authority를 별도 검토한다. 자동 DB restore, reverse migration, runtime directory 삭제는 이 ADR 범위가 아니다.

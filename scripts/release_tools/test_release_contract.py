@@ -17,6 +17,7 @@ PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-release.yml"
 FULL_CI_WORKFLOW = ROOT / ".github" / "workflows" / "full-ci.yml"
 RUNTIME_DOCKERFILE = ROOT / "runtime-config.Dockerfile"
 VERIFY_SCRIPT = ROOT / "scripts" / "verify-release-transport.sh"
+FRESH_HOST_VERIFY_SCRIPT = ROOT / "scripts" / "verify-fresh-host-bootstrap.sh"
 REVISION = "1" * 40
 API_DIGEST = "sha256:" + ("a" * 64)
 WEB_DIGEST = "sha256:" + ("b" * 64)
@@ -25,7 +26,7 @@ OTHER_DIGEST = "sha256:" + ("d" * 64)
 CHECKOUT_SHA = "d23441a48e516b6c34aea4fa41551a30e30af803"
 VALIDATION_RUN_ID = "33300523522"
 
-RUNTIME_FILES = {
+RUNTIME_PAYLOAD_FILES = {
     "compose.prod.yaml": ("0600", "/runtime/compose.yaml"),
     "infra/nginx/nginx.conf": ("0600", "/runtime/infra/nginx/nginx.conf"),
     "scripts/backup-production.sh": ("0700", "/runtime/scripts/backup-production.sh"),
@@ -40,6 +41,10 @@ RUNTIME_FILES = {
     "scripts/backup_tools/backup_core.sh": (
         "0600",
         "/runtime/scripts/backup_tools/backup_core.sh",
+    ),
+    "scripts/backup_tools/offsite_backup.py": (
+        "0600",
+        "/runtime/scripts/backup_tools/offsite_backup.py",
     ),
     "scripts/deploy-production.sh": (
         "0700",
@@ -74,6 +79,10 @@ RUNTIME_FILES = {
         "/runtime/scripts/host_tools/production_host.py",
     ),
     "scripts/monitor-production.sh": ("0700", "/runtime/scripts/monitor-production.sh"),
+    "scripts/offsite-backup-production.sh": (
+        "0700",
+        "/runtime/scripts/offsite-backup-production.sh",
+    ),
     "scripts/production-status.sh": ("0700", "/runtime/scripts/production-status.sh"),
     "scripts/release_tools/release_contract.py": (
         "0700",
@@ -92,11 +101,29 @@ RUNTIME_FILES = {
         "/runtime/scripts/status_tools/production_status.py",
     ),
 }
-RUNTIME_ARTIFACT_SOURCES = set(RUNTIME_FILES)
-DORMANT_V2_SOURCES = {
-    "scripts/backup_tools/offsite_backup.py",
-    "scripts/offsite-backup-production.sh",
+RUNTIME_FILES = {
+    "runtime-manifest.json": ("0600", "/runtime/runtime-manifest.json"),
+    **RUNTIME_PAYLOAD_FILES,
 }
+RUNTIME_ARTIFACT_SOURCES = set(RUNTIME_FILES)
+RUNTIME_MANIFEST_VALUE = {
+    "formatVersion": 2,
+    "project": "our-ledger",
+    "files": [
+        {
+            "path": destination.removeprefix("/runtime/"),
+            "mode": mode,
+        }
+        for mode, destination in sorted(
+            RUNTIME_PAYLOAD_FILES.values(),
+            key=lambda entry: entry[1],
+        )
+    ],
+}
+RUNTIME_MANIFEST_BYTES = (
+    json.dumps(RUNTIME_MANIFEST_VALUE, ensure_ascii=True, indent=2).encode("utf-8")
+    + b"\n"
+)
 
 
 class ReleaseContractTest(unittest.TestCase):
@@ -396,6 +423,8 @@ class RuntimeConfigChangeDetectorTest(unittest.TestCase):
         self.app_only = self._commit("application")
         self._write("compose.prod.yaml", "services:\n  web: {}\n")
         self.runtime_change = self._commit("runtime")
+        self._write("runtime-manifest.json", '{"formatVersion":2}\n')
+        self.manifest_change = self._commit("manifest")
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -413,6 +442,12 @@ class RuntimeConfigChangeDetectorTest(unittest.TestCase):
         self.assertEqual(changed.stdout, "update\n")
         self.assertEqual(forced.returncode, 0, forced.stderr)
         self.assertEqual(forced.stdout, "update\n")
+
+    def test_manifest_change_updates_runtime_config(self) -> None:
+        result = self._detect(self.runtime_change, self.manifest_change, "false")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "update\n")
 
     def test_zero_baseline_is_bootstrap_update(self) -> None:
         result = self._detect(release_contract.ZERO_SHA, self.app_only, "false")
@@ -713,21 +748,31 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn('io.chochiho.runtime-config.project="our-ledger"', dockerfile)
         self.assertNotRegex(dockerfile, r"(?m)^COPY\s+(?:--\S+\s+)*\.\s")
         self.assertNotRegex(dockerfile, r"(?i)\.env|private|secret|\.pem|\.key")
-        for source in RUNTIME_ARTIFACT_SOURCES | DORMANT_V2_SOURCES:
+        for source in RUNTIME_ARTIFACT_SOURCES:
             self.assertTrue((ROOT / source).is_file(), source)
 
-    def test_detector_tracks_bridge_and_dormant_v2_sources(self) -> None:
+    def test_repository_manifest_bytes_match_exact_v2_payload(self) -> None:
+        manifest = ROOT / "runtime-manifest.json"
+
+        self.assertEqual(manifest.read_bytes(), RUNTIME_MANIFEST_BYTES)
+        self.assertEqual(json.loads(manifest.read_bytes()), RUNTIME_MANIFEST_VALUE)
+
+    def test_detector_tracks_manifested_v2_artifact_sources(self) -> None:
         detector = DETECTOR.read_text(encoding="utf-8")
         dockerfile = RUNTIME_DOCKERFILE.read_text(encoding="utf-8")
 
         for source in sorted(RUNTIME_ARTIFACT_SOURCES):
             self.assertIn(source, detector)
             self.assertIn(source, dockerfile)
-        for source in sorted(DORMANT_V2_SOURCES):
-            self.assertIn(source, detector)
-            self.assertNotIn(source, dockerfile)
-        self.assertNotIn("runtime-manifest.json", dockerfile)
         self.assertIn("runtime-config.Dockerfile", detector)
+
+    def test_fresh_host_gate_builds_context_from_manifested_v2_profile(self) -> None:
+        source = FRESH_HOST_VERIFY_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("host_state.RUNTIME_MANIFEST", source)
+        self.assertIn("host_state.parse_runtime_manifest(manifest_bytes)", source)
+        self.assertIn("for relative, mode in profile.files:", source)
+        self.assertNotIn("host_state.RELEASE_FILES.items()", source)
 
     def test_release_gate_uses_only_synthetic_local_boundaries(self) -> None:
         source = VERIFY_SCRIPT.read_text(encoding="utf-8")

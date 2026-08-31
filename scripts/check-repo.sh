@@ -28,6 +28,7 @@ required_paths=(
   ".github/ISSUE_TEMPLATE/decision.yml"
   ".github/ISSUE_TEMPLATE/feature.yml"
   ".github/workflows/deploy.yml"
+  "runtime-manifest.json"
   "runtime-config.Dockerfile"
   "scripts/detect-runtime-config-change.sh"
   "scripts/release_tools/release_contract.py"
