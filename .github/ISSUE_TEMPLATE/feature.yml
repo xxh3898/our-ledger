@@ -1,5 +1,5 @@
 name: 기능 작업
-about: 기능, 개선, 리팩터링을 한 Pull Request 크기로 정의합니다.
+description: 기능, 개선, 리팩터링을 한 Pull Request 크기로 정의합니다.
 title: "[기능] "
 labels:
   - 기능
