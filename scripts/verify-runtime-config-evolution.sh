@@ -32,7 +32,10 @@ fi
 image_tag="our-ledger-runtime-config:evolution-${git_head:0:12}-$$"
 container_name="our-ledger-runtime-config-evolution-$$"
 temporary_root="$(mktemp -d)"
+temporary_root="$(cd "$temporary_root" && pwd -P)"
 runtime_archive="$temporary_root/runtime.tar"
+runtime_dir="$temporary_root/runtime"
+host_root="$temporary_root/host"
 image_created=false
 container_created=false
 
@@ -88,8 +91,27 @@ actual_revision="$(
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
     "$image_tag"
 )"
-if [[ "$actual_architecture" != arm64 || "$actual_revision" != "$git_head" ]]; then
-  printf 'Bridge runtime-config image identity가 올바르지 않습니다.\n' >&2
+actual_version="$(
+  docker image inspect \
+    --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+    "$image_tag"
+)"
+actual_source="$(
+  docker image inspect \
+    --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' \
+    "$image_tag"
+)"
+actual_project="$(
+  docker image inspect \
+    --format '{{ index .Config.Labels "io.chochiho.runtime-config.project" }}' \
+    "$image_tag"
+)"
+if [[ "$actual_architecture" != arm64 \
+  || "$actual_revision" != "$git_head" \
+  || "$actual_version" != "$git_head" \
+  || "$actual_source" != https://github.com/xxh3898/our-ledger \
+  || "$actual_project" != our-ledger ]]; then
+  printf 'Manifested Runtime V2 image identity가 올바르지 않습니다.\n' >&2
   exit 1
 fi
 
@@ -101,20 +123,29 @@ docker create \
 container_created=true
 docker export --output "$runtime_archive" "$container_name"
 
-python3 -B - "$runtime_archive" <<'PY'
-import stat
+PYTHONDONTWRITEBYTECODE=1 python3 -B - \
+  "$runtime_archive" \
+  "$runtime_dir" \
+  "$host_root" \
+  "$git_head" <<'PY'
+import hashlib
 import sys
-import tarfile
-from pathlib import PurePosixPath
+from pathlib import Path
 
-archive = sys.argv[1]
-legacy_files = {
+from scripts.host_tools import host_state, production_deploy
+
+archive = Path(sys.argv[1])
+runtime = Path(sys.argv[2])
+host_root = Path(sys.argv[3])
+revision = sys.argv[4]
+expected_files = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
     "scripts/backup-production.sh": 0o700,
-    "scripts/bootstrap-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/backup_tools/offsite_backup.py": 0o600,
+    "scripts/bootstrap-production.sh": 0o700,
     "scripts/deploy-production.sh": 0o700,
     "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/fresh_bootstrap_state.py": 0o600,
@@ -124,77 +155,67 @@ legacy_files = {
     "scripts/host_tools/production_fresh_bootstrap.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
+    "scripts/offsite-backup-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
     "scripts/status_tools/monitor_worker.py": 0o600,
     "scripts/status_tools/production_status.py": 0o600,
 }
-legacy_directories = {
-    str(parent)
-    for relative in legacy_files
-    for parent in PurePosixPath(relative).parents
-    if str(parent) != "."
+expected_directories = {
+    "infra",
+    "infra/nginx",
+    "scripts",
+    "scripts/backup_tools",
+    "scripts/host_tools",
+    "scripts/release_tools",
+    "scripts/status_tools",
 }
-actual_directories = set()
-actual_files = {}
-file_members = {}
-seen = set()
-runtime_root_seen = False
+manifest_bytes = Path("runtime-manifest.json").read_bytes()
+manifest_profile = host_state.parse_runtime_manifest(manifest_bytes)
+if manifest_profile.file_modes != expected_files:
+    raise SystemExit("repository V2 manifest payload differs")
+if manifest_profile.directories != expected_directories:
+    raise SystemExit("repository V2 manifest directory set differs")
 
-with tarfile.open(archive, "r") as bundle:
-    for member in bundle.getmembers():
-        path = PurePosixPath(member.name)
-        normalized = member.name[:-1] if member.name.endswith("/") else member.name
-        if path.is_absolute() or ".." in path.parts or normalized != path.as_posix():
-            raise SystemExit("bridge archive contains an unsafe path")
-        if not path.parts or path.parts[0] != "runtime":
-            continue
-        if len(path.parts) == 1:
-            if runtime_root_seen or not member.isdir():
-                raise SystemExit("bridge runtime root differs")
-            runtime_root_seen = True
-            continue
-        relative = PurePosixPath(*path.parts[1:]).as_posix()
-        if relative in seen:
-            raise SystemExit("bridge archive contains a duplicate entry")
-        seen.add(relative)
-        if member.isdir():
-            actual_directories.add(relative)
-        elif member.isfile():
-            actual_files[relative] = stat.S_IMODE(member.mode)
-            file_members[relative] = member
-        else:
-            raise SystemExit("bridge archive contains non-regular material")
+production_deploy._extract_verified_runtime(archive, runtime)
+extracted_profile = host_state._validate_release(runtime)
+if extracted_profile.format_version != 2:
+    raise SystemExit("exported runtime is not Manifested V2")
+if extracted_profile.file_modes != expected_files:
+    raise SystemExit("exported V2 payload differs")
+if extracted_profile.directories != expected_directories:
+    raise SystemExit("exported V2 directory set differs")
+if (runtime / host_state.RUNTIME_MANIFEST).read_bytes() != manifest_bytes:
+    raise SystemExit("exported V2 manifest bytes differ")
 
-    if not runtime_root_seen:
-        raise SystemExit("bridge runtime root is missing")
-    if actual_directories != legacy_directories:
-        raise SystemExit("bridge directory set differs from frozen Legacy V1")
-    if actual_files != legacy_files:
-        raise SystemExit("bridge file or mode set differs from frozen Legacy V1")
-    for forbidden in (
-        "runtime-manifest.json",
-        "scripts/backup_tools/offsite_backup.py",
-        "scripts/offsite-backup-production.sh",
-    ):
-        if forbidden in actual_files:
-            raise SystemExit("bridge contains a future Manifested V2 entry")
-    for relative, member in file_members.items():
-        source = bundle.extractfile(member)
-        if source is None:
-            raise SystemExit("bridge file content is unavailable")
-        with source:
-            payload = source.read(2 * 1024 * 1024 + 1)
-        if len(payload) > 2 * 1024 * 1024:
-            raise SystemExit("bridge file is too large")
-        lowered = PurePosixPath(relative).name.lower()
-        if lowered in {".env", "last-success.json", "monitor-state.json"}:
-            raise SystemExit("bridge contains state or env material")
-        if PurePosixPath(relative).suffix.lower() in {".key", ".pem", ".p12", ".jks", ".dump"}:
-            raise SystemExit("bridge contains private or backup material")
-        if b"BEGIN PRIVATE KEY" in payload:
-            raise SystemExit("bridge contains private key material")
+source_hash = host_state.release_content_sha256(runtime)
+paths = host_state.HostPaths(host_root)
+host_state.initialize_layout(paths)
+runtime_digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+with host_state.OperationLock(paths) as lock:
+    identity = host_state.stage_release(
+        paths,
+        lock,
+        runtime,
+        application_revision=revision,
+        runtime_config_digest=runtime_digest,
+        runtime_config_revision=revision,
+    )
+    host_state.begin_pending(paths, lock, identity)
+    host_state.commit_pending(paths, lock)
+    state = host_state.inspect_state(paths, lock)
+
+current = paths.releases / identity.release_name
+current_profile = host_state._validate_release(current)
+if current_profile != extracted_profile:
+    raise SystemExit("staged V2 profile differs after re-read")
+if host_state.release_content_sha256(current) != source_hash:
+    raise SystemExit("staged V2 content hash differs after re-read")
+if identity.runtime_config_content_sha256 != source_hash:
+    raise SystemExit("staged V2 identity hash differs")
+if state["current"] != identity.to_json():
+    raise SystemExit("staged V2 current identity differs")
 PY
 
-printf 'Runtime-config evolution bridge 검증을 통과했습니다.\n'
+printf 'Manifested Runtime V2 evolution 검증을 통과했습니다.\n'

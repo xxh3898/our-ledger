@@ -253,7 +253,13 @@ from scripts.host_tools import host_state
 
 root = Path(sys.argv[1])
 context = Path(sys.argv[2])
-for relative, mode in host_state.RELEASE_FILES.items():
+manifest_source = root / host_state.RUNTIME_MANIFEST
+manifest_bytes = manifest_source.read_bytes()
+profile = host_state.parse_runtime_manifest(manifest_bytes)
+manifest_target = context / host_state.RUNTIME_MANIFEST
+shutil.copyfile(manifest_source, manifest_target)
+manifest_target.chmod(0o600)
+for relative, mode in profile.files:
     if relative == "compose.yaml":
         continue
     target = context / relative

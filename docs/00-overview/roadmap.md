@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.9
-last_updated: 2026-08-31
+version: 2.0
+last_updated: 2026-09-01
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
@@ -113,10 +113,11 @@ Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 �
 - **10D-3A2 Fresh-host Bootstrap Transaction Source**: repository 밖 owner-only one-time input, pre-current fixed ingress와 immutable runtime staging을 B1 lock 아래 `fresh PostgreSQL → migration → bootstrap → normal readiness → first verified backup → durable current/state`로 조합한다. 실제 값·host 실행은 여전히 제외한다.
 - **10D-3B0 Exact-SHA GHCR Publish-only Source**: live `main` exact HEAD와 같은 repository의 성공한 Release Source Harness run에 결합된 같은 SHA만 입력받는다. API/Web/runtime-config를 ARM64 digest-first로 발행하고 세 exact tag의 absent/same/conflict preflight와 postflight를 수행하되 Tailscale/SSH/deploy/Production environment와 kill switch를 사용하지 않는다. source PR과 Hosted CI에서는 실제 GHCR workflow를 실행하지 않는다.
 - **10D-3B3A Encrypted Offsite Backup Source**: committed `last-success.json`의 latest verified bundle 전체를 plaintext tar file 없이 `bsdtar stdout → age public recipient`로 암호화한다. owner-only local ciphertext staging, target `.partial` fsync/hash, final rename/reverify, atomic offsite marker와 8시간 read-only freshness를 고정하고 실제 `age` round-trip/failure matrix를 synthetic path에서 검증한다. 실제 recipient/config/iCloud directory/LaunchAgent는 만들거나 실행하지 않는다.
-- **10D-3B3C Runtime-config Evolution Bridge**: production `9dd350b...` worker가 받는 manifest 없는 Legacy V1 20-file shape와 content hash를 동결한다. bridge artifact는 이 shape를 유지하되 worker는 strict `runtime-manifest.json` V2의 exact payload/mode/type을 분류·검증·stage할 수 있다. offsite source는 repository에 유지하지만 bridge artifact에서 제외하고 후속 V2 artifact Gate 전까지 production update/offsite activation을 HOLD한다.
+- **10D-3B3C Runtime-config Evolution Bridge**: production `9dd350b...` worker가 받는 manifest 없는 Legacy V1 20-file shape와 content hash를 동결한다. bridge artifact는 이 shape를 유지하되 worker는 strict `runtime-manifest.json` V2의 exact payload/mode/type을 분류·검증·stage할 수 있다. offsite source는 bridge artifact에서 제외하고 별도 V2 source Gate까지 활성화를 분리한다.
+- **10D-3B3F Manifested Runtime V2 Source Gate**: root manifest mode `0600`과 sorted exact 22-file payload를 `scratch` linux/arm64 artifact로 활성화한다. detector·Dockerfile·manifest source를 동기화하고 actual build/export를 bridge worker로 preflight·추출·stage·re-read/hash 검증하되 GHCR publish, host update와 offsite 실행은 하지 않는다.
 - **10D-3B Public Production Activation**: actual GHCR/Tailscale/SSH credential, Cloudflare/도메인/secret/User, backup schedule·retention·외부 암호화 복제와 public smoke를 각각 승인한 뒤 운영을 시작한다.
 
-10D-2B2, 10D-3B0, 10D-3B3A와 10D-3B3C 완료는 restricted transaction, publish-only, encrypted offsite source와 runtime evolution bridge가 local/Hosted synthetic gate에서 검증됐다는 뜻이다. bridge publish/host update와 후속 V2 artifact activation, forced-command, Tailscale/SSH credential, Mac mini 설치, 실제 recipient/iCloud publish가 없으므로 artifact publish, production status/backup/migration/reporter/offsite 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
+10D-2B2, 10D-3B0, 10D-3B3A, 10D-3B3C와 10D-3B3F 완료는 restricted transaction, publish-only, encrypted offsite source, runtime evolution bridge와 Manifested V2 artifact source가 local/Hosted synthetic gate에서 검증됐다는 뜻이다. V2 GHCR publish/host update, forced-command, Tailscale/SSH credential, Mac mini 설치와 실제 recipient/iCloud publish가 없으므로 artifact publish, production status/backup/migration/reporter/offsite 실행, disaster recovery 준비 완료, LaunchAgent/Cloudflare/PWA/production activation 또는 deploy 완료를 의미하지 않는다.
 
 ## Release Gate
 

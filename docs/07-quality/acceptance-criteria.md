@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.2
-last_updated: 2026-08-30
+version: 1.3
+last_updated: 2026-09-01
 related:
   - 00-overview/roadmap.md
   - ADR-008
@@ -192,7 +192,7 @@ related:
 - read-only status는 final/marker를 쓰지 않고 검증하여 `MISSING|INVALID|FRESH|STALE`, age와 8시간 grace만 privacy-safe JSON으로 노출한다. HomeOps unsupported signal을 만들거나 다른 type으로 위장하지 않는다.
 - LaunchAgent example은 backup windows 뒤 `00:50/06:50/12:50/18:50`, fixed external bootstrap, no `KeepAlive`/private identity environment만 고정한다. actual install/load/start는 OUT이다.
 - `verify-offsite-backup.sh`는 pinned age v1.3.1 actual encrypt/decrypt round-trip, decrypted exact bundle hash, no plaintext staging, idempotency/freshness/failure/privacy/residue를 disposable path에서 검증한다. Hosted Full CI 독립 `offsite-backup` job은 actual production/iCloud/recipient/LaunchAgent/DB/Compose를 사용하지 않는다.
-- offsite wrapper/worker source와 독립 gate는 repository에 유지한다. 다만 10D-3B3C bridge Docker artifact는 old production worker 호환을 위해 두 파일을 일시 제외하며 config, marker, identity, ciphertext도 계속 포함하지 않는다. 후속 Manifested V2 artifact Gate에서만 다시 운반한다.
+- offsite wrapper/worker source와 독립 gate는 repository에 유지한다. 10D-3B3C bridge Docker artifact는 old production worker 호환을 위해 두 파일을 일시 제외했고, 10D-3B3F Manifested V2 source가 두 파일을 declared payload로 다시 운반한다. config, marker, identity와 ciphertext는 계속 포함하지 않는다.
 
 ### Slice 10D-3B3C Runtime-config Evolution Bridge Source Gate
 
@@ -202,8 +202,17 @@ related:
 - V2 content hash는 domain marker, exact manifest bytes, payload path/mode/content를 포함하고 V1 hash namespace와 분리한다. `ReleaseIdentity`와 current/state/pending formatVersion 2 JSON schema는 변경하지 않는다.
 - candidate archive는 exact digest/OCI linux/arm64 검증 뒤 runtime subtree를 read-only 분류하고 traversal, duplicate, symlink/hardlink/device/FIFO/socket, missing/extra/mode/size/private-key material을 추출 전에 거부한다. `extractall`을 사용하지 않고 extracted tree를 host validator로 다시 검증한다.
 - stage는 source profile의 owner-only tree만 복사·fsync하고 copy 전후 source/profile/hash 및 staged hash가 같을 때만 immutable release를 publish한다. failure는 기존 release/current/state를 보존하고 invocation-owned stage만 제거한다.
-- `verify-runtime-config-evolution.sh`는 frozen V1 acceptance/hash/state, V1→synthetic V2 archive/extract/stage/current transition, failure matrix와 actual bridge image residue 0을 검증한다. production/GHCR/Cloudflare/iCloud/LaunchAgent/Secret/DB를 사용하지 않는다.
-- `558f92e...` full offsite runtime artifact의 direct production update는 HOLD다. bridge Release/publish와 old V1→bridge V1 host update, 후속 V2 artifact 활성화는 각각 별도 Gate다.
+- `verify-runtime-config-evolution.sh`는 frozen V1 acceptance/hash/state, V1→synthetic V2 archive/extract/stage/current transition과 failure matrix를 계속 검증한다. actual Docker artifact profile은 10D-3B3F V2 source 계약을 따른다.
+- `558f92e...` 과거 full offsite runtime artifact의 direct production update는 HOLD다. 10D-3B3F source와 별개로 V2 Release/publish와 bridge worker를 통한 production update는 각각 별도 Gate다.
+
+### Slice 10D-3B3F Manifested Runtime V2 Source Gate
+
+- root `runtime-manifest.json`은 mode `0600` regular file이고 exact top-level/entry schema, integer version 2, project `our-ledger`, sorted unique canonical POSIX path와 `0600|0700` mode로 exact 22개 payload를 선언한다. manifest 자신은 payload list에 포함하지 않는다.
+- `runtime-config.Dockerfile`은 `scratch`에서 manifest와 22개 payload를 최종 mode로 각각 한 번만 COPY한다. actual runtime subtree는 exact 23 regular file과 payload parent 7 directory이며 env/key/dump/marker/state, symlink/hardlink/nonregular/unexpected entry가 없다.
+- offsite worker `scripts/backup_tools/offsite_backup.py` mode `0600`과 public wrapper `scripts/offsite-backup-production.sh` mode `0700`을 활성 payload에 포함하고 Dockerfile, manifest와 runtime change detector source allowlist를 동기화한다.
+- `verify-runtime-config-evolution.sh`는 frozen Legacy V1 20-file/hash/state regression과 V1→V2 synthetic failure matrix를 유지하면서 actual candidate를 `linux/arm64 --network none`으로 build/create/export한다. bridge extractor preflight→member별 extract→host validator re-read→immutable stage/current/content hash를 actual manifest bytes와 payload로 검증한다.
+- `verify-release-transport.sh`는 같은 actual V2 allowlist/mode/directory/OCI identity, public shell syntax/Python help와 Compose render를 검증하고 Docker residue 0을 요구한다. GHCR login/push, Tailscale, SSH, production path/DB/iCloud/Cloudflare/Secret을 사용하지 않는다.
+- Source Gate 성공 의미는 `MANIFESTED_RUNTIME_V2_SOURCE_READY`이며 V2 release/publish, Mac mini pull/stage/current 전환, encrypted offsite 실행이나 운영 활성화를 승인하지 않는다.
 
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 

@@ -23,8 +23,12 @@ required_paths=(
   "infra/nginx/nginx.conf"
   "docs/README.md"
   ".github/PULL_REQUEST_TEMPLATE.md"
+  ".github/ISSUE_TEMPLATE/bug.yml"
+  ".github/ISSUE_TEMPLATE/config.yml"
+  ".github/ISSUE_TEMPLATE/decision.yml"
   ".github/ISSUE_TEMPLATE/feature.yml"
   ".github/workflows/deploy.yml"
+  "runtime-manifest.json"
   "runtime-config.Dockerfile"
   "scripts/detect-runtime-config-change.sh"
   "scripts/release_tools/release_contract.py"
@@ -82,6 +86,26 @@ required_paths=(
 for path in "${required_paths[@]}"; do
   if [[ ! -e "$ROOT_DIR/$path" ]]; then
     echo "필수 경로가 없습니다: $path" >&2
+    exit 1
+  fi
+done
+
+issue_form_paths=(
+  ".github/ISSUE_TEMPLATE/bug.yml"
+  ".github/ISSUE_TEMPLATE/feature.yml"
+  ".github/ISSUE_TEMPLATE/decision.yml"
+)
+
+for path in "${issue_form_paths[@]}"; do
+  description_count="$(
+    awk '/^description:[[:space:]]*[^[:space:]]/ { count++ } END { print count + 0 }' \
+      "$ROOT_DIR/$path"
+  )"
+  about_count="$(
+    awk '/^about:/ { count++ } END { print count + 0 }' "$ROOT_DIR/$path"
+  )"
+  if [[ "$description_count" -ne 1 || "$about_count" -ne 0 ]]; then
+    echo "GitHub Issue Form 최상위 schema가 잘못됐습니다: $path" >&2
     exit 1
   fi
 done
