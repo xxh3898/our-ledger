@@ -116,10 +116,13 @@ fi
 postgres_id="$postgres_ids"
 
 if ! docker inspect "$postgres_id" \
-  | python3 "$ARTIFACT_HELPER" check-container \
-      --project-name "$project_name" \
-      --compose-file "$COMPOSE_FILE" \
-      --expected-image "$POSTGRES_IMAGE"; then
+  | (
+      cd "$ROOT_DIR"
+      python3 -B -m scripts.backup_tools.backup_artifact check-container \
+        --project-name "$project_name" \
+        --compose-file "$COMPOSE_FILE" \
+        --expected-image "$POSTGRES_IMAGE"
+    ); then
   fail "postgres runtime 경계 또는 health가 production backup 계약과 다릅니다."
 fi
 

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -17,6 +18,12 @@ try:
     from . import backup_artifact as contract
 except ImportError:
     import backup_artifact as contract
+
+try:
+    from scripts.host_tools import host_state
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.host_tools import host_state
 
 
 CREATED_AT = "2026-08-29T03:15:00Z"
@@ -119,6 +126,68 @@ class BackupArtifactTest(unittest.TestCase):
             else:
                 result[relative] = ("directory", mode)
         return result
+
+    def runtime_release(
+        self,
+        runtime_root: Path,
+        digest_character: str,
+        *,
+        compose_content: str = "services:\n  postgres:\n    image: synthetic\n",
+    ) -> Path:
+        runtime_root.mkdir(mode=0o700, exist_ok=True)
+        runtime_root.chmod(0o700)
+        releases = runtime_root / "releases"
+        releases.mkdir(mode=0o700, exist_ok=True)
+        releases.chmod(0o700)
+        release = releases / (digest_character * 64)
+        release.mkdir(mode=0o700)
+        for relative in sorted(
+            host_state.LEGACY_RELEASE_DIRECTORIES,
+            key=lambda item: item.count("/"),
+        ):
+            (release / relative).mkdir(mode=0o700)
+        for relative, mode in host_state.LEGACY_RELEASE_FILES.items():
+            target = release / relative
+            target.write_text(
+                compose_content if relative == "compose.yaml" else f"{relative}\n",
+                encoding="utf-8",
+            )
+            target.chmod(mode)
+        return release / "compose.yaml"
+
+    @staticmethod
+    def postgres_payload(
+        config_file: str,
+        project: str,
+        image: str,
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "Config": {
+                    "Image": image,
+                    "Labels": {
+                        "com.docker.compose.project": project,
+                        "com.docker.compose.service": "postgres",
+                        "com.docker.compose.project.config_files": config_file,
+                    },
+                },
+                "State": {"Status": "running", "Health": {"Status": "healthy"}},
+                "HostConfig": {
+                    "PortBindings": {},
+                    "NetworkMode": f"{project}_database",
+                },
+                "Mounts": [
+                    {
+                        "Type": "volume",
+                        "Destination": "/var/lib/postgresql",
+                        "Name": f"{project}_postgres-data",
+                    }
+                ],
+                "NetworkSettings": {
+                    "Networks": {f"{project}_database": {}}
+                },
+            }
+        ]
 
     def copied_bundle(self, bundle: Path, label: str) -> Path:
         parent = self.root / label
@@ -488,41 +557,140 @@ class BackupArtifactTest(unittest.TestCase):
             contract.cleanup_staging(self.backup_directory, unsafe)
         self.assertTrue(unsafe.exists())
 
-    def test_should_validate_exact_postgres_container_boundary(self) -> None:
-        compose_file = self.repo_root / "compose.prod.yaml"
-        compose_file.write_text("services: {}\n", encoding="utf-8")
-        compose_file.chmod(0o600)
+    def test_should_accept_current_or_verified_prior_release_compose_authority(self) -> None:
+        runtime_root = self.root / "runtime-config"
+        prior_compose = self.runtime_release(runtime_root, "a")
+        current_compose = self.runtime_release(runtime_root, "b")
         project = "our-ledger-production"
         image = "postgres:18.6-alpine3.23@sha256:fixture"
-        payload = [
-            {
-                "Config": {
-                    "Image": image,
-                    "Labels": {
-                        "com.docker.compose.project": project,
-                        "com.docker.compose.service": "postgres",
-                        "com.docker.compose.project.config_files": str(compose_file),
-                    },
-                },
-                "State": {"Status": "running", "Health": {"Status": "healthy"}},
-                "HostConfig": {"PortBindings": {}, "NetworkMode": f"{project}_database"},
-                "Mounts": [
-                    {
-                        "Type": "volume",
-                        "Destination": "/var/lib/postgresql",
-                        "Name": f"{project}_postgres-data",
-                    }
-                ],
-                "NetworkSettings": {
-                    "Networks": {f"{project}_database": {}}
-                },
-            }
-        ]
-        contract.check_postgres_container(payload, project, compose_file, image)
 
-        payload[0]["State"]["Health"]["Status"] = "unhealthy"
-        with self.assertRaises(contract.ContractError):
-            contract.check_postgres_container(payload, project, compose_file, image)
+        for label_path in (current_compose, prior_compose):
+            with self.subTest(label_path=label_path.parent.name):
+                contract.check_postgres_container(
+                    self.postgres_payload(str(label_path), project, image),
+                    project,
+                    current_compose,
+                    image,
+                )
+
+    def test_should_reject_unmanaged_or_changed_release_compose_authority(self) -> None:
+        runtime_root = self.root / "runtime-config"
+        current_compose = self.runtime_release(runtime_root, "a")
+        prior_compose = self.runtime_release(runtime_root, "b")
+        external_compose = self.runtime_release(self.root / "external-runtime", "c")
+
+        symlink_release = runtime_root / "releases" / ("d" * 64)
+        symlink_release.mkdir(mode=0o700)
+        symlink_compose = symlink_release / "compose.yaml"
+        symlink_compose.symlink_to(prior_compose)
+
+        unverified_release = runtime_root / "releases" / ("e" * 64)
+        unverified_release.mkdir(mode=0o700)
+        unverified_compose = unverified_release / "compose.yaml"
+        unverified_compose.write_text(current_compose.read_text(encoding="utf-8"))
+        unverified_compose.chmod(0o600)
+
+        extra_compose = self.runtime_release(runtime_root, "f")
+        extra_file = extra_compose.parent / "unexpected.txt"
+        extra_file.write_text("unexpected\n", encoding="utf-8")
+        extra_file.chmod(0o600)
+
+        wrong_mode_compose = self.runtime_release(runtime_root, "1")
+        wrong_mode_compose.chmod(0o700)
+
+        mutated_compose = self.runtime_release(runtime_root, "2")
+        mutated_source = (
+            mutated_compose.parent / "scripts" / "backup_tools" / "backup_core.sh"
+        )
+        mutated_source.write_text(
+            "-----BEGIN PRIVATE KEY-----\n",
+            encoding="utf-8",
+        )
+        mutated_source.chmod(0o600)
+
+        different_compose = self.runtime_release(
+            runtime_root,
+            "3",
+            compose_content="services:\n  postgres:\n    image: changed\n",
+        )
+        traversal = (
+            current_compose.parent
+            / ".."
+            / prior_compose.parent.name
+            / "compose.yaml"
+        )
+        project = "our-ledger-production"
+        image = "postgres:18.6-alpine3.23@sha256:fixture"
+        rejected = {
+            "external-byte-equal": str(external_compose),
+            "symlink": str(symlink_compose),
+            "traversal": str(traversal),
+            "unverified": str(unverified_compose),
+            "unexpected-entry": str(extra_compose),
+            "wrong-mode": str(wrong_mode_compose),
+            "mutated-release": str(mutated_compose),
+            "different-compose": str(different_compose),
+            "duplicate-label-entry": f"{prior_compose},{prior_compose}",
+        }
+
+        for name, label_path in rejected.items():
+            with self.subTest(name=name), self.assertRaises(contract.ContractError):
+                contract.check_postgres_container(
+                    self.postgres_payload(label_path, project, image),
+                    project,
+                    current_compose,
+                    image,
+                )
+
+    def test_should_reject_postgres_container_boundary_mutations(self) -> None:
+        compose_file = self.runtime_release(self.root / "runtime-config", "a")
+        project = "our-ledger-production"
+        image = "postgres:18.6-alpine3.23@sha256:fixture"
+
+        mutations = {
+            "container-count": lambda value: value.append(value[0]),
+            "project": lambda value: value[0]["Config"]["Labels"].update(
+                {"com.docker.compose.project": "foreign"}
+            ),
+            "service": lambda value: value[0]["Config"]["Labels"].update(
+                {"com.docker.compose.service": "api"}
+            ),
+            "image": lambda value: value[0]["Config"].update({"Image": "foreign"}),
+            "status": lambda value: value[0]["State"].update({"Status": "exited"}),
+            "health": lambda value: value[0]["State"]["Health"].update(
+                {"Status": "unhealthy"}
+            ),
+            "host-port": lambda value: value[0]["HostConfig"].update(
+                {"PortBindings": {"5432/tcp": [{"HostPort": "5432"}]}}
+            ),
+            "host-network": lambda value: value[0]["HostConfig"].update(
+                {"NetworkMode": "host"}
+            ),
+            "mount-count": lambda value: value[0].update({"Mounts": []}),
+            "mount-type": lambda value: value[0]["Mounts"][0].update(
+                {"Type": "bind"}
+            ),
+            "mount-target": lambda value: value[0]["Mounts"][0].update(
+                {"Destination": "/foreign"}
+            ),
+            "mount-project": lambda value: value[0]["Mounts"][0].update(
+                {"Name": "foreign_postgres-data"}
+            ),
+            "network": lambda value: value[0]["NetworkSettings"].update(
+                {"Networks": {"foreign": {}}}
+            ),
+        }
+
+        for name, mutate in mutations.items():
+            payload = self.postgres_payload(str(compose_file), project, image)
+            mutate(payload)
+            with self.subTest(name=name), self.assertRaises(contract.ContractError):
+                contract.check_postgres_container(
+                    payload,
+                    project,
+                    compose_file,
+                    image,
+                )
 
 
 if __name__ == "__main__":
