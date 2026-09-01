@@ -1,0 +1,94 @@
+{
+  "formatVersion": 2,
+  "project": "our-ledger",
+  "files": [
+    {
+      "path": "compose.yaml",
+      "mode": "0600"
+    },
+    {
+      "path": "infra/nginx/nginx.conf",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/backup-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/backup_tools/backup_artifact.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/backup_tools/backup_core.sh",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/backup_tools/offsite_backup.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/bootstrap-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/deploy-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/host_tools/deploy_transaction.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/fresh_bootstrap_state.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/fresh_host_bootstrap.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/host_state.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/production_deploy.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/production_fresh_bootstrap.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/host_tools/production_host.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/monitor-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/offsite-backup-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/production-status.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/release_tools/release_contract.py",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/status_tools/monitor_policy.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/status_tools/monitor_worker.py",
+      "mode": "0600"
+    },
+    {
+      "path": "scripts/status_tools/production_status.py",
+      "mode": "0600"
+    }
+  ]
+}

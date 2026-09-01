@@ -41,6 +41,7 @@ if docker container inspect "$container_name" >/dev/null 2>&1 \
   exit 1
 fi
 runtime_parent="$(mktemp -d)"
+runtime_parent="$(cd "$runtime_parent" && pwd -P)"
 runtime_dir="$runtime_parent/runtime"
 runtime_archive="$runtime_parent/runtime.tar"
 image_created=false
@@ -107,8 +108,16 @@ actual_project="$(
     --format '{{ index .Config.Labels "io.chochiho.runtime-config.project" }}' \
     "$image_tag"
 )"
-if [[ "$actual_revision" != "$git_head" \
+actual_architecture="$(docker image inspect --format '{{.Architecture}}' "$image_tag")"
+actual_source="$(
+  docker image inspect \
+    --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' \
+    "$image_tag"
+)"
+if [[ "$actual_architecture" != arm64 \
+  || "$actual_revision" != "$git_head" \
   || "$actual_version" != "$git_head" \
+  || "$actual_source" != https://github.com/xxh3898/our-ledger \
   || "$actual_project" != our-ledger ]]; then
   printf 'Runtime config image identity label이 올바르지 않습니다.\n' >&2
   exit 1
@@ -122,12 +131,13 @@ docker create \
 container_created=true
 docker export --output "$runtime_archive" "$container_name"
 
-python3 -B - "$runtime_archive" "$runtime_dir" <<'PY'
-import shutil
-import stat
+PYTHONDONTWRITEBYTECODE=1 python3 -B - \
+  "$runtime_archive" \
+  "$runtime_dir" <<'PY'
 import sys
-import tarfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+
+from scripts.host_tools import host_state, production_deploy
 
 archive = Path(sys.argv[1])
 root = Path(sys.argv[2])
@@ -144,9 +154,10 @@ expected_files = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
     "scripts/backup-production.sh": 0o700,
-    "scripts/bootstrap-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
+    "scripts/backup_tools/offsite_backup.py": 0o600,
+    "scripts/bootstrap-production.sh": 0o700,
     "scripts/deploy-production.sh": 0o700,
     "scripts/host_tools/deploy_transaction.py": 0o600,
     "scripts/host_tools/fresh_bootstrap_state.py": 0o600,
@@ -156,59 +167,31 @@ expected_files = {
     "scripts/host_tools/production_fresh_bootstrap.py": 0o600,
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
+    "scripts/offsite-backup-production.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
     "scripts/status_tools/monitor_worker.py": 0o600,
     "scripts/status_tools/production_status.py": 0o600,
 }
-actual_directories = set()
-actual_files = {}
-file_members = {}
-seen_entries = set()
+manifest_bytes = Path("runtime-manifest.json").read_bytes()
+manifest_profile = host_state.parse_runtime_manifest(manifest_bytes)
+if manifest_profile.file_modes != expected_files:
+    raise SystemExit("runtime config repository manifest payload differs")
+if manifest_profile.directories != expected_directories:
+    raise SystemExit("runtime config repository manifest directory set differs")
 
-with tarfile.open(archive, "r") as bundle:
-    for member in bundle.getmembers():
-        member_path = PurePosixPath(member.name)
-        if member_path.is_absolute() or ".." in member_path.parts:
-            raise SystemExit("runtime config contains an unsafe path")
-        if not member_path.parts or member_path.parts[0] != "runtime":
-            continue
-        if len(member_path.parts) == 1:
-            if not member.isdir():
-                raise SystemExit("runtime config root is not a directory")
-            continue
-
-        relative = PurePosixPath(*member_path.parts[1:]).as_posix()
-        if relative in seen_entries:
-            raise SystemExit("runtime config contains a duplicate entry")
-        seen_entries.add(relative)
-        if member.issym() or member.islnk():
-            raise SystemExit("runtime config contains a symlink")
-        if member.isdir():
-            actual_directories.add(relative)
-        elif member.isfile():
-            actual_files[relative] = stat.S_IMODE(member.mode)
-            file_members[relative] = member
-        else:
-            raise SystemExit("runtime config contains a non-regular entry")
-
-    if actual_directories != expected_directories:
-        raise SystemExit("runtime config directory allowlist differs")
-    if actual_files != expected_files:
-        raise SystemExit("runtime config file allowlist or mode differs")
-
-    root.mkdir(mode=0o700)
-    for relative in sorted(expected_directories, key=lambda value: value.count("/")):
-        (root / relative).mkdir(mode=0o700, parents=True, exist_ok=True)
-    for relative, expected_mode in expected_files.items():
-        source = bundle.extractfile(file_members[relative])
-        if source is None:
-            raise SystemExit("runtime config file content is unavailable")
-        target = root / relative
-        with source, target.open("wb") as destination:
-            shutil.copyfileobj(source, destination)
-        target.chmod(expected_mode)
+production_deploy._extract_verified_runtime(archive, root)
+profile = host_state._validate_release(root)
+if profile.format_version != 2:
+    raise SystemExit("runtime config is not Manifested V2")
+if profile.file_modes != expected_files:
+    raise SystemExit("runtime config file allowlist or mode differs")
+if profile.directories != expected_directories:
+    raise SystemExit("runtime config directory allowlist differs")
+if (root / host_state.RUNTIME_MANIFEST).read_bytes() != manifest_bytes:
+    raise SystemExit("runtime config manifest bytes differ")
+host_state.release_content_sha256(root)
 
 for path in root.rglob("*"):
     lowered = path.name.lower()
@@ -226,12 +209,14 @@ bash -n \
   "$runtime_dir/scripts/backup_tools/backup_core.sh" \
   "$runtime_dir/scripts/deploy-production.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
+  "$runtime_dir/scripts/offsite-backup-production.sh" \
   "$runtime_dir/scripts/production-status.sh"
 (
   cd "$runtime_dir"
   python3 -B -m scripts.release_tools.release_contract --help >/dev/null
   python3 -B -m scripts.host_tools.production_host --help >/dev/null
   SSH_ORIGINAL_COMMAND=invalid python3 -B -m scripts.host_tools.production_fresh_bootstrap </dev/null >/dev/null 2>&1 || true
+  python3 -B -m scripts.backup_tools.offsite_backup --help >/dev/null
   python3 -B -m scripts.status_tools.production_status --help >/dev/null
   python3 -B -m scripts.status_tools.monitor_worker --help >/dev/null
 )
