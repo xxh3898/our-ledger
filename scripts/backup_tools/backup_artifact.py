@@ -661,6 +661,144 @@ def retention_plan(
     }
 
 
+def _runtime_host_state_module() -> Any:
+    try:
+        from scripts.host_tools import host_state
+    except ImportError as error:
+        raise ContractError("runtime config release validator를 불러올 수 없습니다.") from error
+
+    expected = (
+        Path(__file__).resolve().parents[1] / "host_tools" / "host_state.py"
+    )
+    try:
+        actual = Path(host_state.__file__).resolve(strict=True)
+        expected = expected.resolve(strict=True)
+    except OSError as error:
+        raise ContractError("runtime config release validator authority를 확인할 수 없습니다.") from error
+    require(actual == expected, "runtime config release validator authority가 다릅니다.")
+    return host_state
+
+
+def _managed_release_compose(path: Path, label: str) -> tuple[Path, Path]:
+    raw = _raw_path(str(path), label)
+    require(raw.name == "compose.yaml", f"{label}는 release direct Compose file이어야 합니다.")
+    release_root = raw.parent
+    release_store = release_root.parent
+    require(release_store.name == "releases", f"{label}의 release store authority가 다릅니다.")
+    require(
+        bool(SHA256_PATTERN.fullmatch(release_root.name))
+        and release_root.name != "0" * 64,
+        f"{label}의 release identity가 잘못됐습니다.",
+    )
+    try:
+        resolved = raw.resolve(strict=True)
+        resolved_store = release_store.resolve(strict=True)
+        store_info = os.lstat(release_store)
+    except OSError as error:
+        raise ContractError(f"{label} authority를 확인할 수 없습니다.") from error
+    require(resolved == raw, f"{label}는 canonical path여야 합니다.")
+    require(resolved_store == release_store, f"{label}의 release store는 canonical path여야 합니다.")
+    require(stat.S_ISDIR(store_info.st_mode), f"{label}의 release store는 directory여야 합니다.")
+    require(store_info.st_uid == os.geteuid(), f"{label}의 release store owner가 다릅니다.")
+    require(
+        stat.S_IMODE(store_info.st_mode) == 0o700,
+        f"{label}의 release store mode가 다릅니다.",
+    )
+    return release_root, resolved
+
+
+def _hash_owner_regular_nofollow(path: Path, expected_mode: int) -> str:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ContractError("runtime Compose file을 안전하게 열 수 없습니다.") from error
+    try:
+        descriptor_info = os.fstat(descriptor)
+        path_info = os.lstat(path)
+        require(
+            stat.S_ISREG(descriptor_info.st_mode) and stat.S_ISREG(path_info.st_mode),
+            "runtime Compose authority가 regular file이 아닙니다.",
+        )
+        require(
+            (descriptor_info.st_dev, descriptor_info.st_ino)
+            == (path_info.st_dev, path_info.st_ino),
+            "runtime Compose file identity가 변경됐습니다.",
+        )
+        require(
+            descriptor_info.st_uid == os.geteuid()
+            and stat.S_IMODE(descriptor_info.st_mode) == expected_mode
+            and descriptor_info.st_nlink == 1,
+            "runtime Compose file owner/mode/link authority가 다릅니다.",
+        )
+        digest = hashlib.sha256()
+        while block := os.read(descriptor, 1024 * 1024):
+            digest.update(block)
+        final_info = os.fstat(descriptor)
+        require(
+            (
+                final_info.st_dev,
+                final_info.st_ino,
+                final_info.st_size,
+                final_info.st_mtime_ns,
+            )
+            == (
+                descriptor_info.st_dev,
+                descriptor_info.st_ino,
+                descriptor_info.st_size,
+                descriptor_info.st_mtime_ns,
+            ),
+            "runtime Compose file이 검증 중 변경됐습니다.",
+        )
+        return digest.hexdigest()
+    except OSError as error:
+        raise ContractError("runtime Compose file 검증에 실패했습니다.") from error
+    finally:
+        os.close(descriptor)
+
+
+def _check_release_compose_authority(
+    compose_file: Path,
+    observed_config_file: Path,
+) -> None:
+    current_root, current_compose = _managed_release_compose(
+        compose_file,
+        "current Compose file",
+    )
+    observed_root, observed_compose = _managed_release_compose(
+        observed_config_file,
+        "container Compose file",
+    )
+    require(
+        current_root.parent == observed_root.parent,
+        "postgres container의 Compose release store authority가 다릅니다.",
+    )
+
+    host_state = _runtime_host_state_module()
+    try:
+        current_before = host_state.release_content_sha256(current_root)
+        observed_before = host_state.release_content_sha256(observed_root)
+    except (host_state.ContractError, OSError) as error:
+        raise ContractError("runtime config release authority가 잘못됐습니다.") from error
+
+    require(
+        _hash_owner_regular_nofollow(current_compose, 0o600)
+        == _hash_owner_regular_nofollow(observed_compose, 0o600),
+        "postgres container의 Compose content authority가 다릅니다.",
+    )
+    try:
+        current_after = host_state.release_content_sha256(current_root)
+        observed_after = host_state.release_content_sha256(observed_root)
+    except (host_state.ContractError, OSError) as error:
+        raise ContractError("runtime config release authority가 검증 중 변경됐습니다.") from error
+    require(
+        current_before == current_after and observed_before == observed_after,
+        "runtime config release authority가 검증 중 변경됐습니다.",
+    )
+
+
 def check_postgres_container(
     payload: Any,
     project_name: str,
@@ -674,10 +812,13 @@ def check_postgres_container(
     require(labels.get("com.docker.compose.project") == project_name, "postgres container project label이 다릅니다.")
     require(labels.get("com.docker.compose.service") == "postgres", "postgres service label이 다릅니다.")
     config_files = labels.get("com.docker.compose.project.config_files", "")
-    resolved_config_files = {
-        Path(value).resolve() for value in config_files.split(",") if value
-    }
-    require(resolved_config_files == {compose_file.resolve()}, "postgres container의 Compose file authority가 다릅니다.")
+    require(isinstance(config_files, str), "postgres container의 Compose file label이 잘못됐습니다.")
+    config_file_values = config_files.split(",")
+    require(
+        len(config_file_values) == 1 and bool(config_file_values[0]),
+        "postgres container의 Compose file label cardinality가 다릅니다.",
+    )
+    _check_release_compose_authority(compose_file, Path(config_file_values[0]))
     require(container.get("Config", {}).get("Image") == expected_image, "postgres image가 pinned 18.6 contract와 다릅니다.")
 
     state = container.get("State", {}) or {}

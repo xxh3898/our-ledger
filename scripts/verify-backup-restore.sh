@@ -33,8 +33,11 @@ runtime_temp_dir="$(cd "$runtime_temp_dir" && pwd -P)"
 chmod 700 "$runtime_temp_dir"
 synthetic_app_root="$runtime_temp_dir/host"
 runtime_source="$runtime_temp_dir/runtime-source"
+runtime_source_next="$runtime_temp_dir/runtime-source-next"
 runtime_digest="sha256:$(printf 'd%.0s' {1..64})"
+runtime_digest_next="sha256:$(printf 'e%.0s' {1..64})"
 runtime_release="$synthetic_app_root/runtime-config/releases/${runtime_digest#sha256:}"
+runtime_release_next="$synthetic_app_root/runtime-config/releases/${runtime_digest_next#sha256:}"
 
 case "$runtime_temp_dir" in
   */our-ledger-backup-restore.*) ;;
@@ -61,14 +64,15 @@ mkdir -m 700 \
   "$fault_bin_dir" \
   "$fault_python_dir"
 
-python3 -B - "$ROOT_DIR" "$runtime_source" "$git_head" <<'PY'
+python3 -B - "$ROOT_DIR" "$runtime_source" "$runtime_source_next" "$git_head" <<'PY'
 import shutil
 import sys
 from pathlib import Path
 
 repo = Path(sys.argv[1])
 source = Path(sys.argv[2])
-git_head = sys.argv[3]
+next_source = Path(sys.argv[3])
+git_head = sys.argv[4]
 sys.path.insert(0, str(repo))
 
 from scripts.host_tools.host_state import RELEASE_DIRECTORIES, RELEASE_FILES
@@ -123,6 +127,12 @@ for relative, mode in RELEASE_FILES.items():
     else:
         shutil.copyfile(repository_source, target)
     target.chmod(mode)
+
+shutil.copytree(source, next_source)
+evolution_marker = next_source / "scripts/release_tools/release_contract.py"
+with evolution_marker.open("a", encoding="utf-8") as target:
+    target.write("\n# synthetic runtime release B\n")
+evolution_marker.chmod(RELEASE_FILES["scripts/release_tools/release_contract.py"])
 PY
 
 python3 -B -m scripts.host_tools.synthetic_host \
@@ -414,9 +424,50 @@ source_api_id="$("${source_compose[@]}" ps --quiet api)"
 [[ -n "$source_postgres_id" && -n "$source_api_id" ]] \
   || fail "source postgres/API container를 확인할 수 없습니다."
 docker inspect "$source_postgres_id" \
-  | python3 "$ARTIFACT_HELPER" check-container \
+  | python3 -B -m scripts.backup_tools.backup_artifact check-container \
       --project-name "$source_project" \
       --compose-file "$COMPOSE_FILE" \
+      --expected-image "$POSTGRES_IMAGE"
+
+python3 -B - \
+  "$synthetic_app_root" \
+  "$runtime_source_next" \
+  "$git_head" \
+  "$runtime_digest_next" <<'PY'
+import sys
+from pathlib import Path
+
+from scripts.host_tools import host_state
+
+paths = host_state.HostPaths(Path(sys.argv[1]))
+source = Path(sys.argv[2])
+revision = sys.argv[3]
+digest = sys.argv[4]
+with host_state.OperationLock(paths) as lock:
+    before = host_state.inspect_state(paths, lock)
+    if before["status"] != "READY" or before["pending"]:
+        raise SystemExit("synthetic runtime release A authority differs")
+    identity = host_state.stage_release(
+        paths,
+        lock,
+        source,
+        application_revision=revision,
+        runtime_config_digest=digest,
+        runtime_config_revision=revision,
+    )
+    host_state.begin_pending(paths, lock, identity)
+    committed = host_state.commit_pending(paths, lock)
+    if committed != identity:
+        raise SystemExit("synthetic runtime release B commit differs")
+PY
+
+source_postgres_id_after_runtime_transition="$("${source_compose[@]}" ps --quiet postgres)"
+[[ "$source_postgres_id_after_runtime_transition" == "$source_postgres_id" ]] \
+  || fail "runtime A→B 전환이 persistent PostgreSQL container identity를 변경했습니다."
+docker inspect "$source_postgres_id" \
+  | python3 -B -m scripts.backup_tools.backup_artifact check-container \
+      --project-name "$source_project" \
+      --compose-file "$runtime_release_next/compose.yaml" \
       --expected-image "$POSTGRES_IMAGE"
 
 printf '\n[backup/restore 3/11] non-empty financial fixture and source fingerprint\n'
@@ -677,7 +728,7 @@ target_postgres_id="$("${target_compose[@]}" ps --quiet postgres)"
 [[ -n "$target_postgres_id" && "$target_postgres_id" != "$source_postgres_id" ]] \
   || fail "restore target postgres가 source와 분리되지 않았습니다."
 docker inspect "$target_postgres_id" \
-  | python3 "$ARTIFACT_HELPER" check-container \
+  | python3 -B -m scripts.backup_tools.backup_artifact check-container \
       --project-name "$target_project" \
       --compose-file "$COMPOSE_FILE" \
       --expected-image "$POSTGRES_IMAGE"
