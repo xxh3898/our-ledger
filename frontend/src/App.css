@@ -202,11 +202,6 @@ p {
   white-space: nowrap;
 }
 
-.member-avatars small {
-  margin-left: 0.25rem;
-  color: var(--accent-text);
-}
-
 .avatar-placeholder {
   display: grid;
   width: 2.65rem;

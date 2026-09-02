@@ -184,10 +184,7 @@ function CoupleHeader({
               <span className="avatar-placeholder" aria-hidden="true">
                 {member.displayName.slice(0, 1)}
               </span>
-              <span>
-                {member.displayName}
-                {member.userId === user.userId && <small>나</small>}
-              </span>
+              <span>{member.displayName}</span>
             </li>
           ))}
         </ul>
@@ -241,12 +238,10 @@ function SpendingHero({
 }
 
 function ScopeSelector({
-  user,
   household,
   navigation,
   onChange,
 }: {
-  user: CurrentUser
   household: CurrentHousehold
   navigation: CalendarNavigationState
   onChange: (state: CalendarNavigationState) => void
@@ -271,7 +266,7 @@ function ScopeSelector({
             memberId: member.memberId,
           })}
         >
-          {member.displayName}{member.userId === user.userId ? ' · 나' : ''}
+          {member.displayName}
         </button>
       ))}
       <button
@@ -1082,7 +1077,6 @@ function CalendarWorkspace({
               createSuccessFocusRef={calendarGoalFocusRef}
             />
             <ScopeSelector
-              user={user}
               household={references.household}
               navigation={navigation}
               onChange={updateNavigation}
