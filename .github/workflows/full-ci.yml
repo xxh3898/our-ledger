@@ -33,6 +33,23 @@ jobs:
       - name: Docker Compose 검사
         run: ./scripts/verify-compose.sh
 
+  backup-docker-authority-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hosted Linux Docker authority read-only 수집
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker_path="$(command -v docker)"
+          docker_canonical_path="$(realpath "$docker_path")"
+          [[ "$docker_path" == /* && "$docker_canonical_path" == /* ]]
+          printf 'docker-command-path=%s\n' "$docker_path"
+          printf 'docker-canonical-path=%s\n' "$docker_canonical_path"
+          printf 'docker-client-version=%s\n' "$(docker version --format '{{.Client.Version}}')"
+          printf 'docker-server-version=%s\n' "$(docker version --format '{{.Server.Version}}')"
+          printf 'docker-compose-version=%s\n' "$(docker compose version --short)"
+
   backend:
     uses: ./.github/workflows/backend-ci.yml
 
