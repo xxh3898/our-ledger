@@ -22,7 +22,7 @@ function errorMessage(error: unknown) {
 
 function title(target: BudgetDrilldownTarget) {
   const scope = target.scope === 'HOUSEHOLD'
-    ? '우리 전체'
+    ? '가계 전체 한도'
     : target.scope === 'SHARED'
       ? '공동'
       : target.owner?.displayName ?? '개인'

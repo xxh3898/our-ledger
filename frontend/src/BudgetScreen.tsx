@@ -37,7 +37,7 @@ function errorMessage(error: unknown) {
 }
 
 function scopeLabel(scope: BudgetScope, owner: BudgetOwner | null) {
-  if (scope === 'HOUSEHOLD') return '우리 전체'
+  if (scope === 'HOUSEHOLD') return '가계 전체 한도'
   if (scope === 'SHARED') return '공동'
   return owner?.displayName ?? '개인'
 }
@@ -246,7 +246,10 @@ export function BudgetScreen({
       <section className="budget-heading" aria-labelledby="budget-title">
         <p className="section-kicker">Slice 5 · Monthly Budget</p>
         <h2 id="budget-title">예산</h2>
-        <p>거래 원장에서 계산한 이번 달 사용액과 남은 금액을 함께 봅니다.</p>
+        <p>
+          가계 전체 한도는 개인 예산의 합계가 아니라, 개인·공동 지출 전체에 적용하는
+          별도 월 한도예요. 사용액은 거래 원장에서 계산합니다.
+        </p>
       </section>
       <div className="month-navigation budget-month-navigation">
         <button type="button" aria-label="예산 이전 달" onClick={() => onMoveMonth(-1)}>‹</button>

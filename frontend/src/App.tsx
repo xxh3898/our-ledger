@@ -51,6 +51,7 @@ import {
   unlinkMarriageGoalAccount,
 } from './ledgerApi.ts'
 import { entryByRole } from './transactionUtils.ts'
+import { householdRoleLabel } from './uiVocabulary.ts'
 import {
   isStatisticsScreen,
   normalizeStatisticsState,
@@ -173,7 +174,7 @@ function CoupleHeader({
         <p className="brand-kicker">둘이 쓰는 하나의 생활 기록</p>
         <h1>우리의 장부</h1>
         <p className="household-meta">
-          {household.name} · {user.email} · {user.role}
+          {household.name} · {user.email} · {householdRoleLabel(user.role)}
         </p>
       </div>
       <div className="couple-actions">

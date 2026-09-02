@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.3
-last_updated: 2026-08-29
+version: 1.4
+last_updated: 2026-09-02
 related:
   - 04-api/error-contract.md
   - ADR-008
@@ -225,6 +225,7 @@ POST는 다음 identity와 amount를 받는다.
 PATCH는 같은 field에 현재 `version`을 추가한다. V1은 month/scope/owner/category/amount를 함께 수정할 수 있다.
 
 - HOUSEHOLD/SHARED는 `ownerMemberId=null`, PERSONAL은 current Household Member ID가 필수다.
+- HOUSEHOLD amount도 POST/PATCH로 직접 설정하는 독립 Budget 값이며 PERSONAL amount 합에서 파생하지 않는다.
 - `categoryId=null`은 해당 Scope 전체이며 값이 있으면 active EXPENSE Category만 허용한다.
 - amount는 0 이상 정수다.
 - 같은 identity의 service pre-check와 DB unique race는 모두 `409 BUDGET_DUPLICATE`다.
@@ -274,7 +275,9 @@ GET은 Budget row와 Transaction 파생 사용액의 단일 화면 계약이다.
 
 `scopes`는 HOUSEHOLD, current Household의 각 실제 Member PERSONAL, SHARED를 Budget 설정 여부와 무관하게 포함한다. 미설정은 `budgetId/version/budgetAmount/remainingAmount=null`이다. `categories`는 실제 생성된 Category Budget만 반환하고 archived Category도 `archived=true`로 식별한다.
 
-사용액은 같은 month/scope/category의 `NORMAL EXPENSE - REFUND EXPENSE`다. INCOME, TRANSFER, 논리삭제는 제외한다. 실제 request/response는 `BudgetApiDocsTest`의 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, Budget conflict snippet으로 검증한다.
+HOUSEHOLD `budgetAmount`는 HOUSEHOLD Budget row의 저장값이며 별도 `totalBudget` 합계 field가 아니다. 한 PERSONAL Budget이 미설정이어도 HOUSEHOLD 값은 변하지 않고, HOUSEHOLD가 미설정이면 PERSONAL Budget 존재 여부와 무관하게 HOUSEHOLD `budgetAmount/remainingAmount=null`이다.
+
+사용액은 같은 month/scope/category의 `NORMAL EXPENSE - REFUND EXPENSE`다. INCOME, TRANSFER, 논리삭제는 제외한다. HOUSEHOLD 사용액은 모든 PERSONAL과 SHARED 사용액을 포함하고, PERSONAL은 해당 Owner만, SHARED는 공동지출만 포함한다. `payerMemberId`는 Budget 계산에 사용하지 않는다. HOUSEHOLD와 PERSONAL/SHARED는 중첩 관점이므로 각 사용액을 다시 합산하지 않는다. 실제 request/response는 `BudgetApiDocsTest`의 `budget-create`, `budget-month`, `budget-update`, `budget-delete`, Budget conflict snippet으로 검증한다.
 
 ## Recurring API
 

@@ -1,3 +1,5 @@
+import { userFacingApiErrorMessage } from './uiVocabulary.ts'
+
 export type CurrentUser = {
   userId: number
   email: string
@@ -501,8 +503,9 @@ async function responseError(response: Response) {
     code?: string
     message?: string
   }
+  const fallback = error.message ?? '요청을 처리하지 못했습니다.'
   return new LedgerApiError(
-    error.message ?? '요청을 처리하지 못했습니다.',
+    userFacingApiErrorMessage(error.code, fallback),
     response.status,
     error.code,
   )

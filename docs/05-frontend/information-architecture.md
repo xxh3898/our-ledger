@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.1
-last_updated: 2026-08-29
+version: 1.2
+last_updated: 2026-09-02
 related:
   - 01-product/benchmark-weple-money.md
   - 05-frontend/calendar-screen.md
@@ -21,7 +21,7 @@ related:
 Ledger 본 화면 전에는 same-origin `/api/v1/me`로 current identity를 확인한다.
 
 - loading: User와 Household 확인 중임을 표시한다.
-- success: 표시명, email, Household 이름과 `OWNER`/`MEMBER` role을 표시한다.
+- success: 표시명, email, Household 이름과 membership role을 표시한다. 내부 `OWNER`/`MEMBER`는 각각 `대표 구성원`/`구성원`으로 mapping해 enum을 직접 노출하지 않는다.
 - 401: Cloudflare Access 인증이 필요함을 안내하되 app 자체 로그인/OTP form은 만들지 않는다.
 - 403: 내부 User 미등록·비활성 또는 Household membership 문제를 안내한다.
 - network/server error: 재시도 가능한 일반 오류로 표시한다.
@@ -107,6 +107,17 @@ Calendar Home은 Goal 없음이면 생성 CTA, Goal 존재면 실제 current/tar
 ```
 
 개인 항목은 API가 반환한 실제 Member 이름을 사용한다. `ME`나 `PARTNER`를 data model에 추가하지 않는다. 선택값은 달력·예산·통계의 조회 조건과 Assets Account ownership filter에 반영하되 화면별로 부적절한 경우 명확히 비활성화한다. Assets의 월 추이는 현재 소유 filter와 무관하게 Household 전체를 유지한다.
+
+## owner/payer 표시 용어
+
+| 내부 개념 | 화면 context | 사용자 노출 용어 |
+|---|---|---|
+| Transaction/Budget owner | 개인 수입·소비·예산 귀속 | `귀속자` |
+| Transaction payer | 지출을 실제 결제한 Member | `결제자` |
+| Account owner/ownership | 개인 Account 소유 Member·Assets filter | `소유자` / `소유 기준` |
+| Household `OWNER` role | Household당 한 명인 membership role | `대표 구성원` |
+
+이 mapping은 presentation 계약이다. API/DB/domain identifier, Household role 수·권한, 재무 계산을 변경하지 않는다. Member가 설정한 display name이 `Owner`나 `Payer`를 포함하더라도 사용자 data는 그대로 표시한다.
 
 ## 반응형
 

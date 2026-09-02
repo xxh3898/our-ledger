@@ -1241,7 +1241,7 @@ describe('App', () => {
     expect(within(householdMembers).getByText('Owner')).toBeInTheDocument()
     expect(within(householdMembers).getByText('Member')).toBeInTheDocument()
     expect(within(householdMembers).queryByText('나')).not.toBeInTheDocument()
-    expect(screen.getByText(/테스트 Household · owner@example.test · OWNER/))
+    expect(screen.getByText(/테스트 Household · owner@example.test · 대표 구성원/))
       .toBeInTheDocument()
     const hero = screen.getByRole('heading', { name: '이번 달 우리가 쓴 돈' }).closest('section')
     await waitFor(() => expect(hero).toHaveTextContent('12,000원'))
@@ -1639,7 +1639,8 @@ describe('App', () => {
     expect(amount).toHaveAttribute('inputmode', 'numeric')
     expect(within(dialog).getByLabelText('날짜')).toHaveValue('2026-08-27')
     expect(within(dialog).getByLabelText('범위')).toHaveValue('PERSONAL')
-    expect(within(dialog).getByLabelText('Owner')).toHaveValue('100')
+    expect(within(dialog).getByLabelText('귀속자')).toHaveValue('100')
+    expect(within(dialog).getByLabelText('결제자 (선택)')).toHaveValue('100')
   })
 
   it('clears Category on actual type changes and preserves inputs for the same type', async () => {
@@ -1971,6 +1972,7 @@ describe('App', () => {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: '설정' }))
     const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    expect(within(settings).getByLabelText('소유자')).toHaveValue('100')
 
     fireEvent.change(within(settings).getByLabelText('계좌 이름'), {
       target: { value: '생활비 통장' },
@@ -2304,8 +2306,8 @@ describe('App', () => {
 
     expect(within(dialog).getByLabelText('Category')).toHaveValue('302')
     expect(within(dialog).getByLabelText('Account')).toHaveValue('202')
-    expect(within(dialog).getByLabelText('Owner')).toHaveValue('101')
-    expect(within(dialog).getByLabelText('Payer (선택)')).toHaveValue('101')
+    expect(within(dialog).getByLabelText('귀속자')).toHaveValue('101')
+    expect(within(dialog).getByLabelText('결제자 (선택)')).toHaveValue('101')
     fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')).toBe(true))
@@ -2358,7 +2360,7 @@ describe('App', () => {
 
     expect(within(dialog).getByLabelText('Category')).toHaveValue('303')
     expect(within(dialog).getByLabelText('Account')).toHaveValue('201')
-    expect(within(dialog).getByLabelText('Owner')).toHaveValue('101')
+    expect(within(dialog).getByLabelText('귀속자')).toHaveValue('101')
     fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')).toBe(true))
@@ -2540,7 +2542,9 @@ describe('App', () => {
     expect(within(navigation).getByRole('button', { name: /예산/ }))
       .toHaveAttribute('aria-current', 'page')
     expect(window.location.search).toBe('?screen=budget&month=2026-08')
-    const householdCard = screen.getByRole('heading', { name: '우리 전체' })
+    expect(screen.getByText(/가계 전체 한도는 개인 예산의 합계가 아니라/))
+      .toBeInTheDocument()
+    const householdCard = screen.getByRole('heading', { name: '가계 전체 한도' })
       .closest('article') as HTMLElement
     expect(householdCard).toHaveTextContent('예산20,000원')
     expect(householdCard).toHaveTextContent('사용24,000원')
@@ -2656,11 +2660,12 @@ describe('App', () => {
     useBudgetUrl()
     const { fetchMock } = installLedgerRouter()
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '설정' }))
     const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    expect(within(dialog).getByText(/개인 예산 합계가 아니라/)).toBeInTheDocument()
     const categoryPicker = within(dialog).getByLabelText('Category')
     expect(within(categoryPicker).getByRole('option', { name: '식비' })).toBeInTheDocument()
     expect(within(categoryPicker).queryByRole('option', { name: '급여' })).not.toBeInTheDocument()
@@ -2718,7 +2723,7 @@ describe('App', () => {
       }],
     })
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
@@ -2738,7 +2743,7 @@ describe('App', () => {
     const deleteDialog = await screen.findByRole('dialog', { name: '예산 수정' })
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '예산 삭제' }))
     expect(within(deleteDialog).getByRole('alert')).toHaveTextContent(
-      '2026년 8월 · 우리 전체 · 전체 Category 예산만 삭제할까요?',
+      '2026년 8월 · 가계 전체 한도 · 전체 Category 예산만 삭제할까요?',
     )
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '삭제 확인' }))
 
@@ -2785,7 +2790,7 @@ describe('App', () => {
       }],
     })
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
     const updateDialog = await screen.findByRole('dialog', { name: '예산 수정' })
@@ -2843,16 +2848,16 @@ describe('App', () => {
     useBudgetUrl()
     installLedgerRouter()
     render(<App />)
-    const opener = await screen.findByRole('button', { name: '우리 전체 사용 내역 보기' })
+    const opener = await screen.findByRole('button', { name: '가계 전체 한도 사용 내역 보기' })
 
     fireEvent.click(opener)
 
-    const dialog = await screen.findByRole('dialog', { name: '우리 전체' })
+    const dialog = await screen.findByRole('dialog', { name: '가계 전체 한도' })
     const closeButton = within(dialog).getByRole('button', { name: '예산 사용 내역 닫기' })
     await waitFor(() => expect(closeButton).toHaveFocus())
     fireEvent.keyDown(window, { key: 'Escape' })
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '우리 전체' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '가계 전체 한도' }))
       .not.toBeInTheDocument())
     await waitFor(() => expect(opener).toHaveFocus())
   })
@@ -3229,6 +3234,8 @@ describe('App', () => {
     installLedgerRouter(options)
     const rendered = render(<App />)
     expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
+    expect(screen.getByText('소유 기준')).toBeInTheDocument()
+    expect(screen.queryByText('Current ownership')).not.toBeInTheDocument()
 
     options.assetsGate = new Promise<void>((resolve) => { releaseAssets = resolve })
     fireEvent.click(screen.getByRole('button', { name: 'Calendar' }))

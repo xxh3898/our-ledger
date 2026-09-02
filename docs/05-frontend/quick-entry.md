@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.5
-last_updated: 2026-08-28
+version: 0.6
+last_updated: 2026-09-02
 related:
   - 01-product/user-flows.md
   - 02-domain/transaction.md
@@ -50,6 +50,13 @@ related:
 - Scope 선택에는 고양이 identity를 signature interaction으로 사용할 수 있지만 실제 Member 이름과 `공동` text를 항상 함께 표시한다.
 - 거래 유형을 바꿔 기존 Category가 유효하지 않게 되면 임의로 다른 Category를 선택하지 않고 값을 해제해 사용자가 다시 선택하게 한다.
 - 숨긴 field의 이전 값은 submit payload에 남지 않아야 한다.
+
+## 사용자 노출 용어
+
+- Transaction `Owner`는 기록 작성자나 Account 소유자가 아니라 개인 수입·소비의 귀속자이므로 UI에서 `귀속자`로 표시한다.
+- `Payer`는 지출을 실제 결제한 Member이므로 UI에서 `결제자`로 표시한다. nullable field의 label은 `결제자 (선택)`이다.
+- 반복 거래 Sheet도 동일한 용어를 사용한다.
+- `owner`, `payer`, `ownerMemberId`, `payerMemberId`는 내부 API/domain identifier로 유지하고 사용자 label로 직접 출력하지 않는다.
 
 ## 기본값
 

@@ -10,6 +10,7 @@ import {
   updateTransaction,
 } from './ledgerApi.ts'
 import { entryByRole, isPrimaryAccountForType } from './transactionUtils.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 type TransactionFormState = {
   type: LedgerTransaction['type']
@@ -186,7 +187,7 @@ export function QuickEntrySheet({
       } else if (!form.categoryId || !form.accountId) {
         throw new Error('Category와 Account를 확인해 주세요.')
       } else if (form.scope === 'PERSONAL' && !form.ownerMemberId) {
-        throw new Error('개인 거래의 Owner를 확인해 주세요.')
+        throw new Error(`개인 거래의 ${UI_VOCABULARY.transactionOwner}를 확인해 주세요.`)
       }
 
       const input = {
@@ -295,7 +296,7 @@ export function QuickEntrySheet({
           )}
           {form.type !== 'TRANSFER' && form.scope === 'PERSONAL' && (
             <label>
-              Owner
+              {UI_VOCABULARY.transactionOwner}
               <select
                 required
                 value={form.ownerMemberId}
@@ -311,7 +312,7 @@ export function QuickEntrySheet({
           )}
           {form.type === 'EXPENSE' && (
             <label>
-              Payer (선택)
+              {UI_VOCABULARY.payer} (선택)
               <select
                 value={form.payerMemberId}
                 onChange={(event) => change('payerMemberId', event.target.value)}
