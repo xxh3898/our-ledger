@@ -141,6 +141,7 @@ revision = sys.argv[4]
 expected_files = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
+    "scripts/backup-our-ledger-bootstrap.sh": 0o700,
     "scripts/backup-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
@@ -156,6 +157,7 @@ expected_files = {
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/offsite-backup-production.sh": 0o700,
+    "scripts/offsite-our-ledger-bootstrap.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,

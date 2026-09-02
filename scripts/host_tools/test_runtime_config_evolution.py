@@ -25,7 +25,15 @@ OFFSITE_FILES = {
     "scripts/backup_tools/offsite_backup.py": 0o600,
     "scripts/offsite-backup-production.sh": 0o700,
 }
-V2_FILES = {**host_state.LEGACY_RELEASE_FILES, **OFFSITE_FILES}
+FIXED_BOOTSTRAP_FILES = {
+    "scripts/backup-our-ledger-bootstrap.sh": 0o700,
+    "scripts/offsite-our-ledger-bootstrap.sh": 0o700,
+}
+V2_FILES = {
+    **host_state.LEGACY_RELEASE_FILES,
+    **OFFSITE_FILES,
+    **FIXED_BOOTSTRAP_FILES,
+}
 
 
 class RuntimeConfigEvolutionTest(unittest.TestCase):
@@ -44,6 +52,9 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
         self.assertEqual(len(host_state.LEGACY_RELEASE_FILES), 20)
         self.assertNotIn(host_state.RUNTIME_MANIFEST, host_state.LEGACY_RELEASE_FILES)
         self.assertTrue(OFFSITE_FILES.keys().isdisjoint(host_state.LEGACY_RELEASE_FILES))
+        self.assertTrue(
+            FIXED_BOOTSTRAP_FILES.keys().isdisjoint(host_state.LEGACY_RELEASE_FILES)
+        )
         self.assertEqual(
             host_state.release_content_sha256(source),
             LEGACY_REFERENCE_SHA256,
@@ -68,7 +79,7 @@ class RuntimeConfigEvolutionTest(unittest.TestCase):
         profile = host_state.parse_runtime_manifest(expected_bytes)
         self.assertEqual(profile.format_version, 2)
         self.assertEqual(profile.file_modes, V2_FILES)
-        self.assertEqual(len(profile.file_modes), 22)
+        self.assertEqual(len(profile.file_modes), 24)
         self.assertEqual(
             profile.directories,
             {

@@ -79,6 +79,16 @@ jobs:
       - name: Host state/shared operation lock 검증
         run: ./scripts/verify-host-state.sh
 
+  fixed-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: Fixed backup/offsite bootstrap source 검증
+        run: ./scripts/verify-fixed-bootstrap.sh
+
   runtime-config-evolution:
     runs-on: ubuntu-latest
     timeout-minutes: 15

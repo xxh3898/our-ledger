@@ -180,7 +180,7 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
-`runtime-config.Dockerfile`은 `scratch`에서 시작한다. 10D-3B3F source는 root `runtime-manifest.json` mode `0600`과 manifest가 선언한 exact 22개 Compose/Nginx/backup/offsite/status/monitor/host payload를 한 번씩 COPY한다. manifest top-level은 `formatVersion`, `project`, `files`, entry는 `path`, `mode`만 허용하고 sorted unique canonical relative POSIX path와 `0600|0700` mode를 고정한다. `.env`, recipient, credential, private key, backup dump, local/offsite marker, monitor state와 host-specific runtime value는 계속 포함하지 않는다. artifact contract는 23개 regular file의 exact mode와 7개 parent directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1/A2 source는 release/state/current와 fresh ingress의 owner/mode를 검증하고 실제 Mac mini app root와 bootstrap/offsite ingress 설치는 별도 운영 Gate에서 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 manifest와 declared payload source가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
+`runtime-config.Dockerfile`은 `scratch`에서 시작한다. 10D-3B3F가 만든 exact 22개 payload에 10D-3B3J12 fixed backup/offsite bootstrap source 2개를 더해 root `runtime-manifest.json` mode `0600`과 exact 24개 Compose/Nginx/backup/offsite/bootstrap/status/monitor/host payload를 한 번씩 COPY한다. manifest top-level은 `formatVersion`, `project`, `files`, entry는 `path`, `mode`만 허용하고 sorted unique canonical relative POSIX path와 `0600|0700` mode를 고정한다. `.env`, recipient, credential, private key, backup dump, local/offsite marker, monitor state와 host-specific runtime value는 계속 포함하지 않는다. artifact contract는 manifest 포함 25개 regular file의 exact mode와 기존 7개 parent directory hierarchy, symlink·비정규 entry 부재를 고정하지만 BuildKit이 자동 생성한 parent directory mode를 security authority로 주장하지 않는다. B1/A2 source는 release/state/current와 fresh ingress의 owner/mode를 검증하고 실제 Mac mini app root와 fixed bootstrap ingress 설치는 별도 운영 Gate에서 수행한다. `scripts/detect-runtime-config-change.sh`는 last successful Production revision부터 candidate까지 manifest와 declared payload source가 바뀌지 않았으면 `keep`, 변경·최초 bootstrap·명시적인 force면 `update`를 반환한다. revision이 없거나 candidate의 ancestor가 아니면 publish 전에 fail closed한다.
 
 전송 payload는 다음 둘 중 하나다.
 
@@ -213,7 +213,7 @@ V2 manifest는 exact `formatVersion`, `project`, `files`와 entry `path`, `mode`
 
 candidate tar는 exact digest, linux/arm64와 OCI revision/version을 먼저 검증한 뒤 `/runtime` subtree를 read-only 분류한다. actual member set이 profile과 exact 일치하고 traversal, duplicate, symlink/hardlink/device/FIFO/socket, mode/size/private-key marker가 없을 때만 member별로 private temp root에 추출하고 host validator로 다시 검증한다. stage는 source/profile/hash를 copy 전후 비교하고 owner-only file/directory fsync 뒤에만 immutable release를 publish한다. current/state/pending `ReleaseIdentity` JSON schema는 변경하지 않아 Legacy V1과 V2 release가 함께 존재할 수 있다.
 
-`./scripts/verify-runtime-config-evolution.sh`는 frozen V1 hash/state와 V1→synthetic V2 transition/failure matrix를 보존하면서 actual candidate image를 `linux/arm64 --network none`으로 build/create/export한다. exported V2 archive의 exact manifest bytes, 22 payload/7 directory와 type/mode를 bridge extractor로 preflight·member별 추출하고 동일 host validator로 re-read한 뒤 immutable stage/current/content hash까지 합성 경로에서 검증한다. `verify-release-transport.sh`도 같은 V2 source allowlist, executable/help와 Compose render를 확인한다. V2 GHCR release/publish와 bridge worker를 통한 production update/offsite 실행은 별도 Gate다.
+`./scripts/verify-runtime-config-evolution.sh`는 frozen V1 hash/state와 V1→synthetic V2 transition/failure matrix를 보존하면서 actual candidate image를 `linux/arm64 --network none`으로 build/create/export한다. exported V2 archive의 exact manifest bytes, current 24 payload/7 directory와 type/mode를 bridge extractor로 preflight·member별 추출하고 동일 host validator로 re-read한 뒤 immutable stage/current/content hash까지 합성 경로에서 검증한다. `verify-release-transport.sh`도 같은 V2 source allowlist, executable/help와 Compose render를 확인한다. `verify-fixed-bootstrap.sh`는 hostile inherited environment, exact argument와 plist correspondence를 synthetic하게 고정한다. V2 GHCR release/publish와 bridge worker를 통한 production update, fixed host path 설치, LaunchAgent activation과 backup/offsite 실행은 별도 Gate다.
 
 ## 10D-2B1 host state와 shared operation lock
 
@@ -317,7 +317,7 @@ DB mutation 뒤 실패에는 volume/User/Household/Flyway history를 삭제하�
 
 ## 10D-3B activation boundary
 
-B2, 3A1, 3A2, 3B0, 3B3A, 3B3C와 3B3F 완료는 deployment/application bootstrap/fresh transaction/publish-only/encrypted offsite source/runtime evolution bridge/Manifested V2 source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. V2 release/publish/host update, owner-only actual env/input/offsite config, pre-current/offsite ingress 설치, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, age recipient/iCloud target, Cloudflare/secret/User, actual production DB/migration/bootstrap/backup/offsite, schedule·replication, public smoke와 kill switch 활성화는 별도 운영 승인 대상이다. one-shot migration/bootstrap/offsite architecture가 실제 schema, 2인 Household 또는 host security 의미와 맞지 않으면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
+B2, 3A1, 3A2, 3B0, 3B3A, 3B3C, 3B3F와 3B3J12 완료는 deployment/application bootstrap/fresh transaction/publish-only/encrypted offsite source/runtime evolution bridge/Manifested V2/fixed schedule bootstrap source와 synthetic recovery·exact-state 검증이 끝났다는 의미다. 후속 V2 release/publish/host update, fixed host ingress 설치, owner-only actual env/input/offsite config, pre-current/offsite ingress 설치, 실제 GHCR package/credential, Tailscale credential, authorized key forced command, age recipient/iCloud target, Cloudflare/secret/User, actual production DB/migration/bootstrap/backup/offsite, LaunchAgent schedule·replication, public smoke와 kill switch 활성화는 별도 운영 승인 대상이다. one-shot migration/bootstrap/offsite architecture가 실제 schema, 2인 Household 또는 host security 의미와 맞지 않으면 activation을 진행하지 않고 `DECISION_REQUIRED`로 중단한다.
 
 ## 배포 Gate
 
@@ -332,7 +332,7 @@ B2, 3A1, 3A2, 3B0, 3B3A, 3B3C와 3B3F 완료는 deployment/application bootstrap
 - `cloudflared` Access 검증 설정
 - health check
 
-10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1/A2/3B0/3B3A/3B3C/3B3F source/CI 통과는 artifact publish workflow 실행, Tailscale/SSH, production deploy, ingress/host state 설치, actual bootstrap input/DB write, status/monitor/offsite 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service, iCloud 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 운영 결정이다.
+10C source와 10D-1/10D-2A/10D-2B1/B2/10D-3A1/A2/3B0/3B3A/3B3C/3B3F/3B3J12 source/CI 통과는 artifact publish workflow 실행, Tailscale/SSH, production deploy, fixed ingress/host state 설치, actual bootstrap input/DB write, status/monitor/offsite 실행 또는 production backup/migration/restore/LaunchAgent Gate의 승인이 아니며 실제 public URL, service, iCloud 또는 data 상태를 변경하지 않는다. `OUR_LEDGER_DEPLOY_ENABLED` 활성화도 별도 운영 결정이다.
 
 ## 롤백
 

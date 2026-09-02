@@ -154,7 +154,7 @@ related:
 - 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
 - actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
 - local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
-- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`, encrypted `offsite-backup`과 `runtime-config-evolution`을 포함한 현재 14개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`과 `runtime-config-evolution`을 포함한 현재 15개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
 
 ### Slice 10D-3A2 Fresh-host Bootstrap Transaction Source Gate
 
@@ -167,7 +167,7 @@ related:
 - first verified backup 이후에만 one-time input을 unlink하고 parent fsync하며, `INPUT_CONSUMED` 이후에는 input 없이 exact authority를 재검증해 commit할 수 있다.
 - 최종 state는 existing B2 formatVersion 2, previous null과 exact candidate current를 사용한다. 성공 후 fresh ingress rerun은 nonzero이고 data/schema/backup authority가 바뀌지 않는다.
 - local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
-- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`, encrypted `offsite-backup`과 `runtime-config-evolution`을 포함한 14개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`과 `runtime-config-evolution`을 포함한 15개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
 ### Slice 10D-3B0 Exact-SHA GHCR Publish-only Source Gate
 
@@ -207,12 +207,22 @@ related:
 
 ### Slice 10D-3B3F Manifested Runtime V2 Source Gate
 
-- root `runtime-manifest.json`은 mode `0600` regular file이고 exact top-level/entry schema, integer version 2, project `our-ledger`, sorted unique canonical POSIX path와 `0600|0700` mode로 exact 22개 payload를 선언한다. manifest 자신은 payload list에 포함하지 않는다.
-- `runtime-config.Dockerfile`은 `scratch`에서 manifest와 22개 payload를 최종 mode로 각각 한 번만 COPY한다. actual runtime subtree는 exact 23 regular file과 payload parent 7 directory이며 env/key/dump/marker/state, symlink/hardlink/nonregular/unexpected entry가 없다.
+- 10D-3B3F 당시 root `runtime-manifest.json` baseline은 mode `0600` regular file이고 exact top-level/entry schema, integer version 2, project `our-ledger`, sorted unique canonical POSIX path와 `0600|0700` mode로 exact 22개 payload를 선언했다. manifest 자신은 payload list에 포함하지 않는다. 후속 10D-3B3J12가 같은 schema에 두 fixed bootstrap source를 additive하게 추가한다.
+- 10D-3B3F 당시 `runtime-config.Dockerfile` baseline은 `scratch`에서 manifest와 22개 payload를 최종 mode로 각각 한 번만 COPY했다. 후속 10D-3B3J12 current profile은 exact 24 payload/25 regular file이며 parent 7 directory, env/key/dump/marker/state와 symlink/hardlink/nonregular/unexpected entry 부재 계약은 유지한다.
 - offsite worker `scripts/backup_tools/offsite_backup.py` mode `0600`과 public wrapper `scripts/offsite-backup-production.sh` mode `0700`을 활성 payload에 포함하고 Dockerfile, manifest와 runtime change detector source allowlist를 동기화한다.
 - `verify-runtime-config-evolution.sh`는 frozen Legacy V1 20-file/hash/state regression과 V1→V2 synthetic failure matrix를 유지하면서 actual candidate를 `linux/arm64 --network none`으로 build/create/export한다. bridge extractor preflight→member별 extract→host validator re-read→immutable stage/current/content hash를 actual manifest bytes와 payload로 검증한다.
 - `verify-release-transport.sh`는 같은 actual V2 allowlist/mode/directory/OCI identity, public shell syntax/Python help와 Compose render를 검증하고 Docker residue 0을 요구한다. GHCR login/push, Tailscale, SSH, production path/DB/iCloud/Cloudflare/Secret을 사용하지 않는다.
 - Source Gate 성공 의미는 `MANIFESTED_RUNTIME_V2_SOURCE_READY`이며 V2 release/publish, Mac mini pull/stage/current 전환, encrypted offsite 실행이나 운영 활성화를 승인하지 않는다.
+
+### Slice 10D-3B3J12 Production Backup/Offsite Fixed Bootstrap Source Gate
+
+- canonical source `scripts/backup-our-ledger-bootstrap.sh`와 `scripts/offsite-our-ledger-bootstrap.sh`는 installed mode `0700`의 Manifested Runtime V2 payload다. production fixed path 설치와 LaunchAgent 등록은 이 Source Gate에서 수행하지 않는다.
+- 두 source는 `#!/bin/bash`, `set -euo pipefail`, `umask 077`을 사용하고 `/usr/bin/env -i`로 `HOME=/Users/homeserver`, `LANG=C`, `LC_ALL=C`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`만 downstream runtime wrapper에 전달한다. Homebrew/user path, inherited `BASH_ENV`/`PYTHONPATH`, secret과 private AGE identity를 전달하지 않는다.
+- backup public interface는 argument 0개만 허용하고 exact `backup-production.sh`에 source가 고정한 `our-ledger-production`, `/Users/homeserver/Server/apps/our-ledger/.env`, `/Users/homeserver/Server/backups/our-ledger/data` authority를 전달한다. offsite public interface는 exact `run` 하나만 받아 exact `offsite-backup-production.sh run`을 전달한다. 두 target을 각각 한 번 `exec`하고 retry, fallback checkout, direct Docker/DB/launchctl capability를 제공하지 않는다.
+- leaf entrypoint가 current owner의 regular non-symlink executable이 아니면 fail closed한다. full release/current manifest/content authority는 기존 host state validator와 schedule activation preflight가 검증하며 fixed ingress가 별도 mutable artifact authority를 만들지 않는다.
+- active manifest는 sorted exact 24 payload, artifact는 manifest 포함 exact 25 regular file과 기존 7개 parent directory를 요구한다. Dockerfile single COPY, runtime detector, bridge/evolution/release gate를 같은 source set으로 동기화한다.
+- hostile inherited environment, invalid argument, missing/symlink/non-executable target과 plist fixed path/calendar correspondence를 synthetic test로 검증한다. local `verify.sh`와 Hosted Full CI의 독립 `fixed-bootstrap` job은 actual production path, backup/offsite worker와 LaunchAgent를 실행하지 않는다.
+- delivery model은 `RUNTIME_V2_PAYLOAD`다. Source Gate 뒤 exact-SHA Runtime V2 publish/host update가 먼저 필요하며 그 후 별도 #116 owner package가 payload bytes/hash에 대응하는 fixed host ingress를 설치하고 schedule을 활성화한다.
 
 ### Slice 10D-2B1 Host State / Shared Operation Lock / Runtime-config Staging Gate
 
