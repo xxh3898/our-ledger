@@ -256,6 +256,16 @@ Encrypted Offsite Backup Source Gate는 추가로 다음을 검증한다.
 
 `scripts/verify-offsite-backup.sh`는 owner-only temporary root만 사용하고 actual production backup/config/state/iCloud/recipient/LaunchAgent/DB/Compose에 접근하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `offsite-backup` job에서 실행한다.
 
+Fixed Backup/Offsite Bootstrap Source Harness는 다음을 검증한다.
+
+- 두 canonical source의 `/bin/bash`, strict mode, `umask 077`, exact production `runtime-config/current` entrypoint와 installed executable mode
+- backup public argument 0개와 fixed project/env/backup downstream authority, offsite exact `run` 하나 외 입력의 fail-closed, target missing/symlink/non-executable 거부, 정상 target call site 1회와 retry/fallback 부재
+- hostile inherited `HOME`, `PATH`, `PYTHONPATH`, `BASH_ENV`를 넣어도 `/usr/bin/env -i` 이후 exact HOME/locale/system-only PATH만 downstream으로 전달됨
+- launchd example의 fixed ProgramArguments와 backup `:35`/offsite `:50` calendar, no `KeepAlive`/`RunAtLoad`/secret environment/mutable working directory
+- source, manifest, Dockerfile, runtime detector와 current 24-payload profile의 동기화 및 production/LaunchAgent/backup/offsite 실행 0
+
+`scripts/verify-fixed-bootstrap.sh`는 source shell syntax와 Python synthetic harness만 실행한다. local `verify.sh`와 Hosted Full CI의 독립 `fixed-bootstrap` job에서 실행하며 `/Users/homeserver/Server`를 읽거나 쓰지 않고 fixed production target literal은 test-only temporary harness에서만 exact 1회 치환한다.
+
 Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 
 - release helper의 exact 40자리 SHA, `sha256:` digest, bounded actor와 keep/update restricted command grammar
@@ -265,7 +275,7 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 - publish/deploy job의 최소 permission, exact-SHA linux/arm64 image/OCI label/digest와 `latest` 부재
 - publish/deploy privileged job의 third-party action exact 40-hex pin과 mutable tag 부재
 - GHCR token stdin-only restricted SSH boundary, helper-free private `config.json`의 exact JSON/owner/mode/nlink/fsync/lifetime과 token/base64 auth의 command argument·environment·report·exception 비포함
-- `scratch` runtime-config artifact의 manifest+22 payload source별 single COPY, exact 23 regular-file allowlist와 `0600`/`0700` mode, 7개 expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
+- `scratch` runtime-config artifact의 manifest+24 payload source별 single COPY, exact 25 regular-file allowlist와 `0600`/`0700` mode, 7개 expected directory hierarchy, symlink와 env/key/dump/state 부재. BuildKit parent directory mode는 고정하지 않고 10D-2B1 state source/10D-2B2 host install authority와 분리한다.
 - 고유 label을 가진 disposable image/container의 성공·실패 cleanup과 residue 0
 
 `scripts/verify-release-transport.sh`는 helper unit test 뒤 local Docker `--platform linux/arm64 --network none`으로 Manifested Runtime V2 source를 build/create/export하고 bridge extractor와 host validator로 exact manifest/payload를 확인한다. 합성 `.env.production.example`로 Compose render와 공개 local/offsite script syntax/Python help를 확인하고 actual registry login/push, Tailscale, SSH, GitHub deployment, Mac mini 또는 `/Users/homeserver/Server`를 사용하지 않는다. local `verify.sh`와 Hosted Full CI의 독립 `release-transport` job에서 실행한다.
@@ -273,8 +283,8 @@ Immutable Release/Deploy Source Harness는 다음을 추가로 검증한다.
 Runtime-config Evolution / Manifested V2 Harness는 다음을 추가로 검증한다.
 
 - production `9dd350b...`의 manifest 없는 20-file Legacy V1 profile과 independent old reference content hash
-- repository `runtime-manifest.json` exact bytes/schema와 sorted 22 payload, Dockerfile single COPY와 detector source allowlist 동기화
-- candidate branch의 actual `runtime-config.Dockerfile` linux/arm64 build/export 결과가 manifest+22 payload/7 directory와 OCI source/revision/version identity에 일치함
+- repository `runtime-manifest.json` exact bytes/schema와 sorted 24 payload, Dockerfile single COPY와 detector source allowlist 동기화
+- candidate branch의 actual `runtime-config.Dockerfile` linux/arm64 build/export 결과가 manifest+24 payload/7 directory와 OCI source/revision/version identity에 일치함
 - 기존 V1 release/current/state parse와 read-only inspect, V1/V2 release 공존, V1→V2 archive classify/safe extract/stage/pending/current transition
 - V2 exact manifest bytes를 포함한 domain-separated hash와 strict duplicate key/path, sorted path, namespace, mode, file count/size schema
 - missing/extra/mixed payload, unsafe path, symlink/hardlink/device/FIFO/socket, mode/size/private-key marker, source-copy race의 fail-closed 및 prior state/stage residue 보존
@@ -499,4 +509,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 17개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 14개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 16개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.

@@ -52,6 +52,7 @@ if git diff --quiet \
   infra/nginx/nginx.conf \
   runtime-config.Dockerfile \
   runtime-manifest.json \
+  scripts/backup-our-ledger-bootstrap.sh \
   scripts/backup-production.sh \
   scripts/bootstrap-production.sh \
   scripts/backup_tools/backup_artifact.py \
@@ -67,6 +68,7 @@ if git diff --quiet \
   scripts/host_tools/production_host.py \
   scripts/monitor-production.sh \
   scripts/offsite-backup-production.sh \
+  scripts/offsite-our-ledger-bootstrap.sh \
   scripts/production-status.sh \
   scripts/release_tools/release_contract.py \
   scripts/status_tools/monitor_policy.py \
