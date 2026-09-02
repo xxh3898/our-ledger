@@ -1237,8 +1237,10 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '우리의 장부' }))
       .toBeInTheDocument()
-    expect(screen.getAllByText('Owner').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Member').length).toBeGreaterThan(0)
+    const householdMembers = screen.getByRole('list', { name: 'Household 구성원' })
+    expect(within(householdMembers).getByText('Owner')).toBeInTheDocument()
+    expect(within(householdMembers).getByText('Member')).toBeInTheDocument()
+    expect(within(householdMembers).queryByText('나')).not.toBeInTheDocument()
     expect(screen.getByText(/테스트 Household · owner@example.test · OWNER/))
       .toBeInTheDocument()
     const hero = screen.getByRole('heading', { name: '이번 달 우리가 쓴 돈' }).closest('section')
@@ -1246,7 +1248,10 @@ describe('App', () => {
     expect(hero).toHaveTextContent('지난달보다 7,000원 더 썼어요.')
     expect(await screen.findByRole('heading', { name: '둘의 결혼자금 목표를 만들어 보세요' }))
       .toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Calendar 보기 범위' })).toBeInTheDocument()
+    const scope = screen.getByRole('navigation', { name: 'Calendar 보기 범위' })
+    expect(within(scope).getByRole('button', { name: 'Owner' })).toBeInTheDocument()
+    expect(within(scope).getByRole('button', { name: 'Member' })).toBeInTheDocument()
+    expect(within(scope).queryByRole('button', { name: / · 나$/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '2026년 8월' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '8월 27일의 기록' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '주요 메뉴' })).toBeInTheDocument()
@@ -1507,7 +1512,7 @@ describe('App', () => {
     render(<App />)
     const scope = await screen.findByRole('navigation', { name: 'Calendar 보기 범위' })
 
-    fireEvent.click(within(scope).getByRole('button', { name: 'Owner · 나' }))
+    fireEvent.click(within(scope).getByRole('button', { name: 'Owner' }))
     await waitFor(() => expect(
       screen.getByRole('heading', { name: '이번 달 우리가 쓴 돈' }).closest('section'),
     ).toHaveTextContent('12,000원'))

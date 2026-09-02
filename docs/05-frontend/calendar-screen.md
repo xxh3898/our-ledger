@@ -138,7 +138,7 @@ Slice 8은 loading에서 이전 수치를 지우고 `GET /api/v1/goals/marriage`
 
 ## Slice 4 구현 상태
 
-- Couple header는 API의 실제 Member 이름과 현재 사용자 `나` 표시, CSS avatar placeholder를 사용한다.
+- Couple header는 API의 실제 Member 이름과 CSS avatar placeholder를 사용하며 현재 사용자를 뜻하는 별도 `나` 표시는 붙이지 않는다.
 - 월 요약·날짜별 상태·선택일 목록은 같은 ALL/PERSONAL/SHARED 조건으로 각각 독립 로딩하며 이전 조건 값을 남기지 않는다.
 - 무지출 Paw는 Household timezone 기준 미래가 아닌 날짜에서 순소비가 0일 때 표시한다. 수입/이체만 있는 날도 포함한다.
 - `month/view/date/memberId` URL을 정규화하고 `popstate`와 동기화한다. 월 이동 시 선택 일자를 새 월 마지막 날까지 clamp한다.
