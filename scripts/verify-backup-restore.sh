@@ -56,6 +56,7 @@ backup_dir="$runtime_temp_dir/backups"
 failure_backup_dir="$runtime_temp_dir/failure-backups"
 fault_bin_dir="$runtime_temp_dir/fault-bin"
 fault_python_dir="$runtime_temp_dir/fault-python"
+fault_backup_core="$runtime_temp_dir/fault-backup-core.sh"
 cleanup_complete=false
 
 mkdir -m 700 \
@@ -551,7 +552,7 @@ rmdir "$synthetic_app_root/operations/lock"
 real_docker="$(command -v docker)"
 fault_docker="$fault_bin_dir/docker"
 {
-  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '#!/bin/bash'
   printf '%s\n' 'set -euo pipefail'
   printf '%s\n' 'fault_mode="${OUR_LEDGER_FAULT_MODE:-}"'
   printf '%s\n' 'for argument in "$@"; do'
@@ -581,6 +582,38 @@ fault_docker="$fault_bin_dir/docker"
 } > "$fault_docker"
 chmod 700 "$fault_docker"
 
+python3 -B - \
+  "$runtime_release_next/scripts/backup_tools/backup_core.sh" \
+  "$fault_backup_core" \
+  "$runtime_release_next" \
+  "$fault_docker" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+source_path = Path(sys.argv[1])
+target_path = Path(sys.argv[2])
+runtime_root = Path(sys.argv[3])
+fault_docker = Path(sys.argv[4])
+source = source_path.read_text(encoding="utf-8")
+root_assignment = 'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"'
+if source.count(root_assignment) != 1:
+    raise SystemExit("backup core root assignment differs")
+source = source.replace(
+    root_assignment,
+    f"ROOT_DIR={shlex.quote(str(runtime_root))}",
+    1,
+)
+for fixed_docker in ("/usr/local/bin/docker", "/usr/bin/docker"):
+    if source.count(fixed_docker) != 1:
+        raise SystemExit("backup core fixed Docker literal differs")
+    source = source.replace(fixed_docker, str(fault_docker), 1)
+target_path.write_text(source, encoding="utf-8")
+target_path.chmod(0o700)
+PY
+
+FAULT_BACKUP_COMMAND=(/bin/bash "$fault_backup_core")
+
 {
   printf '%s\n' 'import os'
   printf '%s\n' 'import sys'
@@ -596,7 +629,7 @@ expect_failure "pg_dump command" \
     PATH="$fault_bin_dir:$PATH" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=pg-dump \
-    "${BACKUP_COMMAND[@]}" \
+    "${FAULT_BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -619,7 +652,7 @@ expect_failure "Flyway schema version overlap" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=schema-version-change \
     OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/schema-version-state" \
-    "${BACKUP_COMMAND[@]}" \
+    "${FAULT_BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
@@ -631,7 +664,7 @@ expect_failure "post-check failed Flyway migration" \
     OUR_LEDGER_REAL_DOCKER="$real_docker" \
     OUR_LEDGER_FAULT_MODE=post-failed-migration \
     OUR_LEDGER_FAULT_STATE_FILE="$runtime_temp_dir/post-failed-state" \
-    "${BACKUP_COMMAND[@]}" \
+    "${FAULT_BACKUP_COMMAND[@]}" \
       --project-name "$source_project" \
       --env-file "$env_file" \
       --backup-dir "$backup_dir"
