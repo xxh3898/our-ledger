@@ -29,6 +29,10 @@ VALIDATION_RUN_ID = "33300523522"
 RUNTIME_PAYLOAD_FILES = {
     "compose.prod.yaml": ("0600", "/runtime/compose.yaml"),
     "infra/nginx/nginx.conf": ("0600", "/runtime/infra/nginx/nginx.conf"),
+    "scripts/backup-our-ledger-bootstrap.sh": (
+        "0700",
+        "/runtime/scripts/backup-our-ledger-bootstrap.sh",
+    ),
     "scripts/backup-production.sh": ("0700", "/runtime/scripts/backup-production.sh"),
     "scripts/bootstrap-production.sh": (
         "0700",
@@ -82,6 +86,10 @@ RUNTIME_PAYLOAD_FILES = {
     "scripts/offsite-backup-production.sh": (
         "0700",
         "/runtime/scripts/offsite-backup-production.sh",
+    ),
+    "scripts/offsite-our-ledger-bootstrap.sh": (
+        "0700",
+        "/runtime/scripts/offsite-our-ledger-bootstrap.sh",
     ),
     "scripts/production-status.sh": ("0700", "/runtime/scripts/production-status.sh"),
     "scripts/release_tools/release_contract.py": (
@@ -624,6 +632,8 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertIn("run: ./scripts/verify-release-transport.sh", workflow)
         self.assertIn("  offsite-backup:\n", workflow)
         self.assertIn("run: ./scripts/verify-offsite-backup.sh", workflow)
+        self.assertIn("  fixed-bootstrap:\n", workflow)
+        self.assertIn("run: ./scripts/verify-fixed-bootstrap.sh", workflow)
 
     def test_deploy_workflow_is_inert_by_default_and_serialized(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")

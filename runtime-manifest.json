@@ -11,6 +11,10 @@
       "mode": "0600"
     },
     {
+      "path": "scripts/backup-our-ledger-bootstrap.sh",
+      "mode": "0700"
+    },
+    {
       "path": "scripts/backup-production.sh",
       "mode": "0700"
     },
@@ -68,6 +72,10 @@
     },
     {
       "path": "scripts/offsite-backup-production.sh",
+      "mode": "0700"
+    },
+    {
+      "path": "scripts/offsite-our-ledger-bootstrap.sh",
       "mode": "0700"
     },
     {

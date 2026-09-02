@@ -153,6 +153,7 @@ expected_directories = {
 expected_files = {
     "compose.yaml": 0o600,
     "infra/nginx/nginx.conf": 0o600,
+    "scripts/backup-our-ledger-bootstrap.sh": 0o700,
     "scripts/backup-production.sh": 0o700,
     "scripts/backup_tools/backup_artifact.py": 0o600,
     "scripts/backup_tools/backup_core.sh": 0o600,
@@ -168,6 +169,7 @@ expected_files = {
     "scripts/host_tools/production_host.py": 0o600,
     "scripts/monitor-production.sh": 0o700,
     "scripts/offsite-backup-production.sh": 0o700,
+    "scripts/offsite-our-ledger-bootstrap.sh": 0o700,
     "scripts/production-status.sh": 0o700,
     "scripts/release_tools/release_contract.py": 0o700,
     "scripts/status_tools/monitor_policy.py": 0o600,
@@ -204,12 +206,14 @@ for path in root.rglob("*"):
 PY
 
 bash -n \
+  "$runtime_dir/scripts/backup-our-ledger-bootstrap.sh" \
   "$runtime_dir/scripts/backup-production.sh" \
   "$runtime_dir/scripts/bootstrap-production.sh" \
   "$runtime_dir/scripts/backup_tools/backup_core.sh" \
   "$runtime_dir/scripts/deploy-production.sh" \
   "$runtime_dir/scripts/monitor-production.sh" \
   "$runtime_dir/scripts/offsite-backup-production.sh" \
+  "$runtime_dir/scripts/offsite-our-ledger-bootstrap.sh" \
   "$runtime_dir/scripts/production-status.sh"
 (
   cd "$runtime_dir"
