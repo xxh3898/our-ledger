@@ -2535,7 +2535,9 @@ describe('App', () => {
     expect(within(navigation).getByRole('button', { name: /예산/ }))
       .toHaveAttribute('aria-current', 'page')
     expect(window.location.search).toBe('?screen=budget&month=2026-08')
-    const householdCard = screen.getByRole('heading', { name: '우리 전체' })
+    expect(screen.getByText(/가계 전체 한도는 개인 예산의 합계가 아니라/))
+      .toBeInTheDocument()
+    const householdCard = screen.getByRole('heading', { name: '가계 전체 한도' })
       .closest('article') as HTMLElement
     expect(householdCard).toHaveTextContent('예산20,000원')
     expect(householdCard).toHaveTextContent('사용24,000원')
@@ -2651,11 +2653,12 @@ describe('App', () => {
     useBudgetUrl()
     const { fetchMock } = installLedgerRouter()
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '설정' }))
     const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    expect(within(dialog).getByText(/개인 예산 합계가 아니라/)).toBeInTheDocument()
     const categoryPicker = within(dialog).getByLabelText('Category')
     expect(within(categoryPicker).getByRole('option', { name: '식비' })).toBeInTheDocument()
     expect(within(categoryPicker).queryByRole('option', { name: '급여' })).not.toBeInTheDocument()
@@ -2713,7 +2716,7 @@ describe('App', () => {
       }],
     })
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
@@ -2733,7 +2736,7 @@ describe('App', () => {
     const deleteDialog = await screen.findByRole('dialog', { name: '예산 수정' })
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '예산 삭제' }))
     expect(within(deleteDialog).getByRole('alert')).toHaveTextContent(
-      '2026년 8월 · 우리 전체 · 전체 Category 예산만 삭제할까요?',
+      '2026년 8월 · 가계 전체 한도 · 전체 Category 예산만 삭제할까요?',
     )
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '삭제 확인' }))
 
@@ -2780,7 +2783,7 @@ describe('App', () => {
       }],
     })
     render(<App />)
-    const householdCard = (await screen.findByRole('heading', { name: '우리 전체' }))
+    const householdCard = (await screen.findByRole('heading', { name: '가계 전체 한도' }))
       .closest('article') as HTMLElement
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
     const updateDialog = await screen.findByRole('dialog', { name: '예산 수정' })
@@ -2838,16 +2841,16 @@ describe('App', () => {
     useBudgetUrl()
     installLedgerRouter()
     render(<App />)
-    const opener = await screen.findByRole('button', { name: '우리 전체 사용 내역 보기' })
+    const opener = await screen.findByRole('button', { name: '가계 전체 한도 사용 내역 보기' })
 
     fireEvent.click(opener)
 
-    const dialog = await screen.findByRole('dialog', { name: '우리 전체' })
+    const dialog = await screen.findByRole('dialog', { name: '가계 전체 한도' })
     const closeButton = within(dialog).getByRole('button', { name: '예산 사용 내역 닫기' })
     await waitFor(() => expect(closeButton).toHaveFocus())
     fireEvent.keyDown(window, { key: 'Escape' })
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '우리 전체' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '가계 전체 한도' }))
       .not.toBeInTheDocument())
     await waitFor(() => expect(opener).toHaveFocus())
   })

@@ -38,6 +38,8 @@ import io.github.xxh3898.ourledger.transaction.TransactionType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -222,6 +224,51 @@ class BudgetIntegrationTest {
                         BudgetMonthResponse.CategoryBudget::exceeded
                 )
                 .containsExactly(0L, 20_000L, -20_000L, true);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+            "Case 1: A personal expense, PERSONAL, A, A, 100000, 900000, 800000, 100000, 0",
+            "Case 2: B personal expense, PERSONAL, B, B, 50000, 1000000, 750000, 50000, 0",
+            "Case 3: shared expense paid by A, SHARED, NONE, A, 200000, 1000000, 800000, 200000, 200000",
+            "Case 4: shared expense paid by B, SHARED, NONE, B, 200000, 1000000, 800000, 200000, 200000"
+    })
+    void should_calculateIndependentScopeBudgets_when_expenseScopeAndPayerVary(
+            String scenario,
+            TransactionScope scope,
+            ScenarioMember owner,
+            ScenarioMember payer,
+            long amount,
+            long ownerRemaining,
+            long partnerRemaining,
+            long totalSpent,
+            long sharedSpent
+    ) {
+        createBudget(BudgetScope.PERSONAL, ownerMemberId, null, 1_000_000);
+        createBudget(BudgetScope.PERSONAL, partnerMemberId, null, 800_000);
+        saveTransaction(
+                TransactionType.EXPENSE,
+                amount,
+                scope,
+                memberId(owner),
+                expenseCategoryId,
+                "2026-08-15T03:00:00Z",
+                AdjustmentType.NORMAL,
+                null,
+                memberId(payer)
+        );
+
+        BudgetMonthResponse response = budgetService.findMonth(
+                currentHousehold, YearMonth.of(2026, 8));
+
+        assertScope(response, BudgetScope.PERSONAL, ownerMemberId, 1_000_000L,
+                1_000_000L - ownerRemaining, ownerRemaining, false);
+        assertScope(response, BudgetScope.PERSONAL, partnerMemberId, 800_000L,
+                800_000L - partnerRemaining, partnerRemaining, false);
+        assertScope(response, BudgetScope.HOUSEHOLD, null, null,
+                totalSpent, null, false);
+        assertScope(response, BudgetScope.SHARED, null, null,
+                sharedSpent, null, false);
     }
 
     @Test
@@ -499,13 +546,37 @@ class BudgetIntegrationTest {
             AdjustmentType adjustmentType,
             Long reversesTransactionId
     ) {
+        return saveTransaction(
+                type,
+                amount,
+                scope,
+                ownerMemberId,
+                categoryId,
+                occurredAt,
+                adjustmentType,
+                reversesTransactionId,
+                null
+        );
+    }
+
+    private LedgerTransaction saveTransaction(
+            TransactionType type,
+            long amount,
+            TransactionScope scope,
+            Long ownerMemberId,
+            Long categoryId,
+            String occurredAt,
+            AdjustmentType adjustmentType,
+            Long reversesTransactionId,
+            Long payerMemberId
+    ) {
         return transactionRepository.saveAndFlush(LedgerTransaction.create(
                 currentHousehold.householdId(),
                 type,
                 amount,
                 scope,
                 ownerMemberId,
-                null,
+                payerMemberId,
                 categoryId,
                 Instant.parse(occurredAt),
                 null,
@@ -513,6 +584,19 @@ class BudgetIntegrationTest {
                 reversesTransactionId,
                 ownerMemberId == null ? this.ownerMemberId : ownerMemberId
         ));
+    }
+
+    private Long memberId(ScenarioMember member) {
+        if (member == ScenarioMember.NONE) {
+            return null;
+        }
+        return member == ScenarioMember.A ? ownerMemberId : partnerMemberId;
+    }
+
+    private enum ScenarioMember {
+        A,
+        B,
+        NONE
     }
 
     private Category createCategory(
