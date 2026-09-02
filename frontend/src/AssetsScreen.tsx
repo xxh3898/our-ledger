@@ -1,5 +1,6 @@
 import type { AssetsData, AssetsSummary } from './ledgerApi.ts'
 import type { AssetsNavigationState } from './assetsState.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 export type AssetsViewState =
   | { status: 'loading' }
@@ -225,7 +226,10 @@ export function AssetsScreen({
 
       <section className="assets-current-summary" aria-labelledby="assets-current-title">
         <div className="section-heading">
-          <div><p className="section-kicker">Current ownership</p><h2 id="assets-current-title">{label} 현재</h2></div>
+          <div>
+            <p className="section-kicker">{UI_VOCABULARY.accountOwnership}</p>
+            <h2 id="assets-current-title">{label} 현재</h2>
+          </div>
         </div>
         <dl>
           <div><dt>자산</dt><dd>{formatWon(summary.totalAssets)}</dd></div>

@@ -19,6 +19,7 @@ import {
   loadRecurringTransactions,
   updateRecurringTransaction,
 } from './ledgerApi.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 function errorMessage(error: unknown) {
   if (error instanceof LedgerApiError) return error.message
@@ -387,7 +388,7 @@ function AccountSetup({
         </label>
         {ownership === 'PERSONAL' && (
           <label>
-            소유자
+            {UI_VOCABULARY.accountOwner}
             <select
               required
               value={ownerMemberId}

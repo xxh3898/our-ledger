@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.0
-last_updated: 2026-08-29
+version: 1.1
+last_updated: 2026-09-02
 related:
   - 02-domain/account.md
   - 02-domain/financial-metrics.md
@@ -44,6 +44,8 @@ loading 중에는 이전 금융 숫자를 남기지 않는다. API 오류는 안
 ```
 
 실제 Member는 `/api/v1/assets`가 반환한 ID와 display name을 사용한다. 선택 시 현재 자산·부채·순자산 소계와 Account 목록만 바뀐다. 개인은 Account owner, 공동은 Account ownership 기준이며 Transaction Scope로 귀속을 추론하지 않는다.
+
+이 문맥의 사용자 노출 용어는 Account owner `소유자`, ownership filter·소계 `소유 기준`으로 고정한다. 내부 `owner`/`ownership` field는 API 계약으로 유지한다.
 
 ## Account 그룹
 
