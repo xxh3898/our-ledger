@@ -102,7 +102,14 @@ issue_form_paths=(
   ".github/ISSUE_TEMPLATE/decision.yml"
 )
 
-for path in "${issue_form_paths[@]}"; do
+issue_form_expected_labels=(
+  "bug"
+  "enhancement"
+  ""
+)
+
+for index in "${!issue_form_paths[@]}"; do
+  path="${issue_form_paths[$index]}"
   description_count="$(
     awk '/^description:[[:space:]]*[^[:space:]]/ { count++ } END { print count + 0 }' \
       "$ROOT_DIR/$path"
@@ -112,6 +119,32 @@ for path in "${issue_form_paths[@]}"; do
   )"
   if [[ "$description_count" -ne 1 || "$about_count" -ne 0 ]]; then
     echo "GitHub Issue Form 최상위 schema가 잘못됐습니다: $path" >&2
+    exit 1
+  fi
+
+  labels_key_count="$(
+    awk '/^labels:[[:space:]]*$/ { count++ } END { print count + 0 }' "$ROOT_DIR/$path"
+  )"
+  actual_labels="$(
+    awk '
+      /^labels:[[:space:]]*$/ { in_labels = 1; next }
+      in_labels && /^[^[:space:]]/ { exit }
+      in_labels && /^[[:space:]]*-[[:space:]]*/ {
+        sub(/^[[:space:]]*-[[:space:]]*/, "")
+        sub(/[[:space:]]+$/, "")
+        print
+      }
+    ' "$ROOT_DIR/$path"
+  )"
+  expected_label="${issue_form_expected_labels[$index]}"
+
+  if [[ -n "$expected_label" ]]; then
+    if [[ "$labels_key_count" -ne 1 || "$actual_labels" != "$expected_label" ]]; then
+      echo "GitHub Issue Form canonical label이 잘못됐습니다: $path (expected: $expected_label)" >&2
+      exit 1
+    fi
+  elif [[ "$labels_key_count" -ne 0 || -n "$actual_labels" ]]; then
+    echo "GitHub Issue Form에 canonical 대응이 없는 label이 지정됐습니다: $path" >&2
     exit 1
   fi
 done
