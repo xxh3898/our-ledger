@@ -63,7 +63,26 @@ done
   || fail "Compose project 이름이 안전한 형식이 아닙니다."
 
 command -v python3 >/dev/null 2>&1 || fail "Python 3를 사용할 수 없습니다."
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+if ! platform="$(/usr/bin/uname -s)"; then
+  fail "Docker executable platform을 확인할 수 없습니다."
+fi
+case "$platform" in
+  Darwin)
+    DOCKER="/usr/local/bin/docker"
+    ;;
+  Linux)
+    DOCKER="/usr/bin/docker"
+    ;;
+  *)
+    fail "지원하지 않는 Docker executable platform입니다."
+    ;;
+esac
+readonly DOCKER
+
+if [[ "$DOCKER" != /* || ! -f "$DOCKER" || ! -x "$DOCKER" ]]; then
+  fail "Fixed Docker executable authority를 사용할 수 없습니다."
+fi
+if ! "$DOCKER" compose version >/dev/null 2>&1; then
   fail "Docker Compose를 사용할 수 없습니다."
 fi
 
@@ -99,7 +118,7 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 compose=(
-  docker compose
+  "$DOCKER" compose
   --project-name "$project_name"
   --env-file "$env_file"
   --file "$COMPOSE_FILE"
@@ -115,7 +134,7 @@ if [[ -z "$postgres_ids" || "$postgres_ids" == *$'\n'* ]]; then
 fi
 postgres_id="$postgres_ids"
 
-if ! docker inspect "$postgres_id" \
+if ! "$DOCKER" inspect "$postgres_id" \
   | (
       cd "$ROOT_DIR"
       python3 -B -m scripts.backup_tools.backup_artifact check-container \

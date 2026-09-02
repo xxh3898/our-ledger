@@ -154,7 +154,7 @@ related:
 - 성공 output은 `household-bootstrap: created|verified` marker 한 줄만 허용하고 raw JSON, email, display name, Household name, credential과 User/Household/Member ID를 출력하지 않는다.
 - actual PostgreSQL lifecycle에서 unmigrated/schema mismatch/unreachable DB, strict input matrix, invalid profile/flag, no-HTTP/no-recurring/no-Flyway, normal API no-replay와 V1~V8 byte 불변을 검증한다.
 - local/Hosted `production-bootstrap` gate는 고유 labeled disposable project만 사용하고 cleanup 뒤 container/network/volume/image residue 0을 요구한다.
-- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`과 `runtime-config-evolution`을 포함한 현재 15개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `production-bootstrap`, A2 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`, `backup-docker-authority`와 `runtime-config-evolution`을 포함한 현재 16개 job 전체를 통과하며 actual production input/DB/iCloud, GHCR, Tailscale, SSH, HomeOps 또는 Cloudflare를 사용하지 않는다.
 
 ### Slice 10D-3A2 Fresh-host Bootstrap Transaction Source Gate
 
@@ -167,7 +167,7 @@ related:
 - first verified backup 이후에만 one-time input을 unlink하고 parent fsync하며, `INPUT_CONSUMED` 이후에는 input 없이 exact authority를 재검증해 commit할 수 있다.
 - 최종 state는 existing B2 formatVersion 2, previous null과 exact candidate current를 사용한다. 성공 후 fresh ingress rerun은 nonzero이고 data/schema/backup authority가 바뀌지 않는다.
 - local `verify-fresh-host-bootstrap.sh`는 pure phase matrix와 고유 cleanup label의 disposable Docker lifecycle을 실행하고 V1~V8 byte, privacy와 container/network/volume/image residue 0을 검증한다.
-- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`과 `runtime-config-evolution`을 포함한 15개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
+- Hosted Full CI가 exact PR HEAD에서 `fresh-host-bootstrap`, encrypted `offsite-backup`, `fixed-bootstrap`, `backup-docker-authority`와 `runtime-config-evolution`을 포함한 16개 job 전체를 통과한다. actual production path/iCloud, GHCR login/publish, Tailscale, SSH, HomeOps, Cloudflare와 public network는 사용하지 않는다.
 
 ### Slice 10D-3B0 Exact-SHA GHCR Publish-only Source Gate
 

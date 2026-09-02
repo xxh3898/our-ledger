@@ -192,6 +192,10 @@ Production Household Bootstrap One-shot Gate는 별도 actual PostgreSQL/contain
 
 Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
 
+- Darwin `/usr/local/bin/docker`, Linux `/usr/bin/docker` fixed absolute authority와 그 외 platform fail-closed
+- hostile/선행 fake `PATH`와 `DOCKER_BIN` environment가 Compose/inspect executable을 바꾸지 못함
+- missing/non-executable fixed CLI와 Compose plugin unavailable의 pre-mutation failure
+- backup과 accepted production deploy의 Darwin Docker authority correspondence
 - env/backup path의 absolute/canonical/owner-only/repository 밖 경계와 root·Docker data·symlink·traversal 거부
 - exact Compose project/config/image label, running/healthy PostgreSQL과 project-scoped volume/internal network
 - restrictive umask, shared project operation lock contention, user-controlled text 없는 strict artifact filename
@@ -205,7 +209,7 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 - Household composite FK/Entry·Goal Account unique enforcement, restored V8의 same-image migration rerun과 normal production API JPA/readiness startup 뒤 state 불변
 - missing restore DB failure와 성공·실패 trap 뒤 exact project container/network/volume/image tag residue 0
 
-`scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
+`scripts/verify-backup-docker-authority.sh`는 actual local/Hosted platform의 fixed CLI path, canonical path, Docker/Compose version과 synthetic hostile environment matrix를 검증하며 Docker container를 생성·변경하지 않는다. `scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. fixed authority fault injection은 production override 없이 invocation-owned copied core의 두 platform literal만 strict하게 test wrapper로 치환한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
 
 Operational Status Harness는 추가로 다음을 검증한다.
 
@@ -505,4 +509,4 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 18개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 15개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 16개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
