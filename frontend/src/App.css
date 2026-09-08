@@ -1237,6 +1237,23 @@ p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.entry-category-field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.category-create-button {
+  max-width: 100%;
+  min-height: 2.35rem;
+  justify-self: start;
+  padding: 0.5rem 0.72rem;
+  border-color: var(--pink-300);
+  color: var(--accent-text);
+  font-size: 0.78rem;
+}
+
 .entry-form label,
 .compact-form label {
   display: grid;
@@ -1373,6 +1390,36 @@ select {
 
 .compact-form + .compact-form {
   padding-top: 1rem;
+}
+
+.quick-category-backdrop {
+  z-index: 110;
+}
+
+.quick-category-sheet {
+  width: min(100%, 32rem);
+  min-height: 0;
+  max-height: min(82dvh, 34rem);
+}
+
+.quick-category-form {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.quick-category-form input,
+.quick-category-form select {
+  font-size: 1rem;
+}
+
+.quick-category-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.quick-category-actions > button {
+  min-width: 0;
 }
 
 .field-hint {

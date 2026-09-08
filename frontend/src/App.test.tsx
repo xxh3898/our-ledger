@@ -513,6 +513,8 @@ type RouterOptions = {
   budgets?: Array<Record<string, unknown>>
   recurringTransactions?: Array<Record<string, unknown>>
   failTransactionCreate?: boolean
+  categoryCreateFailures?: Array<{ code: string; message: string; status: number }>
+  categoryCreateGate?: Promise<void>
   failRefundCreate?: boolean
   failBudgetCreate?: boolean
   failBudgetUpdate?: boolean
@@ -552,6 +554,7 @@ function transactionDate(occurredAt: string) {
 }
 
 function installLedgerRouter(options: RouterOptions = {}) {
+  let categoryCreateAttempt = 0
   const state = {
     accounts: [...(options.accounts ?? [checkingAccount, savingsAccount])],
     groups: [...(options.groups ?? [])],
@@ -976,8 +979,31 @@ function installLedgerRouter(options: RouterOptions = {}) {
       return jsonResponse(state.categories)
     }
     if (url.pathname === '/api/v1/categories' && method === 'POST') {
+      if (options.categoryCreateGate) await options.categoryCreateGate
+      const failure = options.categoryCreateFailures?.[categoryCreateAttempt]
+      categoryCreateAttempt += 1
+      if (failure) {
+        return jsonResponse({ code: failure.code, message: failure.message }, failure.status)
+      }
       const inputBody = JSON.parse(String(init?.body)) as Record<string, unknown>
-      const created = { id: 302, group: null, ...inputBody, archived: false }
+      const group = state.groups.find((item) => Number(item.id) === Number(inputBody.groupId))
+      const created = {
+        id: Math.max(0, ...state.categories.map((category) => Number(category.id))) + 1,
+        group: group
+          ? {
+              id: group.id,
+              name: group.name,
+              type: group.type,
+              archived: group.archived ?? false,
+            }
+          : null,
+        name: String(inputBody.name).trim(),
+        type: inputBody.type,
+        iconKey: inputBody.iconKey,
+        colorKey: inputBody.colorKey,
+        sortOrder: inputBody.sortOrder,
+        archived: false,
+      }
       state.categories.push(created)
       return jsonResponse(created, 201)
     }
@@ -1769,6 +1795,273 @@ describe('App', () => {
     expect(amount).toHaveValue(15000)
     expect(memo).toHaveValue('입력 유지')
     expect(dialog).toBeInTheDocument()
+  })
+
+  it('keeps every Quick Entry draft field when inline Category creation is cancelled', async () => {
+    useCalendarUrl()
+    installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const amount = within(dialog).getByLabelText(/금액/)
+    const category = within(dialog).getByLabelText('Category')
+    const account = within(dialog).getByLabelText('Account')
+    const date = within(dialog).getByLabelText('날짜')
+    const scope = within(dialog).getByLabelText('범위')
+    const owner = within(dialog).getByLabelText('귀속자')
+    const payer = within(dialog).getByLabelText('결제자 (선택)')
+    const memo = within(dialog).getByLabelText('메모 (선택)')
+    const addCategory = within(dialog).getByRole('button', { name: '카테고리 추가' })
+
+    fireEvent.change(amount, { target: { value: '54321' } })
+    fireEvent.change(account, { target: { value: '201' } })
+    fireEvent.change(date, { target: { value: '2026-08-25' } })
+    fireEvent.change(owner, { target: { value: '101' } })
+    fireEvent.change(payer, { target: { value: '101' } })
+    fireEvent.change(memo, { target: { value: '카테고리 작성 중에도 유지' } })
+    fireEvent.click(addCategory)
+
+    const categoryDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    fireEvent.change(within(categoryDialog).getByLabelText('Category 이름'), {
+      target: { value: '임시 Category' },
+    })
+    fireEvent.click(within(categoryDialog).getByRole('button', { name: '취소' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
+      .not.toBeInTheDocument())
+    expect(await screen.findByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
+    expect(within(dialog).getByRole('button', { name: '지출' }))
+      .toHaveAttribute('aria-pressed', 'true')
+    expect(amount).toHaveValue(54321)
+    expect(category).toHaveValue('300')
+    expect(account).toHaveValue('201')
+    expect(date).toHaveValue('2026-08-25')
+    expect(scope).toHaveValue('PERSONAL')
+    expect(owner).toHaveValue('101')
+    expect(payer).toHaveValue('101')
+    expect(memo).toHaveValue('카테고리 작성 중에도 유지')
+    await waitFor(() => expect(addCategory).toHaveFocus())
+  })
+
+  it('keeps outer Quick Entry history and focus across nested close paths', async () => {
+    useCalendarUrl()
+    installLedgerRouter()
+    render(<App />)
+    const quickEntryOpener = await screen.findByRole('button', { name: /빠른 입력 열기/ })
+    fireEvent.click(quickEntryOpener)
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const amount = within(dialog).getByLabelText(/금액/)
+    const addCategory = within(dialog).getByRole('button', { name: '카테고리 추가' })
+    fireEvent.change(amount, { target: { value: '12000' } })
+
+    fireEvent.click(addCategory)
+    await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    expect(window.history.state).toMatchObject({
+      ourLedgerSheet: 'quick-entry',
+      ourLedgerQuickEntry: 'category-create',
+    })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(addCategory).toHaveFocus())
+    expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
+    expect(amount).toHaveValue(12000)
+
+    fireEvent.click(addCategory)
+    const backdropDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    const backdrop = backdropDialog.closest('.quick-category-backdrop') as HTMLElement
+    fireEvent.mouseDown(backdrop)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(addCategory).toHaveFocus())
+    expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
+
+    fireEvent.click(addCategory)
+    await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    window.history.replaceState(
+      { ourLedgerSheet: 'quick-entry' },
+      '',
+      window.location.href,
+    )
+    fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
+      .not.toBeInTheDocument())
+    expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
+    expect(amount).toHaveValue(12000)
+    await waitFor(() => expect(addCategory).toHaveFocus())
+
+    fireEvent.click(addCategory)
+    const closeDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    fireEvent.click(within(closeDialog).getByRole('button', { name: '카테고리 추가 닫기' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(addCategory).toHaveFocus())
+    expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '빠른 입력' }))
+      .not.toBeInTheDocument())
+    await waitFor(() => expect(quickEntryOpener).toHaveFocus())
+  })
+
+  it('creates and selects an inline Category before saving the preserved transaction draft', async () => {
+    useCalendarUrl()
+    const group = {
+      id: 250,
+      name: '생활',
+      type: 'EXPENSE',
+      sortOrder: 0,
+      archived: false,
+    }
+    const incomeGroup = { ...group, id: 251, name: '정기 수입', type: 'INCOME' }
+    let releaseCategory!: () => void
+    const categoryCreateGate = new Promise<void>((resolve) => { releaseCategory = resolve })
+    const { fetchMock } = installLedgerRouter({
+      groups: [group, incomeGroup],
+      categoryCreateGate,
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const amount = within(dialog).getByLabelText(/금액/)
+    const account = within(dialog).getByLabelText('Account')
+    const date = within(dialog).getByLabelText('날짜')
+    const owner = within(dialog).getByLabelText('귀속자')
+    const payer = within(dialog).getByLabelText('결제자 (선택)')
+    const memo = within(dialog).getByLabelText('메모 (선택)')
+    fireEvent.change(amount, { target: { value: '27100' } })
+    fireEvent.change(account, { target: { value: '201' } })
+    fireEvent.change(date, { target: { value: '2026-08-24' } })
+    fireEvent.change(owner, { target: { value: '101' } })
+    fireEvent.change(payer, { target: { value: '101' } })
+    fireEvent.change(memo, { target: { value: '버스와 지하철' } })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '카테고리 추가' }))
+    const categoryDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    expect(within(categoryDialog).queryByRole('option', { name: '정기 수입' }))
+      .not.toBeInTheDocument()
+    fireEvent.change(within(categoryDialog).getByLabelText('Category 이름'), {
+      target: { value: '  교통비  ' },
+    })
+    fireEvent.change(within(categoryDialog).getByLabelText('Group (선택)'), {
+      target: { value: '250' },
+    })
+    const categorySubmit = within(categoryDialog).getByRole('button', {
+      name: '카테고리 저장',
+    })
+    fireEvent.click(categorySubmit)
+    fireEvent.click(categorySubmit)
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/categories' && init?.method === 'POST')).toHaveLength(1)
+    releaseCategory()
+
+    const restoredDialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const category = within(restoredDialog).getByLabelText('Category')
+    await waitFor(() => expect(category).toHaveDisplayValue('교통비'))
+    expect(category).toHaveValue('302')
+    expect(amount).toHaveValue(27100)
+    expect(account).toHaveValue('201')
+    expect(date).toHaveValue('2026-08-24')
+    expect(owner).toHaveValue('101')
+    expect(payer).toHaveValue('101')
+    expect(memo).toHaveValue('버스와 지하철')
+
+    const categoryCalls = fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/categories' && init?.method === 'POST')
+    expect(categoryCalls).toHaveLength(1)
+    const categoryPayload = JSON.parse(String(categoryCalls[0][1]?.body))
+    expect(categoryPayload).toEqual({
+      groupId: 250,
+      name: '  교통비  ',
+      type: 'EXPENSE',
+      iconKey: null,
+      colorKey: null,
+      sortOrder: 1,
+    })
+    expect(categoryPayload).not.toHaveProperty('householdId')
+
+    fireEvent.click(within(restoredDialog).getByRole('button', { name: '거래 저장' }))
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/transactions' && init?.method === 'POST')).toHaveLength(1))
+    const transactionCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/transactions' && init?.method === 'POST')
+    expect(JSON.parse(String(transactionCall?.[1]?.body))).toMatchObject({
+      type: 'EXPENSE',
+      amount: 27100,
+      scope: 'PERSONAL',
+      ownerMemberId: 101,
+      payerMemberId: 101,
+      categoryId: 302,
+      accountId: 201,
+      memo: '버스와 지하철',
+    })
+  })
+
+  it('keeps both drafts through Category errors and allows a successful retry', async () => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter({
+      categoryCreateFailures: [
+        {
+          code: 'SERVICE_UNAVAILABLE',
+          message: '잠시 뒤 다시 시도해 주세요.',
+          status: 503,
+        },
+        {
+          code: 'CATEGORY_NAME_CONFLICT',
+          message: '같은 이름의 Category가 이미 있습니다.',
+          status: 409,
+        },
+        {
+          code: 'INVALID_REQUEST',
+          message: 'Category 이름은 100자 이하여야 합니다.',
+          status: 400,
+        },
+      ],
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const amount = within(dialog).getByLabelText(/금액/)
+    const memo = within(dialog).getByLabelText('메모 (선택)')
+    fireEvent.change(amount, { target: { value: '33000' } })
+    fireEvent.change(memo, { target: { value: '실패해도 유지' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '카테고리 추가' }))
+
+    const categoryDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
+    const name = within(categoryDialog).getByLabelText('Category 이름')
+    const submit = within(categoryDialog).getByRole('button', { name: '카테고리 저장' })
+    expect(name).toBeRequired()
+    fireEvent.change(name, { target: { value: '재시도 Category' } })
+
+    fireEvent.click(submit)
+    expect(await within(categoryDialog).findByRole('alert'))
+      .toHaveTextContent('잠시 뒤 다시 시도해 주세요.')
+    expect(name).toHaveValue('재시도 Category')
+    expect(amount).toHaveValue(33000)
+    expect(memo).toHaveValue('실패해도 유지')
+
+    fireEvent.change(name, { target: { value: '식비' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(categoryDialog).getByRole('alert'))
+      .toHaveTextContent('같은 이름의 Category가 이미 있습니다.'))
+    expect(name).toHaveValue('식비')
+
+    const tooLongName = '가'.repeat(101)
+    fireEvent.change(name, { target: { value: tooLongName } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(within(categoryDialog).getByRole('alert'))
+      .toHaveTextContent('Category 이름은 100자 이하여야 합니다.'))
+    expect(name).toHaveValue(tooLongName)
+
+    fireEvent.change(name, { target: { value: '재시도 Category' } })
+    fireEvent.click(submit)
+    const restoredDialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    await waitFor(() => expect(within(restoredDialog).getByLabelText('Category'))
+      .toHaveDisplayValue('재시도 Category'))
+    expect(amount).toHaveValue(33000)
+    expect(memo).toHaveValue('실패해도 유지')
+    expect(fetchMock.mock.calls.filter(([input, init]) =>
+      input === '/api/v1/categories' && init?.method === 'POST')).toHaveLength(4)
   })
 
   it('offers Refund only from a NORMAL EXPENSE and shows partial or full state', async () => {
