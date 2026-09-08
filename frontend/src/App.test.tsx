@@ -1221,6 +1221,38 @@ describe('App', () => {
     expect(screen.getByText(/내부 User와 Household membership/)).toBeInTheDocument()
   })
 
+  it('uses Household today for a canonical-root app entry and its Quick Entry', async () => {
+    window.history.replaceState({}, '', '/')
+    installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '8월 28일의 기록' }))
+      .toBeInTheDocument()
+    expect(window.location.search).toBe('?month=2026-08&view=all&date=2026-08-28')
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-08-28 빠른 입력 열기' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    expect(within(dialog).getByLabelText('날짜')).toHaveValue('2026-08-28')
+  })
+
+  it('preserves an explicit historical Calendar URL across a same-URL remount', async () => {
+    useCalendarUrl('?month=2026-08&view=all&date=2026-08-27')
+    installLedgerRouter()
+    const firstView = render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '8월 27일의 기록' }))
+      .toBeInTheDocument()
+    expect(window.location.search).toBe('?month=2026-08&view=all&date=2026-08-27')
+
+    firstView.unmount()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '8월 27일의 기록' }))
+      .toBeInTheDocument()
+    expect(window.location.search).toBe('?month=2026-08&view=all&date=2026-08-27')
+  })
+
   it('renders the Couple-first sections in contract order with actual member names', async () => {
     useCalendarUrl()
     installLedgerRouter({

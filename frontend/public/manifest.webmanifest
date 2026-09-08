@@ -1,0 +1,7 @@
+{
+  "name": "our-ledger",
+  "short_name": "our-ledger",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone"
+}

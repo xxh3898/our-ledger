@@ -16,6 +16,8 @@ required_paths=(
   "backend/src/main/resources/db/migration/V1__foundation.sql"
   "frontend/package.json"
   "frontend/package-lock.json"
+  "frontend/public/manifest.webmanifest"
+  "frontend/scripts/verify-app-start-build.mjs"
   "infra/docker/api.Dockerfile"
   "infra/docker/HttpHealthCheck.java"
   "infra/docker/HttpFetch.java"

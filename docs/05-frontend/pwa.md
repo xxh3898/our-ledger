@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.3
-last_updated: 2026-08-29
+version: 0.4
+last_updated: 2026-09-08
 related:
   - 06-security/authentication.md
 ---
@@ -10,7 +10,9 @@ related:
 
 ## 현재 상태
 
-Slice 10B는 최종 한글 앱 이름과 production icon이 결정될 때까지 HOLD다. Slice 10C-1 Nginx는 현재 Vite `dist`를 SPA로 제공하지만 manifest, service worker, install prompt, icon을 생성하거나 임시 자산으로 고정하지 않는다.
+Slice 10B 전체는 최종 한글 앱 이름과 production icon이 결정될 때까지 HOLD다. 다만 Calendar 새 실행의 날짜 권한을 위해 최소 Web App Manifest를 제공한다. 이 manifest는 `start_url=/`, `scope=/`, `display=standalone`만 고정하며 기존 URL의 날짜를 application heuristic으로 초기화하지 않는다.
+
+최종 앱 이름·icon, service worker, install prompt, offline app shell은 여전히 구현하지 않는다. 최소 manifest를 전체 PWA 완료나 설치 품질 acceptance로 간주하지 않는다.
 
 ## 목적
 
