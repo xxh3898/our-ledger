@@ -1,7 +1,7 @@
 ---
 status: active
-version: 2.0
-last_updated: 2026-09-01
+version: 2.1
+last_updated: 2026-09-08
 related:
   - 01-product/feature-matrix.md
   - 07-quality/acceptance-criteria.md
@@ -31,7 +31,7 @@ ERD는 V1 전체를 미리 설계하지만 구현과 migration은 Vertical Slice
 | 10C-2A. Backup/Restore Safety Gate | custom backup, integrity metadata, disposable restore | 합성 데이터의 재현 가능한 복구 검증 |
 | 10C-2B1. Operational Status Harness | health, backup freshness, recurring/filesystem raw signal | privacy-safe read-only snapshot 검증 |
 | 10C-2B2. Monitor/Alert Policy | threshold, evaluator, state와 HomeOps reporter 경계 | 합성 정책 검증, 실제 감시는 10D에서 활성화 |
-| 10B. PWA Installability | manifest, service worker, production icon | 최종 이름·icon 결정 뒤 모바일 홈 화면 설치 가능 |
+| 10B. PWA Installability | full manifest identity, service worker, production icon | 최종 이름·icon 결정 뒤 모바일 홈 화면 설치 완성 |
 | 10D-1. Immutable Release/Deploy Source | Full CI 재사용, exact-SHA artifact, restricted intent | 기본 비활성 source/CI harness 검증 |
 | 10D-2A. Candidate Migration/Validation Gate | normal startup mutation 제거, same-image one-shot Flyway/JPA gate | disposable DB에서 migration/cutover 선행조건 검증 |
 | 10D-2B1. Host State / Shared Operation Lock / Runtime-config Staging | 고정 host root, project lock, immutable release와 versioned state source | temp host synthetic gate 검증 |
@@ -100,7 +100,7 @@ Frontend는 기존 Assets 하단 destination을 활성화하고 actual Member/�
 Slice 10은 CSV, PWA, runtime harness, 실제 운영 활성화를 한 PR이나 한 승인으로 묶지 않는다.
 
 - **10A CSV Export**: current Household의 유효 Transaction과 canonical Entry를 Household timezone 기간으로 읽어 한국어 CSV attachment를 생성한다. 별도 persistence, migration, background job, server temp file은 만들지 않는다.
-- **10B PWA Installability**: 최종 한글 앱 이름·production icon 결정 전까지 보류한다. 결정 뒤 manifest와 service worker 설치 계약을 별도 검증한다.
+- **10B PWA Installability**: 최종 한글 앱 이름·production icon 결정 전까지 전체 설치 경험은 보류한다. Issue #145의 최소 manifest는 Calendar 새 실행만 canonical `/`로 고정하며 icon, service worker, install prompt 또는 offline 계약을 활성화하지 않는다. 이름·icon 결정 뒤 full manifest identity와 service worker 설치 계약을 별도 검증한다.
 - **10C-1 Immutable Runtime Harness**: digest-pinned multi-stage image, non-root same-origin Nginx, production Spring profile, image-only Compose를 합성 설정과 disposable PostgreSQL로 검증한다. Web만 loopback에 publish하고 API/DB host port, source mount, local identity를 금지한다.
 - **10C-2A Backup/Restore Safety Gate**: existing healthy PostgreSQL의 one-shot custom dump를 atomic bundle, checksum, 비민감 metadata와 latest-success marker로 commit한다. 합성 non-empty DB를 별도 project/volume에 실제 복구하고 V1~V8, row count, financial sample, 제약과 production API readiness를 검증한다.
 - **10C-2B1 Operational Status Harness**: exact Compose runtime, loopback Nginx health, process-local recurring scheduler raw signal, 10C-2A verified marker/inventory와 backup filesystem을 read-only canonical JSON으로 결합한다. unknown/unreachable/invalid를 success로 위장하지 않고 secret·PII·재무 상세·absolute path를 제외한다.

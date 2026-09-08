@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.9
-last_updated: 2026-09-01
+version: 2.0
+last_updated: 2026-09-08
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -392,11 +392,12 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
 
-`calendarState.test.ts`는 Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
+`dateTime.test.ts`와 `calendarState.test.ts`는 UTC 날짜 경계와 다른 Household timezone 자정, Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
 
 `App.test.tsx`는 identity loading/401/403을 보존하며 다음 Calendar/Quick Entry 계약을 mock HTTP 경계에서 검증한다.
 
 - Couple-first section 순서, 실제 Member 이름, header와 Calendar Scope의 self marker 부재
+- canonical root 새 앱 진입의 Household 오늘·Quick Entry 날짜와 명시적 과거 Calendar URL의 같은-URL remount 보존
 - ALL/각 Member/SHARED의 월 요약·선택일 동일 적용
 - transfer-only 무지출과 future Paw 제외
 - 날짜 선택 URL/API, listener 등록 뒤 popstate의 month/Member/date 복원과 추가 history entry 없음
@@ -407,6 +408,8 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 선택일 edit/delete 후 월·일 갱신
 - 설정 Sheet의 Account/Category 기능 보존
 - 활성 하단 destination과 `aria-current` 전환
+
+Frontend production build는 `manifest.webmanifest`의 exact `start_url=/`, `scope=/`, `display=standalone` 계약, source/build manifest byte correspondence, source/build HTML의 manifest link를 검증한다. 이 검증은 service worker, icon, install prompt를 PWA 완료 조건으로 확대하지 않는다.
 
 같은 test는 Refund Correctness Gate에서 다음 계약을 추가로 검증한다.
 
