@@ -1,6 +1,6 @@
 ---
 status: active
-version: 2.1
+version: 2.2
 last_updated: 2026-09-09
 related:
   - ADR-008
@@ -520,4 +520,8 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 16개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Hosted Full CI의 기존 16개 job은 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다.
+
+dev 대상 PR은 repository의 deterministic 변경 분류에 따라 docs-only/frontend-only/backend-only의 필요한 job을 실행한다. ops/runtime, API/DB/security authority, mixed/unknown, empty diff와 분류 실패는 Full로 처리한다. dev push, main 대상 PR, dispatch와 `main` release의 reusable workflow 호출은 기존 16개 job 전부를 유지한다. 모든 경로에서 최종 `CI gate`가 선택 job 성공과 생략 job 상태를 확인하며 workflow 전체를 path filter로 생략하지 않는다. PR stale run만 자동 취소하고 production deployment serialization은 유지한다.
+
+`check-repo.sh`에 연결된 classifier/workflow/gate 회귀 테스트, 정확한 경로별 검증 의존성, baseline duration과 Hosted evidence 한계는 [CI 변경 영향 matrix](ci-change-matrix.md)를 따른다.
