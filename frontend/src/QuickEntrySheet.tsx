@@ -1,4 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import { dateInTimeZone, noonInTimeZone } from './dateTime.ts'
 import { QuickCategoryCreateSheet } from './QuickCategoryCreateSheet.tsx'
 import {
@@ -323,15 +324,13 @@ export function QuickEntrySheet({
           <label className="amount-field">
             금액
             <span>
-              <input
+              <AmountInput
                 ref={amountRef}
                 required
                 autoFocus
                 min="1"
-                inputMode="numeric"
-                type="number"
                 value={form.amount}
-                onChange={(event) => change('amount', event.target.value)}
+                onValueChange={(value) => change('amount', value)}
               /> 원
             </span>
           </label>
