@@ -1230,6 +1230,8 @@ p {
 .entry-form,
 .compact-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.8rem;
 }
 
@@ -1274,6 +1276,15 @@ select {
   border-radius: 0.8rem;
   background: var(--neutral-0);
   color: var(--body);
+}
+
+.entry-form input,
+.entry-form select,
+.entry-form textarea,
+.compact-form input,
+.compact-form select,
+.compact-form textarea {
+  font-size: 1rem;
 }
 
 .segmented-control {
@@ -1369,7 +1380,31 @@ select {
 
 .settings-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 1rem;
+}
+
+.couple-header > div:first-child,
+.section-heading > div:first-child,
+.panel-heading > div:first-child,
+.sheet-header > div:first-child,
+.goal-shell > div,
+.budget-card > header > div,
+.budget-transaction-list > li > div,
+.assets-account-list > li > div:first-child,
+.assets-manage-card > div,
+.statistics-breakdown-list > button > span,
+.statistics-transaction-list > li > div {
+  min-width: 0;
+}
+
+.form-error,
+.save-success,
+.list-state,
+.field-hint,
+.inline-error > span {
+  overflow-wrap: anywhere;
 }
 
 .settings-panel {
@@ -1405,11 +1440,6 @@ select {
 .quick-category-form {
   padding-bottom: 0;
   border-bottom: 0;
-}
-
-.quick-category-form input,
-.quick-category-form select {
-  font-size: 1rem;
 }
 
 .quick-category-actions {
@@ -1559,11 +1589,33 @@ select {
   }
 
   .entry-form {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .entry-form > * {
     grid-column: 1;
+  }
+
+  .reference-list:not(.recurring-list) li {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .reference-list:not(.recurring-list) li > div:first-child {
+    max-width: 100%;
+    flex: 1 1 12rem;
+  }
+
+  .reference-list:not(.recurring-list) li > div:first-child strong {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .reference-list:not(.recurring-list) .reference-actions {
+    max-width: 100%;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 
@@ -1892,6 +1944,8 @@ select {
 
 .assets-screen {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 1rem;
 }
 
@@ -1978,6 +2032,8 @@ select {
 
 .assets-trend {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.75rem;
   margin-top: 0.8rem;
 }
@@ -2029,6 +2085,7 @@ select {
 }
 
 .assets-table-wrap {
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -2061,6 +2118,10 @@ select {
   display: block;
   color: var(--accent-text);
   font-size: 0.7rem;
+}
+
+.assets-mobile-label {
+  display: none;
 }
 
 .assets-scope-selector {
@@ -2193,14 +2254,109 @@ select {
 }
 
 @media (max-width: 42rem) {
+  .assets-table-wrap {
+    overflow-x: visible;
+  }
+
+  .assets-trend table,
+  .assets-trend tbody,
+  .assets-trend caption {
+    display: block;
+    min-width: 0;
+  }
+
+  .assets-trend table {
+    border-collapse: separate;
+  }
+
+  .assets-trend thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .assets-trend tbody {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .assets-trend tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.85rem;
+    border: 1px solid var(--neutral-100);
+    border-radius: 0.9rem;
+    background: var(--neutral-50);
+  }
+
+  .assets-trend th,
+  .assets-trend td {
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+    white-space: normal;
+  }
+
+  .assets-trend tbody th {
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--neutral-300);
+  }
+
+  .assets-trend td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .assets-trend td > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+  }
+
+  .assets-mobile-label {
+    display: inline;
+    flex: 0 0 auto;
+    color: var(--neutral-500);
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-align: left;
+  }
+
+  .assets-scope-selector {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .assets-scope-selector button {
+    max-width: 100%;
+    flex: 1 1 auto;
+    overflow-wrap: anywhere;
+  }
+
   .assets-current-summary dl {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .assets-account-list > li,
   .assets-manage-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .assets-account-list strong,
+  .assets-account-list small,
+  .assets-manage-card p {
+    overflow-wrap: anywhere;
   }
 
   .assets-account-balance {

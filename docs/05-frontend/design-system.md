@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-28
+version: 0.3
+last_updated: 2026-09-09
 related:
   - 05-frontend/calendar-screen.md
   - 05-frontend/information-architecture.md
@@ -100,6 +100,14 @@ Semantic color는 pink palette와 분리한다.
 - illustration에는 decorative 여부에 맞는 대체 text 정책을 적용하고 같은 정보가 본문에 있으면 중복 낭독을 피한다.
 - mockup의 금융 숫자와 계좌 표시는 sample이다. 실제 전체 계좌번호, credential, private 금융 식별정보를 asset이나 문서에 넣지 않는다.
 - animation과 interaction은 [Motion과 상호작용](interaction-motion.md)의 reduced-motion 계약을 따른다.
+
+## 모바일 viewport와 입력 control
+
+- form의 설명 label은 작은 보조 typography를 사용할 수 있지만 실제 `input`, `select`, `textarea`는 mobile에서 16px 이상을 유지한다.
+- input focus 확대를 막기 위해 `maximum-scale=1`이나 `user-scalable=no`로 사용자 pinch zoom을 차단하지 않는다.
+- 주요 화면과 Sheet는 `document.documentElement.scrollWidth <= window.innerWidth`를 만족해야 한다. 긴 이름, 큰 금액, native select의 min-content가 grid/flex track을 넓히지 않도록 해당 child를 shrink 또는 wrap한다.
+- 전역 `overflow-x: hidden`으로 원인을 가리지 않는다. 의도된 component 내부 scroller와 page-level overflow를 구분하고 viewport를 침범하는 요소를 직접 수정한다.
+- fixed Sheet와 하단 navigation은 viewport width 안에 두고 기존 `safe-area-inset-top`/`safe-area-inset-bottom` 및 필요한 세로 scroll을 보존한다.
 
 ## Slice 4 CSS 적용
 

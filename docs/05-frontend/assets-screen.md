@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.1
-last_updated: 2026-09-02
+version: 1.2
+last_updated: 2026-09-09
 related:
   - 02-domain/account.md
   - 02-domain/financial-metrics.md
@@ -33,7 +33,9 @@ loading 중에는 이전 금융 숫자를 남기지 않는다. API 오류는 안
 
 ## 월별 추이
 
-직전 11개 완료 월말과 현재 한 점의 Household 자산·부채·순자산을 표시한다. 마지막 점은 `진행 중`과 `현재` 의미를 함께 제공한다. 시각적 SVG는 설명 가능한 이름을 갖고 같은 12개 값을 semantic table로도 제공한다.
+직전 11개 완료 월말과 현재 한 점의 Household 자산·부채·순자산을 표시한다. 마지막 점은 `진행 중`과 `현재` 의미를 함께 제공한다. 시각적 SVG는 설명 가능한 이름을 갖고 같은 12개 값을 하나의 semantic table로도 제공한다.
+
+모바일에서는 각 월을 하나의 세로 card처럼 배치하고 그 아래에 `자산`, `부채`, `순자산` label과 값을 쌓는다. 네 정보는 가로 스크롤 없이 모두 읽을 수 있어야 한다. 넓은 화면에서는 같은 table을 `월 / 자산 / 부채 / 순자산` 4열로 표시해 기존 정보 밀도를 유지한다. responsive 표현을 위해 별도 계산이나 중복 data source를 만들지 않는다.
 
 추이는 소유 filter와 무관하게 Household 전체다. 과거 거래 수정·삭제 시 다음 조회 결과를 그대로 다시 표시하며 client cache에서 과거 값을 조작하지 않는다.
 
@@ -66,9 +68,11 @@ Paw FAB는 Household timezone 오늘 날짜로 기존 Quick Entry를 연다. Cal
 
 - filter button은 선택 상태를 `aria-pressed`로 전달한다.
 - 추이 SVG와 table은 같은 금융 의미를 제공한다.
+- mobile stacked 표현에서도 table caption, column header, 월별 row header를 접근성 tree에 유지한다.
 - 금액의 부호와 Account nature label을 text로 제공한다.
 - loading/error/empty 상태는 `status` 또는 `alert`로 노출한다.
 - mobile 한 열을 기본으로 하고 넓은 화면에서는 summary·Account 정보를 읽기 쉬운 grid로 확장한다.
+- 긴 Member·Account 이름과 큰 signed 금액은 page width를 늘리지 않고 줄바꿈한다. 소유 기준 button은 mobile에서 여러 줄로 배치할 수 있다.
 - reduced motion에서는 새 장식 animation을 사용하지 않는다.
 
 Goal card와 Goal 상세는 Calendar/Goal 흐름이 소유한다. Goal link, target, contribution/projection을 Assets에 병합하거나 current Account balance에 다시 더하지 않는다.
