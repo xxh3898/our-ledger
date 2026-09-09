@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import {
   type BudgetCategory,
   type BudgetInput,
@@ -226,15 +227,13 @@ export function BudgetSheet({
           <label className="amount-field">
             예산 금액
             <span>
-              <input
+              <AmountInput
                 required
                 autoFocus
                 aria-label="예산 금액"
                 min="0"
-                inputMode="numeric"
-                type="number"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
               /> 원
             </span>
           </label>

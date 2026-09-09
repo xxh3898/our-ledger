@@ -1350,11 +1350,12 @@ describe('App', () => {
     const opener = await screen.findByRole('button', { name: '결혼자금 목표 만들기' })
     fireEvent.click(opener)
     const name = screen.getByRole('textbox', { name: '목표 이름' })
-    const amount = screen.getByRole('spinbutton', { name: '목표 금액' })
+    const amount = screen.getByRole('textbox', { name: '목표 금액' })
     expect(name).toHaveFocus()
-    expect(amount).toHaveValue(null)
+    expect(amount).toHaveValue('')
     fireEvent.change(name, { target: { value: '우리 보금자리' } })
     fireEvent.change(amount, { target: { value: '90000000' } })
+    expect(amount).toHaveValue('90,000,000')
     const form = screen.getByRole('button', { name: 'Goal 저장' }).closest('form')!
     fireEvent.submit(form)
     fireEvent.submit(form)
@@ -1392,7 +1393,7 @@ describe('App', () => {
     const name = screen.getByRole('textbox', { name: '목표 이름' })
     expect(name).toHaveFocus()
     fireEvent.change(name, { target: { value: '상세에서 만든 목표' } })
-    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '목표 금액' }), {
       target: { value: '80000000' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
@@ -1426,13 +1427,13 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '목표 이름' }), {
       target: { value: '실패해도 유지' },
     })
-    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '목표 금액' }), {
       target: { value: '50000000' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('결혼자금 목표가 이미 있어요')
     expect(screen.getByRole('textbox', { name: '목표 이름' })).toHaveValue('실패해도 유지')
-    expect(screen.getByRole('spinbutton', { name: '목표 금액' })).toHaveValue(50_000_000)
+    expect(screen.getByRole('textbox', { name: '목표 금액' })).toHaveValue('50,000,000')
     unmount()
 
     useGoalUrl()
@@ -1442,7 +1443,7 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '목표 이름' }), {
       target: { value: '충돌 입력 유지' },
     })
-    fireEvent.change(screen.getByRole('spinbutton', { name: '목표 금액' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '목표 금액' }), {
       target: { value: '110000000' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Goal 저장' }))
@@ -1764,7 +1765,8 @@ describe('App', () => {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
     const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
-    fireEvent.change(within(dialog).getByLabelText(/금액/), { target: { value: '12000' } })
+    fireEvent.change(within(dialog).getByLabelText(/금액/), { target: { value: '123456' } })
+    expect(within(dialog).getByLabelText(/금액/)).toHaveValue('123,456')
     const submit = within(dialog).getByRole('button', { name: '거래 저장' })
 
     fireEvent.click(submit)
@@ -1773,9 +1775,12 @@ describe('App', () => {
     expect(await within(dialog).findByRole('status')).toHaveTextContent('저장했어요 🐾')
     expect(fetchMock.mock.calls.filter(([input, init]) =>
       input === '/api/v1/transactions' && init?.method === 'POST')).toHaveLength(1)
+    const createCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/transactions' && init?.method === 'POST')
+    expect(JSON.parse(String(createCall?.[1]?.body)).amount).toBe(123456)
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '빠른 입력' }))
       .not.toBeInTheDocument())
-    expect(await screen.findByText('−12,000원')).toBeInTheDocument()
+    expect(await screen.findByText('−123,456원')).toBeInTheDocument()
     expect(window.location.search).toContain('date=2026-08-27')
   })
 
@@ -1792,7 +1797,7 @@ describe('App', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '거래 저장' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('분류를 확인해 주세요.')
-    expect(amount).toHaveValue(15000)
+    expect(amount).toHaveValue('15,000')
     expect(memo).toHaveValue('입력 유지')
     expect(dialog).toBeInTheDocument()
   })
@@ -1832,7 +1837,7 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
     expect(within(dialog).getByRole('button', { name: '지출' }))
       .toHaveAttribute('aria-pressed', 'true')
-    expect(amount).toHaveValue(54321)
+    expect(amount).toHaveValue('54,321')
     expect(category).toHaveValue('300')
     expect(account).toHaveValue('201')
     expect(date).toHaveValue('2026-08-25')
@@ -1865,7 +1870,7 @@ describe('App', () => {
       .not.toBeInTheDocument())
     await waitFor(() => expect(addCategory).toHaveFocus())
     expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
-    expect(amount).toHaveValue(12000)
+    expect(amount).toHaveValue('12,000')
 
     fireEvent.click(addCategory)
     const backdropDialog = await screen.findByRole('dialog', { name: '지출 카테고리 추가' })
@@ -1887,7 +1892,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '지출 카테고리 추가' }))
       .not.toBeInTheDocument())
     expect(screen.getByRole('dialog', { name: '빠른 입력' })).toBe(dialog)
-    expect(amount).toHaveValue(12000)
+    expect(amount).toHaveValue('12,000')
     await waitFor(() => expect(addCategory).toHaveFocus())
 
     fireEvent.click(addCategory)
@@ -1959,7 +1964,7 @@ describe('App', () => {
     const category = within(restoredDialog).getByLabelText('Category')
     await waitFor(() => expect(category).toHaveDisplayValue('교통비'))
     expect(category).toHaveValue('302')
-    expect(amount).toHaveValue(27100)
+    expect(amount).toHaveValue('27,100')
     expect(account).toHaveValue('201')
     expect(date).toHaveValue('2026-08-24')
     expect(owner).toHaveValue('101')
@@ -2037,7 +2042,7 @@ describe('App', () => {
     expect(await within(categoryDialog).findByRole('alert'))
       .toHaveTextContent('잠시 뒤 다시 시도해 주세요.')
     expect(name).toHaveValue('재시도 Category')
-    expect(amount).toHaveValue(33000)
+    expect(amount).toHaveValue('33,000')
     expect(memo).toHaveValue('실패해도 유지')
 
     fireEvent.change(name, { target: { value: '식비' } })
@@ -2058,7 +2063,7 @@ describe('App', () => {
     const restoredDialog = await screen.findByRole('dialog', { name: '빠른 입력' })
     await waitFor(() => expect(within(restoredDialog).getByLabelText('Category'))
       .toHaveDisplayValue('재시도 Category'))
-    expect(amount).toHaveValue(33000)
+    expect(amount).toHaveValue('33,000')
     expect(memo).toHaveValue('실패해도 유지')
     expect(fetchMock.mock.calls.filter(([input, init]) =>
       input === '/api/v1/categories' && init?.method === 'POST')).toHaveLength(4)
@@ -2171,6 +2176,7 @@ describe('App', () => {
     const dialog = await screen.findByRole('dialog', { name: '환불 처리' })
     const amount = within(dialog).getByLabelText('환불 금액')
     fireEvent.change(amount, { target: { value: '30000' } })
+    expect(amount).toHaveValue('30,000')
     const submit = within(dialog).getByRole('button', { name: '30,000원 환불 기록' })
 
     fireEvent.click(submit)
@@ -2181,6 +2187,9 @@ describe('App', () => {
     expect(fetchMock.mock.calls.filter(([input, init]) =>
       input === '/api/v1/transactions/400/refunds'
         && init?.method === 'POST')).toHaveLength(1)
+    const refundCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/transactions/400/refunds' && init?.method === 'POST')
+    expect(JSON.parse(String(refundCall?.[1]?.body)).amount).toBe(30000)
     releaseRefund()
     expect(await within(dialog).findByRole('status')).toHaveTextContent('환불을 기록했어요')
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '환불 처리' }))
@@ -2231,7 +2240,7 @@ describe('App', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
       '환불 가능 금액을 초과했습니다.',
     )
-    expect(amount).toHaveValue(30000)
+    expect(amount).toHaveValue('30,000')
     expect(memo).toHaveValue('입력 유지')
     expect(dialog).toBeInTheDocument()
   })
@@ -2275,7 +2284,9 @@ describe('App', () => {
 
     fireEvent.click(await within(selectedDay).findByRole('button', { name: '수정' }))
     const editDialog = await screen.findByRole('dialog', { name: '거래 수정' })
+    expect(within(editDialog).getByLabelText(/금액/)).toHaveValue('12,000')
     fireEvent.change(within(editDialog).getByLabelText(/금액/), { target: { value: '20000' } })
+    expect(within(editDialog).getByLabelText(/금액/)).toHaveValue('20,000')
     fireEvent.click(within(editDialog).getByRole('button', { name: '수정 저장' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '거래 수정' }))
@@ -2283,6 +2294,9 @@ describe('App', () => {
     expect(await screen.findByText('−20,000원')).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/transactions/400' && init?.method === 'PATCH')).toBe(true)
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/transactions/400' && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body)).amount).toBe(20000)
 
     fireEvent.click(within(selectedDay).getByRole('button', { name: '삭제' }))
     expect(await screen.findByText('이 날짜에는 아직 거래가 없어요.')).toBeInTheDocument()
@@ -2549,6 +2563,7 @@ describe('App', () => {
     fireEvent.change(within(createDialog).getByLabelText('금액'), {
       target: { value: '45000' },
     })
+    expect(within(createDialog).getByLabelText('금액')).toHaveValue('45,000')
     fireEvent.change(within(createDialog).getByLabelText('주기'), {
       target: { value: 'WEEKLY' },
     })
@@ -2569,6 +2584,7 @@ describe('App', () => {
     const payload = JSON.parse(String(createCall?.[1]?.body)) as Record<string, unknown>
     expect(payload).toMatchObject({
       type: 'EXPENSE',
+      amount: 45000,
       frequency: 'WEEKLY',
       intervalValue: 2,
       startDate: '2026-08-28',
@@ -2582,6 +2598,7 @@ describe('App', () => {
     const editButton = within(row).getByRole('button', { name: '수정' })
     fireEvent.click(editButton)
     const editDialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+    expect(within(editDialog).getByLabelText('금액')).toHaveValue('45,000')
     expect(within(editDialog).getByText(/이미 생성된 거래는 바뀌지 않습니다/))
       .toBeInTheDocument()
     expect(within(editDialog).queryByText('월말')).not.toBeInTheDocument()
@@ -2804,7 +2821,7 @@ describe('App', () => {
     expect(await within(failedDialog).findByRole('alert'))
       .toHaveTextContent('반복 일정을 확인해 주세요.')
     expect(failedName).toHaveValue('실패 구독')
-    expect(failedAmount).toHaveValue(19000)
+    expect(failedAmount).toHaveValue('19,000')
   })
 
   it('keeps Budget, Statistics, and Assets available from the primary navigation', async () => {
@@ -2995,14 +3012,18 @@ describe('App', () => {
     expect(within(categoryPicker).getByRole('option', { name: '식비' })).toBeInTheDocument()
     expect(within(categoryPicker).queryByRole('option', { name: '급여' })).not.toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('예산 금액'), {
-      target: { value: '50000' },
+      target: { value: '500000' },
     })
+    expect(within(dialog).getByLabelText('예산 금액')).toHaveValue('500,000')
     fireEvent.click(within(dialog).getByRole('button', { name: '예산 저장' }))
 
-    await waitFor(() => expect(householdCard).toHaveTextContent('예산50,000원'))
+    await waitFor(() => expect(householdCard).toHaveTextContent('예산500,000원'))
     expect(window.location.search).toBe('?screen=budget&month=2026-08')
     expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/budgets' && init?.method === 'POST')).toBe(true)
+    const createCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/budgets' && init?.method === 'POST')
+    expect(JSON.parse(String(createCall?.[1]?.body)).amount).toBe(500000)
   })
 
   it('prevents a second Budget submit while the first request is pending', async () => {
@@ -3053,6 +3074,7 @@ describe('App', () => {
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
     const editDialog = await screen.findByRole('dialog', { name: '예산 수정' })
+    expect(within(editDialog).getByLabelText('예산 금액')).toHaveValue('15,000')
     fireEvent.change(within(editDialog).getByLabelText('예산 금액'), {
       target: { value: '20000' },
     })
@@ -3063,6 +3085,9 @@ describe('App', () => {
     await waitFor(() => expect(householdCard).toHaveTextContent('20,000원'))
     expect(fetchMock.mock.calls.some(([input, init]) =>
       input === '/api/v1/budgets/600' && init?.method === 'PATCH')).toBe(true)
+    const patchCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/v1/budgets/600' && init?.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body)).amount).toBe(20000)
 
     fireEvent.click(within(householdCard).getByRole('button', { name: '수정' }))
     const deleteDialog = await screen.findByRole('dialog', { name: '예산 수정' })
@@ -3097,7 +3122,7 @@ describe('App', () => {
 
     expect(await within(createDialog).findByRole('alert'))
       .toHaveTextContent('같은 월·범위·Category의 예산이 이미 있어요.')
-    expect(createAmount).toHaveValue(300000)
+    expect(createAmount).toHaveValue('300,000')
     expect(within(createDialog).getByLabelText('범위')).toHaveValue('PERSONAL:100')
     expect(within(createDialog).getByLabelText('Category')).toHaveValue('300')
     unmount()
@@ -3124,7 +3149,7 @@ describe('App', () => {
     fireEvent.click(within(updateDialog).getByRole('button', { name: '예산 저장' }))
     expect(await within(updateDialog).findByRole('alert'))
       .toHaveTextContent('다른 변경이 먼저 저장됐어요.')
-    expect(updateAmount).toHaveValue(120000)
+    expect(updateAmount).toHaveValue('120,000')
   })
 
   it('reuses the EXPENSE transaction filter for Budget drill-down including refunds', async () => {
@@ -3660,5 +3685,125 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '통계' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '자산' }))
     expect(await screen.findByRole('heading', { name: '우리 순자산' })).toBeInTheDocument()
+  })
+})
+
+describe('formatted monetary form contracts', () => {
+  it.each([
+    ['-1234567', '-1,234,567', -1234567],
+    ['1234567', '1,234,567', 1234567],
+    ['0', '0', 0],
+    ['', '', 0],
+  ])('keeps Account opening balance %s numeric and preserves its optional policy', async (draft, display, amount) => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const balance = within(settings).getByLabelText('기초 잔액')
+    expect(balance).toHaveValue('0')
+    fireEvent.change(within(settings).getByLabelText('계좌 이름'), {
+      target: { value: '포맷 확인 계좌' },
+    })
+    fireEvent.change(balance, { target: { value: draft } })
+    expect(balance).toHaveValue(display)
+    fireEvent.click(within(settings).getByRole('button', { name: '계좌 추가' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      url === '/api/v1/accounts' && init?.method === 'POST')).toBe(true))
+    const request = fetchMock.mock.calls.find(([url, init]) =>
+      url === '/api/v1/accounts' && init?.method === 'POST')
+    expect(JSON.parse(String(request?.[1]?.body)).openingBalance).toBe(amount)
+    await waitFor(() => expect(balance).toHaveValue('0'))
+  })
+
+  it('keeps an empty Budget unset and explicitly saves a numeric zero Budget', async () => {
+    useBudgetUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '+ 예산 추가' }))
+    const dialog = await screen.findByRole('dialog', { name: '예산 추가' })
+    const amount = within(dialog).getByLabelText('예산 금액')
+    expect(amount).toHaveValue('')
+    fireEvent.click(within(dialog).getByRole('button', { name: '예산 저장' }))
+    expect(fetchMock.mock.calls.filter(([url, init]) =>
+      url === '/api/v1/budgets' && init?.method === 'POST')).toHaveLength(0)
+    expect(amount).toBeInvalid()
+    fireEvent.change(amount, { target: { value: '0' } })
+    expect(amount).toHaveValue('0')
+    expect(amount).toBeValid()
+    fireEvent.click(within(dialog).getByRole('button', { name: '예산 저장' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '예산 추가' }))
+      .not.toBeInTheDocument())
+    const request = fetchMock.mock.calls.find(([url, init]) =>
+      url === '/api/v1/budgets' && init?.method === 'POST')
+    expect(JSON.parse(String(request?.[1]?.body)).amount).toBe(0)
+  })
+
+  it.each(['', '0'])('rejects Quick Entry %s without converting empty to zero', async (draft) => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /빠른 입력 열기/ }))
+    const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
+    const amount = within(dialog).getByLabelText(/금액/)
+    fireEvent.change(amount, { target: { value: draft } })
+    const form = within(dialog).getByRole('button', { name: '거래 저장' }).closest('form')!
+    expect(amount).toBeInvalid()
+    fireEvent.submit(form)
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('금액을 확인해 주세요.')
+    expect(amount).toHaveValue(draft)
+    expect(fetchMock.mock.calls.filter(([url, init]) =>
+      url === '/api/v1/transactions' && init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('preserves the Refund cap boundary and sends exactly the remaining numeric amount', async () => {
+    useCalendarUrl()
+    const original = primaryTransaction({ id: 400, amount: 50000 })
+    const { fetchMock } = installLedgerRouter({
+      transactions: [original, refundTransaction({ id: 401, original, amount: 20000 })],
+    })
+    render(<App />)
+    const row = (await screen.findByText('−50,000원')).closest('li')!
+    fireEvent.click(await within(row).findByRole('button', { name: '환불' }))
+    const dialog = await screen.findByRole('dialog', { name: '환불 처리' })
+    const amount = within(dialog).getByLabelText('환불 금액')
+    fireEvent.change(amount, { target: { value: '30001' } })
+    expect(amount).toHaveValue('30,001')
+    fireEvent.click(within(dialog).getByRole('button', { name: '30,001원 환불 기록' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('환불 가능 금액은 30,000원')
+    expect(fetchMock.mock.calls.filter(([url, init]) =>
+      url === '/api/v1/transactions/400/refunds' && init?.method === 'POST')).toHaveLength(0)
+    fireEvent.change(amount, { target: { value: '30,000' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '30,000원 환불 기록' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '환불 처리' }))
+      .not.toBeInTheDocument())
+    const request = fetchMock.mock.calls.find(([url, init]) =>
+      url === '/api/v1/transactions/400/refunds' && init?.method === 'POST')
+    expect(JSON.parse(String(request?.[1]?.body)).amount).toBe(30000)
+    expect(await screen.findByText('전액 환불됨')).toBeInTheDocument()
+  })
+
+  it('edits a formatted recurring amount without changing schedule or payload types', async () => {
+    useCalendarUrl()
+    const { fetchMock } = installLedgerRouter({ recurringTransactions: [recurringRule()] })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '설정' }))
+    const settings = await screen.findByRole('dialog', { name: '장부 설정' })
+    const row = (await within(settings).findByText('월급')).closest('li')!
+    fireEvent.click(within(row).getByRole('button', { name: '수정' }))
+    const dialog = await screen.findByRole('dialog', { name: '반복 거래 수정' })
+    const amount = within(dialog).getByLabelText('금액')
+    expect(amount).toHaveValue('3,000,000')
+    expect(within(dialog).getByLabelText('간격')).toHaveAttribute('type', 'number')
+    fireEvent.change(amount, { target: { value: '3500000' } })
+    expect(amount).toHaveValue('3,500,000')
+    fireEvent.click(within(dialog).getByRole('button', { name: '반복 거래 수정' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '반복 거래 수정' }))
+      .not.toBeInTheDocument())
+    const request = fetchMock.mock.calls.find(([url, init]) =>
+      url === '/api/v1/recurring-transactions/800' && init?.method === 'PATCH')
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      amount: 3500000, intervalValue: 1, frequency: 'MONTHLY', version: 0,
+    })
   })
 })

@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.3
+version: 0.4
 last_updated: 2026-09-09
 related:
   - 05-frontend/calendar-screen.md
@@ -108,6 +108,40 @@ Semantic color는 pink palette와 분리한다.
 - 주요 화면과 Sheet는 `document.documentElement.scrollWidth <= window.innerWidth`를 만족해야 한다. 긴 이름, 큰 금액, native select의 min-content가 grid/flex track을 넓히지 않도록 해당 child를 shrink 또는 wrap한다.
 - 전역 `overflow-x: hidden`으로 원인을 가리지 않는다. 의도된 component 내부 scroller와 page-level overflow를 구분하고 viewport를 침범하는 요소를 직접 수정한다.
 - fixed Sheet와 하단 navigation은 viewport width 안에 두고 기존 `safe-area-inset-top`/`safe-area-inset-bottom` 및 필요한 세로 scroll을 보존한다.
+
+## 공통 금액 입력
+
+`AmountInput`은 입력과 동시에 `1000 → 1,000`, `1234567 → 1,234,567`처럼 표시한다. 화면별 formatter를 반복하지 않고 `amountInput.ts`의 문자열 parse/format을 공유한다.
+
+- 화면 값은 formatted string, 부모 form state는 쉼표 없는 canonical string이다. 각 form의 기존 `Number(...)` 변환 뒤 API에는 JSON numeric value를 전송한다.
+- 빈 입력 `''`와 `'0'`을 구분한다. `001000`은 `1000`으로 정규화하고 `1,000` 붙여넣기는 `1000`으로 해석한다.
+- KRW 정수 입력에 숫자와 표시 구분자만 허용한다. 기초 잔액에만 기존 음수 입력을 허용한다. 문자·소수점·지수 표기·통화 기호를 섞은 변경은 전체를 거부하며 임의로 숫자만 잘라 다른 금액을 만들지 않는다.
+- `type=text`, `inputMode=numeric`으로 쉼표 표시와 모바일 숫자 키보드를 함께 사용한다. required는 native form validation을 유지하고 min/max는 같은 경계의 custom validity와 각 form의 기존 submit/server 검증으로 보존한다.
+- 입력·선택 범위는 숫자 위치를 기준으로 복원한다. Backspace/Delete가 구분자만 지웠을 때는 인접 숫자를 함께 지워 반복 삭제가 멈추지 않게 한다. 붙여넣기·전체 선택 후 재입력·빈 값·0 재입력을 지원한다.
+- 긴 숫자도 formatter는 Number로 변환하지 않는다. 기존 API의 JavaScript number는 모든 BIGINT를 정확히 표현하지 못한다는 한계가 있으며, 이 표시 변경은 새 상한이나 별도 금융 계산 정책을 도입하지 않는다.
+- 기존 16px 이상 control typography, element별 shrink/wrap, page horizontal overflow 방지와 Quick Category 중첩 Sheet의 draft/history/focus 계약을 유지한다.
+
+### Monetary input inventory
+
+frontend의 모든 `input`, `type="number"`, `inputMode`, amount/budget/target/refund/balance/principal/payment/money/won 참조를 조사한 결과다. 각 금액의 domain type은 KRW 정수이며 frontend API는 `number`, backend는 `Long/BIGINT`다.
+
+| 화면/컴포넌트 | field와 mutation | 기존 input | required/null/zero 정책 | min/max | API payload field | 적용과 이유 |
+|---|---|---|---|---|---|---|
+| QuickEntrySheet | 금액, 거래 생성/수정, 지출/수입/이체 | number + numeric | 필수, 빈 값·0 거부 | 1 / 별도 UI max 없음 | transactions.amount | YES: 공통 거래 금액 |
+| BudgetSheet | 예산 금액, 생성/수정 | number + numeric | 필수, 미설정 초기 빈 값, 0원 row 허용 | 0 / 별도 UI max 없음 | budgets.amount | YES: 미설정과 0원 구분 |
+| RefundSheet | 환불 금액, 생성 | number + numeric | 필수, 빈 값·0 거부 | 1 / remainingRefundableAmount | transactions/{id}/refunds.amount | YES: 기존 누적 환불 상한 보존 |
+| RecurringTransactionSheet | 반복 금액, 생성/수정 | number + numeric | 필수, 빈 값·0 거부 | 1 / 별도 UI max 없음 | recurring-transactions.amount | YES: 반복 template 금액 |
+| MarriageGoalSheet | 목표 금액, 생성/수정 | number + numeric | 필수, 초기 빈 값, 0 거부 | 1 / 별도 UI max 없음 | goals/marriage.targetAmount | YES: 목표액 입력 |
+| SettingsSheet AccountSetup | 기초 잔액, Account 생성 | number + numeric | UI optional, 초기 0, 빈 입력은 기존대로 0 전송, signed 허용, API null 금지 | 별도 UI min/max 없음 | accounts.openingBalance | YES: signed 원장 기초 잔액 |
+| RecurringTransactionSheet | 반복 간격 | number | 필수 양수 | 1 / 별도 UI max 없음 | intervalValue | NO: 금액이 아닌 기간 횟수 |
+
+입력 지점 6개 모두 적용한다. Assets/Statistics 잔액과 Goal 현재 보유금·연결 시 시작금액은 조회값이며 직접 입력 대상이 아니다. GoalAccountLinkSheet는 Account 선택만 제공하고 수동 기여금 입력을 만들지 않는다.
+
+### 금액 입력 회귀 검증
+
+`amountInput.test.ts`와 `AmountInput.test.tsx`는 빈 값·0·선행 0·1000·1234567·긴 숫자, required/min/max, signed 입력, 잘못된 변경 거부, 숫자 위치와 구분자 인접 삭제·선택 교체·paste를 검증한다. `App.test.tsx`는 6개 form의 표시/숫자 payload, Quick Entry 생성·수정과 Category draft 보존, Budget 생성·수정 및 미설정/0 구분, Refund 실제 상한, 반복 template, Goal, 기초 잔액 정책을 검증한다.
+
+402×874, 393×852 viewport 검사는 jsdom과 별도로 수행한다. 브라우저 simulation을 실제 iPhone Safari/PWA 검증으로 간주하지 않으며 실기기 미수행 시 iPhone 16 Pro와 iPhone 15는 `OWNER_DEVICE_SMOKE_PENDING`으로 남기고 Draft PR을 유지한다.
 
 ## Slice 4 CSS 적용
 
