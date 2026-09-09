@@ -1,0 +1,8 @@
+name: Prepare CI Docker cache runtime
+description: GHA v2 cache에 필요한 runtime 값 두 개만 비출력 전달
+outputs:
+  ready:
+    description: Runtime 값 전달 완료 여부
+runs:
+  using: node24
+  main: index.js

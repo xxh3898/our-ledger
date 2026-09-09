@@ -180,7 +180,9 @@ fi
 
 (
   cd "$ROOT_DIR"
-  PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest scripts.ci_tools.test_change_classifier
+  PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest \
+    scripts.ci_tools.test_change_classifier \
+    scripts.ci_tools.test_docker_cache
 )
 
 echo "저장소 구조 검사를 통과했습니다."

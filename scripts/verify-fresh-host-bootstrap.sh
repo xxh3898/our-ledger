@@ -218,7 +218,7 @@ oci_labels=(
   --label "org.opencontainers.image.version=$git_head"
 )
 
-docker build \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
   "${cleanup_labels[@]}" \
   "${oci_labels[@]}" \
   --tag "$api_image" \
@@ -226,7 +226,7 @@ docker build \
   "$ROOT_DIR"
 api_created=true
 
-docker build \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web \
   "${cleanup_labels[@]}" \
   "${oci_labels[@]}" \
   --tag "$web_image" \

@@ -277,7 +277,7 @@ class WorkflowContractTest(unittest.TestCase):
         for name in ci.HEAVY_JOBS:
             body = job_block(workflow, name)
             self.assertIn(f"run: ./scripts/verify-{name}.sh", body)
-            self.assertEqual(body.count("    if:"), 1)
+            self.assertEqual(len(re.findall(r"^    if:", body, re.M)), 1)
             self.assertIn("    needs: repository\n", body)
             self.assertIn("if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}", body)
         for name in ("backend", "frontend"):

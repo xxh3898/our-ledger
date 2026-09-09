@@ -390,7 +390,7 @@ expect_failure "missing Compose project/postgres service" \
     --backup-dir "$failure_backup_dir"
 
 printf '\n[backup/restore 2/11] exact-HEAD API image, source migration and startup\n'
-docker build \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
   --progress plain \
   --no-cache \
   --pull \

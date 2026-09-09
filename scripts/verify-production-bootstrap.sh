@@ -366,7 +366,7 @@ for group in ("services", "networks", "volumes"):
 ' "$git_head"
 
 printf '\n[bootstrap 2/12] same candidate API image build\n'
-docker build \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
   --progress plain \
   --label io.homeserver.cleanup.environment=development \
   --label io.homeserver.cleanup.project=our-ledger \

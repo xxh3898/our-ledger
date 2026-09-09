@@ -26,6 +26,7 @@ jobs:
       run_backend: ${{ steps.changes.outputs.run_backend }}
       run_frontend: ${{ steps.changes.outputs.run_frontend }}
       run_full: ${{ steps.changes.outputs.run_full }}
+      docker_cache_mode: ${{ steps.docker-cache.outputs.mode }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
@@ -51,6 +52,10 @@ jobs:
               'run_frontend=true' \
               'run_full=true' >> "$GITHUB_OUTPUT"
           fi
+
+      - name: CI Docker cache 이벤트 경계 판정
+        id: docker-cache
+        run: python3 -B scripts/ci_tools/docker_cache.py policy
 
       - name: 저장소 구조 검사
         run: ./scripts/check-repo.sh
@@ -103,11 +108,31 @@ jobs:
     if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode == 'gha-write' && 'gha-read' || needs.repository.outputs.docker_cache_mode || 'disabled' }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: CI cache runtime 준비
+        id: cache-runtime
+        if: ${{ env.CI_DOCKER_CACHE_MODE == 'gha-read' || env.CI_DOCKER_CACHE_MODE == 'gha-write' }}
+        continue-on-error: true
+        uses: ./.github/actions/prepare-ci-docker-cache
+
+      - name: CI cache Buildx 준비
+        id: cache-builder
+        if: ${{ steps.cache-runtime.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+          cache-binary: false
+          cleanup: true
+
       - name: Production Household bootstrap 검증
+        env:
+          CI_DOCKER_CACHE_READY: ${{ steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true' }}
         run: ./scripts/verify-production-bootstrap.sh
 
   fresh-host-bootstrap:
@@ -115,11 +140,31 @@ jobs:
     if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode || 'disabled' }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: CI cache runtime 준비
+        id: cache-runtime
+        if: ${{ env.CI_DOCKER_CACHE_MODE == 'gha-read' || env.CI_DOCKER_CACHE_MODE == 'gha-write' }}
+        continue-on-error: true
+        uses: ./.github/actions/prepare-ci-docker-cache
+
+      - name: CI cache Buildx 준비
+        id: cache-builder
+        if: ${{ steps.cache-runtime.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+          cache-binary: false
+          cleanup: true
+
       - name: Fresh-host bootstrap transaction 검증
+        env:
+          CI_DOCKER_CACHE_READY: ${{ steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true' }}
         run: ./scripts/verify-fresh-host-bootstrap.sh
 
   host-state:
@@ -175,11 +220,31 @@ jobs:
     if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode == 'gha-write' && 'gha-read' || needs.repository.outputs.docker_cache_mode || 'disabled' }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: CI cache runtime 준비
+        id: cache-runtime
+        if: ${{ env.CI_DOCKER_CACHE_MODE == 'gha-read' || env.CI_DOCKER_CACHE_MODE == 'gha-write' }}
+        continue-on-error: true
+        uses: ./.github/actions/prepare-ci-docker-cache
+
+      - name: CI cache Buildx 준비
+        id: cache-builder
+        if: ${{ steps.cache-runtime.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+          cache-binary: false
+          cleanup: true
+
       - name: Backup/Restore 검증
+        env:
+          CI_DOCKER_CACHE_READY: ${{ steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true' }}
         run: ./scripts/verify-backup-restore.sh
 
   offsite-backup:
@@ -199,11 +264,31 @@ jobs:
     if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode == 'gha-write' && 'gha-read' || needs.repository.outputs.docker_cache_mode || 'disabled' }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: CI cache runtime 준비
+        id: cache-runtime
+        if: ${{ env.CI_DOCKER_CACHE_MODE == 'gha-read' || env.CI_DOCKER_CACHE_MODE == 'gha-write' }}
+        continue-on-error: true
+        uses: ./.github/actions/prepare-ci-docker-cache
+
+      - name: CI cache Buildx 준비
+        id: cache-builder
+        if: ${{ steps.cache-runtime.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+          cache-binary: false
+          cleanup: true
+
       - name: Observability/status 검증
+        env:
+          CI_DOCKER_CACHE_READY: ${{ steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true' }}
         run: ./scripts/verify-observability.sh
 
   monitor-policy:

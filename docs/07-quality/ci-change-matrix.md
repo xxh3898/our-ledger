@@ -1,6 +1,6 @@
 ---
 status: active
-version: 0.1
+version: 0.2
 last_updated: 2026-09-09
 related:
   - 07-quality/testing-strategy.md
@@ -11,7 +11,7 @@ related:
 
 # Fast PR CI와 Full CI 변경 영향 계약
 
-Issue #122는 dev 대상 PR의 피드백 시간을 줄이며, dev에 합쳐진 source와 main/release는 기존 Full 검증을 유지한다. Docker cache, job 사이 exact-HEAD image 공유, heavy verifier 내부 최적화는 별도 Issue #123~#125 범위다.
+Issue #122는 dev 대상 PR의 피드백 시간을 줄이며, dev에 합쳐진 source와 main/release는 기존 Full 검증을 유지한다. Issue #123의 Docker layer cache는 이 job 선택 계약을 바꾸지 않는다. job 사이 exact-HEAD image 공유와 heavy verifier 내부 최적화는 별도 Issue #124~#125 범위다.
 
 ## 진입점과 결과
 
@@ -125,3 +125,9 @@ Issue #122 source PR은 workflow/scripts를 변경해 `ops-runtime`으로 분류
 - 기존 16개 job와 local 19개 entrypoint, 항상 완료되는 gate, PR-only concurrency, production serialization 보존
 
 전체 검증의 source 의미, release/production 권한과 physical device acceptance 구분은 [테스트 전략](testing-strategy.md) 및 기존 Accepted ADR을 따른다.
+
+## Docker cache와 job 선택의 독립성
+
+Issue #123은 위 category, `run_*` 출력, 기존 job/check/CI gate와 concurrency를 유지한다. repository의 별도 `docker_cache_mode` 출력은 build 방식만 선택하며 job을 생략할 수 없다. cache runtime/Buildx 준비 step 실패는 원래 verifier의 no-cache build로 이어지고 실제 verifier의 실패는 숨기지 않는다. dev push는 계속 Full이며 main/release/dispatch/local 기본값은 cache disabled다. production-runtime clean 2개와 fresh-host 합성 runtime build 1개를 포함한 총 11개 build를 유지한다.
+
+API/Web 캐시 적용 6개 호출, fresh-host-bootstrap 단일 writer job, generation/namespace와 cold/warm evidence 기준은 [CI Docker layer cache 계약](testing-strategy.md#ci-docker-layer-cache)을 따른다. runtime-config는 기존 0.40~1.94초 build에 약 4초의 Buildx 준비 비용이 추가되므로 `NOT_APPLIED_WITH_JUSTIFICATION`으로 제외하고 direct build 3개를 유지한다. cache 전 기준인 PR #152 Full run [34357252467](https://github.com/xxh3898/our-ledger/actions/runs/34357252467)은 workflow 432초, critical production-bootstrap 408초였고, dev push [34360329100](https://github.com/xxh3898/our-ledger/actions/runs/34360329100)의 exact head `406ff7432af67e68cbd4f1fb63edd52942ba07d8`는 workflow 340초, critical job 317초였다. 이는 서로 다른 runner/queue의 관측값이며 cache 적용 효과로 해석하지 않는다. 새 exact-head Hosted cold/warm run과 실제 build 구간 비교 전 성능 개선은 미확인이다.
