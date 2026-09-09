@@ -58,9 +58,18 @@ function TrendChart({ trend }: { trend: AssetsData['monthlyTrend'] }) {
                   {monthLabel(point.month, point.complete)}
                   {!point.complete && <small>진행 중</small>}
                 </th>
-                <td>{formatWon(point.assets)}</td>
-                <td>{formatWon(point.liabilities)}</td>
-                <td>{formatWon(point.netWorth)}</td>
+                <td data-label="자산">
+                  <span className="assets-mobile-label" aria-hidden="true">자산</span>
+                  <span>{formatWon(point.assets)}</span>
+                </td>
+                <td data-label="부채">
+                  <span className="assets-mobile-label" aria-hidden="true">부채</span>
+                  <span>{formatWon(point.liabilities)}</span>
+                </td>
+                <td data-label="순자산">
+                  <span className="assets-mobile-label" aria-hidden="true">순자산</span>
+                  <span>{formatWon(point.netWorth)}</span>
+                </td>
               </tr>
             ))}
           </tbody>

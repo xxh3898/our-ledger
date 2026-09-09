@@ -1,7 +1,7 @@
 ---
 status: active
-version: 2.0
-last_updated: 2026-09-08
+version: 2.1
+last_updated: 2026-09-09
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -391,6 +391,10 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 인증되지 않은 상태와 Access 재인증 이동 처리
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
+
+모바일 layout은 최소 `402x874`와 `393x852`에서 Calendar/Home, Quick Entry, Budget, Assets, Settings를 검증한다. Sheet의 open/closed, input focus, keyboard처럼 높이가 줄어든 상태, 긴 Member·Account·Category와 오류 text를 포함하고 각 상태에서 `document.documentElement.scrollWidth <= window.innerWidth`를 요구한다. viewport 밖 rectangle과 자체 `scrollWidth`가 큰 element를 함께 기록해 의도된 component 내부 scroller와 page-level culprit를 구분한다.
+
+`App.test.tsx`는 Assets의 단일 semantic table, column/row header, 12개 월과 mobile label-value 구조를 검증한다. jsdom 구조 검증은 실제 layout 측정을 대신하지 않는다. browser viewport simulation도 WebKit focus auto-zoom이나 Home Screen PWA를 실제 기기에서 검증한 것으로 간주하지 않는다. iPhone 16 Pro와 iPhone 15의 Safari/PWA smoke를 별도 기록하고, 수행하지 못했으면 `OWNER_DEVICE_SMOKE_PENDING`으로 남긴다.
 
 `dateTime.test.ts`와 `calendarState.test.ts`는 UTC 날짜 경계와 다른 Household timezone 자정, Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
 
