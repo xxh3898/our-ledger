@@ -28,12 +28,18 @@ describe('amount input strings', () => {
     expect(parseAmountInput('-001000', true)).toBe('-1000')
     expect(formatAmountInput('-1000')).toBe('-1,000')
     expect(parseAmountInput('-0', true)).toBe('-0')
+    expect(parseAmountInput('-,000', true)).toBe('-0')
+    expect(parseAmountInput('-01,000', true)).toBe('-1000')
   })
 
   it('maps canonical offsets around separators, including signed amounts', () => {
     expect(amountInputCaret('1,234,567', 0)).toBe(0)
     expect(amountInputCaret('1,234,567', 2)).toBe(3)
     expect(amountInputCaret('-1,000', 2)).toBe(2)
+    expect(amountInputCaret('-0', 0)).toBe(0)
+    expect(amountInputCaret('-0', 1)).toBe(1)
+    expect(amountInputCaret('-0', 2)).toBe(2)
+    expect(amountInputCaret('-1,000', 1)).toBe(1)
     expect(amountInputCaret('1,234', 20)).toBe(5)
   })
 })

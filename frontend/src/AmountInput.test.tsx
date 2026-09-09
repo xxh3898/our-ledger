@@ -141,6 +141,45 @@ describe('AmountInput', () => {
     expect(screen.getByTestId('canonical')).toHaveTextContent('9223372036854775807')
   })
 
+  it('keeps the caret after the minus when deleting the first digit normalizes leading zeroes', () => {
+    render(<Editor allowNegative initial="-1000" />)
+    input().focus()
+    input().setSelectionRange(2, 2)
+    edit('-,000', 1, 'deleteContentBackward')
+    expect(input()).toHaveValue('-0')
+    expect(screen.getByTestId('canonical')).toHaveTextContent('-0')
+    expect(input().selectionStart).toBe(1)
+    expect(input().selectionEnd).toBe(1)
+
+    const caret = input().selectionStart!
+    edit(`${input().value.slice(0, caret)}2${input().value.slice(caret)}`, caret + 1)
+    expect(input()).toHaveValue('-20')
+    expect(screen.getByTestId('canonical')).toHaveTextContent('-20')
+    expect(input().selectionStart).toBe(2)
+  })
+
+  it('normalizes signed leading zeroes without moving a caret across the minus', () => {
+    render(<Editor allowNegative />)
+    edit('-001000')
+    expect(input()).toHaveValue('-1,000')
+    expect(input().selectionStart).toBe(6)
+    edit('-01,000', 2)
+    expect(input()).toHaveValue('-1,000')
+    expect(input().selectionStart).toBe(1)
+    edit('-01,000', 0)
+    expect(input().selectionStart).toBe(0)
+  })
+
+  it('preserves signed middle insertion and deletion caret positions', () => {
+    render(<Editor allowNegative initial="-1234567" />)
+    edit('-1,2934,567', 5)
+    expect(input()).toHaveValue('-12,934,567')
+    expect(input().selectionStart).toBe(5)
+    edit('-12,34,567', 4, 'deleteContentBackward')
+    expect(input()).toHaveValue('-1,234,567')
+    expect(input().selectionStart).toBe(4)
+  })
+
   it('forwards focus and remains stable when the parent supplies a new canonical value', () => {
     function Parent() {
       const ref = useRef<HTMLInputElement>(null)

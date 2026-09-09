@@ -85,9 +85,14 @@ export function AmountInput({
         return
       }
       const display = formatAmountInput(canonical)
-      const removedZeros = draft.replace(/,/g, '').length - canonical.length
-      const position = (index: number) => amountInputCaret(display,
-        draft.slice(0, index).replace(/,/g, '').length - removedZeros)
+      const signLength = canonical.startsWith('-') ? 1 : 0
+      const draftDigits = draft.replace(/,/g, '').slice(signLength)
+      const removedZeros = draftDigits.length - (canonical.length - signLength)
+      const position = (index: number) => {
+        const signOffset = index > 0 ? signLength : 0
+        const digitsBefore = draft.slice(0, index).replace(/,/g, '').length - signOffset
+        return amountInputCaret(display, signOffset + Math.max(0, digitsBefore - removedZeros))
+      }
       selectionRef.current = [position(start), position(end)]
       input.value = display
       input.setSelectionRange(...selectionRef.current)
