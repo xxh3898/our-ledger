@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { todayInTimeZone } from './dateTime.ts'
 import { RecurringTransactionSheet } from './RecurringTransactionSheet.tsx'
+import { AmountInput } from './AmountInput.tsx'
 import {
   type Account,
   type Category,
@@ -404,11 +405,10 @@ function AccountSetup({
         )}
         <label>
           기초 잔액
-          <input
-            inputMode="numeric"
-            type="number"
+          <AmountInput
+            allowNegative
             value={openingBalance}
-            onChange={(event) => setOpeningBalance(event.target.value)}
+            onValueChange={setOpeningBalance}
           />
         </label>
         <label>

@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import { todayInTimeZone } from './dateTime.ts'
 import {
   type Account,
@@ -267,8 +268,8 @@ export function RecurringTransactionSheet({
               </button>
             ))}
           </div>
-          <label>금액<input required min="1" type="number" inputMode="numeric"
-            value={form.amount} onChange={(event) => change('amount', event.target.value)} /></label>
+          <label>금액<AmountInput required min="1"
+            value={form.amount} onValueChange={(value) => change('amount', value)} /></label>
           {form.type !== 'TRANSFER' && (
             <>
               <label>범위<select value={form.scope}

@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import {
   type MarriageGoalView,
   LedgerApiError,
@@ -101,14 +102,12 @@ export function MarriageGoalSheet({
           <label className="amount-field">
             목표 금액
             <span>
-              <input
+              <AmountInput
                 required
                 aria-label="목표 금액"
                 min="1"
-                inputMode="numeric"
-                type="number"
                 value={targetAmount}
-                onChange={(event) => setTargetAmount(event.target.value)}
+                onValueChange={setTargetAmount}
               /> 원
             </span>
           </label>
