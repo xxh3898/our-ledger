@@ -38,6 +38,8 @@ required_paths=(
   "scripts/verify-release-transport.sh"
   "scripts/verify-fixed-bootstrap.sh"
   "scripts/verify.sh"
+  "scripts/ci_tools/change_classifier.py"
+  "scripts/ci_tools/test_change_classifier.py"
   "scripts/backup-our-ledger-bootstrap.sh"
   "scripts/backup-production.sh"
   "scripts/bootstrap-production.sh"
@@ -175,5 +177,10 @@ fi
 if command -v git >/dev/null 2>&1 && git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" diff --check
 fi
+
+(
+  cd "$ROOT_DIR"
+  PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest scripts.ci_tools.test_change_classifier
+)
 
 echo "저장소 구조 검사를 통과했습니다."

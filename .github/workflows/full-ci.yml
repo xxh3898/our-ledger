@@ -14,12 +14,43 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: our-ledger-ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   repository:
     runs-on: ubuntu-latest
+    outputs:
+      category: ${{ steps.changes.outputs.category }}
+      run_backend: ${{ steps.changes.outputs.run_backend }}
+      run_frontend: ${{ steps.changes.outputs.run_frontend }}
+      run_full: ${{ steps.changes.outputs.run_full }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: PR 변경 영향 분류
+        id: changes
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BASE_REF: ${{ github.base_ref }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_REF: ${{ github.ref }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          if ! python3 -B scripts/ci_tools/change_classifier.py classify; then
+            printf '%s\n' \
+              'category=mixed/unknown' \
+              'reason=classifier-execution-failure' \
+              'run_backend=true' \
+              'run_frontend=true' \
+              'run_full=true' >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 저장소 구조 검사
         run: ./scripts/check-repo.sh
@@ -34,6 +65,8 @@ jobs:
         run: ./scripts/verify-compose.sh
 
   backup-docker-authority:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -44,12 +77,18 @@ jobs:
         run: ./scripts/verify-backup-docker-authority.sh
 
   backend:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_backend != 'false' }}
     uses: ./.github/workflows/backend-ci.yml
 
   frontend:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_frontend != 'false' }}
     uses: ./.github/workflows/frontend-ci.yml
 
   production-runtime:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -60,6 +99,8 @@ jobs:
         run: ./scripts/verify-production-runtime.sh
 
   production-bootstrap:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -70,6 +111,8 @@ jobs:
         run: ./scripts/verify-production-bootstrap.sh
 
   fresh-host-bootstrap:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -80,6 +123,8 @@ jobs:
         run: ./scripts/verify-fresh-host-bootstrap.sh
 
   host-state:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -90,6 +135,8 @@ jobs:
         run: ./scripts/verify-host-state.sh
 
   fixed-bootstrap:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -100,6 +147,8 @@ jobs:
         run: ./scripts/verify-fixed-bootstrap.sh
 
   runtime-config-evolution:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -110,6 +159,8 @@ jobs:
         run: ./scripts/verify-runtime-config-evolution.sh
 
   host-deploy-transaction:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -120,6 +171,8 @@ jobs:
         run: ./scripts/verify-host-deploy-transaction.sh
 
   backup-restore:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -130,6 +183,8 @@ jobs:
         run: ./scripts/verify-backup-restore.sh
 
   offsite-backup:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -140,6 +195,8 @@ jobs:
         run: ./scripts/verify-offsite-backup.sh
 
   observability:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -150,6 +207,8 @@ jobs:
         run: ./scripts/verify-observability.sh
 
   monitor-policy:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -160,6 +219,8 @@ jobs:
         run: ./scripts/verify-monitor-policy.sh
 
   release-transport:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -168,3 +229,33 @@ jobs:
 
       - name: Release/Deploy source 검증
         run: ./scripts/verify-release-transport.sh
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - repository
+      - backend
+      - frontend
+      - backup-docker-authority
+      - production-runtime
+      - production-bootstrap
+      - fresh-host-bootstrap
+      - host-state
+      - fixed-bootstrap
+      - runtime-config-evolution
+      - host-deploy-transaction
+      - backup-restore
+      - offsite-backup
+      - observability
+      - monitor-policy
+      - release-transport
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: 선택된 검증과 생략 결과 확인
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B scripts/ci_tools/change_classifier.py gate
