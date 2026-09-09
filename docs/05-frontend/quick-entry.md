@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.6
-last_updated: 2026-09-02
+version: 0.7
+last_updated: 2026-09-09
 related:
   - 01-product/user-flows.md
   - 02-domain/transaction.md
@@ -83,6 +83,14 @@ Quick Entry에는 현재 거래 유형에서 최근 사용한 서로 다른 Cate
 - 선택 즉시 Quick Entry에 반영하고 picker를 닫으며 별도 확인 button을 두지 않는다.
 - Concept 단계의 emoji는 placeholder일 뿐 production Category asset 계약이 아니다.
 
+Category가 없으면 selector 옆 `카테고리 추가`로 현재 거래 유형의 Category를 생성할 수 있다.
+
+- 생성 화면은 Quick Entry 위에 중첩 Sheet로 열고, Quick Entry form을 unmount하거나 초기화하지 않는다.
+- 이름과 선택 Group은 설정의 Category 생성과 같은 `/api/v1/categories` 계약을 사용한다. 이름 공백 정규화, 길이, active 중복, Group type·active 상태, Household 경계는 server validation을 authority로 삼는다.
+- 취소하면 거래 유형, 금액, Scope/Owner/Payer, Account, 날짜, 메모를 유지한다. 생성 실패 때는 이 거래 draft와 Category 이름·Group 입력을 모두 유지한다.
+- 성공 응답의 Category를 현재 reference 목록에 반영하고 현재 거래에 자동 선택한다.
+- browser back, ESC, 닫기, backdrop은 먼저 중첩 Sheet만 닫고 Quick Entry history entry를 보존한다. 닫힌 뒤 focus는 `카테고리 추가`로 돌아간다.
+
 ## Account Picker
 
 - Quick Entry에는 현재 선택한 Account 이름을 가장 강하게 표시하고 owner, 기관, 식별 가능한 최소 정보, 필요 시 잔액을 secondary 정보로 둔다.
@@ -140,6 +148,7 @@ client validation은 server의 Household, ownership, 거래 유형, Account/Cate
 - 선택일 목록은 `occurredAt DESC, id DESC`의 API 순서를 그대로 표시한다. 이체는 source→destination, 카드 지출은 카드 Account를 표시하며 edit/delete는 조회한 `version`을 사용한다.
 - mutation helper는 same-origin `XSRF-TOKEN` cookie를 `X-XSRF-TOKEN` header로 보낸다. pending 동안 해당 submit/delete button을 비활성화한다.
 - 서버 validation/domain 실패 시 Account/Category/Transaction form state를 초기화하지 않고 error message를 `role=alert`로 표시한다.
+- 빠른 입력 중 현재 유형의 Category를 기존 Category create API로 추가할 수 있다. 취소·실패는 Quick Entry draft를 보존하고, 성공은 reference 목록 갱신과 새 Category 자동 선택을 함께 수행한다.
 - 성공 시 `저장했어요/수정했어요 🐾`를 500ms 표시한 뒤 Sheet를 닫고 같은 월·Scope·선택일을 갱신한다. Calendar Scope와 무관하게 현재 사용자의 PERSONAL을 신규 입력 기본값으로 사용한다.
 
 최근 Category chip·검색·Group icon grid와 Account section picker는 이 Slice에서 새 dependency나 가짜 최근 사용 data 없이 기존 native select를 유지한다. 해당 picker 정교화는 실제 최근 사용 계약과 production asset을 함께 정의하는 후속 범위다.

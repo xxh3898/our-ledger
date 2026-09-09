@@ -387,6 +387,7 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 403 내부 User 미등록 상태
 - 금액·날짜·필터 변환 단위 테스트
 - 빠른 입력 form 컴포넌트 테스트
+- 빠른 입력 중 Category 생성의 draft, validation error, reference 갱신, 자동 선택 테스트
 - 달력·예산·자산 상태 테스트
 - 인증되지 않은 상태와 Access 재인증 이동 처리
 - 핵심 사용자 흐름 E2E
@@ -409,6 +410,9 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - numeric autofocus, ESC close, opener focus 복귀
 - 중복 submit 방지, 500ms 성공 feedback, 같은 context 갱신
 - 실패 시 Sheet·입력 보존
+- Category 추가 취소·server/duplicate/invalid 실패의 두 form 입력 보존과 재시도
+- Category 생성 성공 응답의 reference 반영·자동 선택 뒤 보존된 거래 저장
+- 중첩 Category Sheet의 browser back/ESC/backdrop/닫기와 Quick Entry history·opener focus 보존
 - 선택일 edit/delete 후 월·일 갱신
 - 설정 Sheet의 Account/Category 기능 보존
 - 활성 하단 destination과 `aria-current` 전환

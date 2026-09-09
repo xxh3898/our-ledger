@@ -34,6 +34,7 @@ import {
 import { todayInTimeZone } from './dateTime.ts'
 import {
   type CalendarMonth,
+  type Category,
   type CurrentHousehold,
   type CurrentUser,
   type LedgerTransaction,
@@ -1043,6 +1044,16 @@ function CalendarWorkspace({
     setRevision((current) => current + 1)
   }
 
+  function acceptCreatedCategory(category: Category) {
+    setReferences((current) => ({
+      ...current,
+      categories: [
+        ...current.categories.filter((item) => item.id !== category.id),
+        category,
+      ],
+    }))
+  }
+
   function acceptGoalView(view: MarriageGoalView) {
     if (goalSheet === 'create') goalCreateSucceededRef.current = true
     setGoalState({ status: 'ready', data: view })
@@ -1155,9 +1166,11 @@ function CalendarWorkspace({
           currentUserId={user.userId}
           household={references.household}
           accounts={references.accounts}
+          groups={references.groups}
           categories={references.categories}
           selectedDate={entryMode.selectedDate}
           editing={entryMode.editing}
+          onCategoryCreated={acceptCreatedCategory}
           onRequestClose={requestCloseEntry}
           onSaved={() => setRevision((current) => current + 1)}
         />
