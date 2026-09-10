@@ -21,7 +21,7 @@ PUSH = {
     "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "xxh3898/our-ledger",
     "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/dev",
     "GITHUB_WORKFLOW_REF": "xxh3898/our-ledger/.github/workflows/full-ci.yml@refs/heads/dev",
-    "GITHUB_JOB": "fresh-host-bootstrap", "CI_DOCKER_CACHE_MODE": "gha-write",
+    "GITHUB_JOB": "test-images", "CI_DOCKER_CACHE_MODE": "gha-write",
     "CI_DOCKER_CACHE_READY": "true", "DOCKER_DEFAULT_PLATFORM": "linux/amd64",
     "ACTIONS_RUNTIME_TOKEN": "synthetic-runtime-token", "ACTIONS_RESULTS_URL": "https://cache.example.invalid/",
 }
@@ -233,15 +233,17 @@ class BuildTest(unittest.TestCase):
 
 
 class WorkflowTest(unittest.TestCase):
-    def test_exact_six_call_sites_and_five_original_builds(self):
+    def test_consumers_retain_local_build_and_shared_adoption_paths(self):
         sites = {"backup-restore": ["api"], "production-bootstrap": ["api"],
                  "fresh-host-bootstrap": ["api", "web"], "observability": ["api", "web"]}
         total = 0
         for name, families in sites.items():
             source = (ROOT / f"scripts/verify-{name}.sh").read_text(encoding="utf-8")
-            actual = re.findall(r'^python3 -B "\$ROOT_DIR/scripts/ci_tools/docker_cache.py" build ([a-z-]+)', source, re.M)
+            actual = re.findall(r'^\s*python3 -B "\$ROOT_DIR/scripts/ci_tools/docker_cache.py" build ([a-z-]+)', source, re.M)
             self.assertEqual(actual, families)
-            blocks = re.findall(r'^python3 -B "\$ROOT_DIR/scripts/ci_tools/docker_cache.py" build ([a-z-]+)(.*?)(?=^\S|\Z)', source, re.M | re.S)
+            adopted = re.findall(r'^\s*python3 -B "\$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \\\n\s+(api|web) ', source, re.M)
+            self.assertEqual(adopted, families)
+            blocks = re.findall(r'^\s*python3 -B "\$ROOT_DIR/scripts/ci_tools/docker_cache.py" build ([a-z-]+)(.*?)(?=^\s*(?:python3|docker|;;)|\Z)', source, re.M | re.S)
             for _, block in blocks:
                 self.assertNotIn("--build-arg", block)
             total += len(actual)
@@ -258,10 +260,11 @@ class WorkflowTest(unittest.TestCase):
             self.assertIn("--platform linux/arm64", source)
             self.assertIn("--network none", source)
 
-    def test_workflow_has_one_writer_job_and_setup_failures_cannot_skip_verification(self):
+    def test_workflow_has_one_matrix_writer_job_and_consumers_do_not_prepare_buildx(self):
         source = (ROOT / ".github/workflows/full-ci.yml").read_text(encoding="utf-8")
         jobs = set().union(*cache.READERS.values())
-        self.assertEqual(set(cache.WRITERS.values()), {"fresh-host-bootstrap"})
+        self.assertEqual(jobs, {"test-images"})
+        self.assertEqual(set(cache.WRITERS.values()), {"test-images"})
         for name in jobs:
             body = job_block(source, name)
             self.assertIn("uses: ./.github/actions/prepare-ci-docker-cache", body)
@@ -271,12 +274,17 @@ class WorkflowTest(unittest.TestCase):
             self.assertIn("cleanup: true", body)
             self.assertEqual(body.count("continue-on-error: true"), 2)
             self.assertIn("steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true'", body)
-            self.assertEqual("docker_cache_mode == 'gha-write' && 'gha-read'" in body, name not in set(cache.WRITERS.values()))
-            verification = body[body.rfind("      - name:"):]
-            self.assertNotIn("if:", verification)
-            self.assertNotIn("continue-on-error:", verification)
-            self.assertIn(f"run: ./scripts/verify-{name}.sh", verification)
-        self.assertEqual(source.count("uses: ./.github/actions/prepare-ci-docker-cache"), 4)
+            self.assertNotIn("docker_cache_mode == 'gha-write' && 'gha-read'", body)
+            self.assertIn("strategy:\n      fail-fast: false\n      matrix:\n        family:\n          - api\n          - web", body)
+            self.assertIn("test_image_artifact.py produce", body)
+            self.assertIn("CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode }}", body)
+        self.assertEqual(source.count("uses: ./.github/actions/prepare-ci-docker-cache"), 1)
+        for name in ("production-bootstrap", "fresh-host-bootstrap", "backup-restore", "observability"):
+            body = job_block(source, name)
+            self.assertNotIn("setup-buildx-action", body)
+            self.assertNotIn("prepare-ci-docker-cache", body)
+            self.assertIn("CI_TEST_IMAGE_MODE", body)
+            self.assertIn("test_image_artifact.py", (ROOT / f"scripts/verify-{name}.sh").read_text(encoding="utf-8"))
         for name in ("production-runtime", "runtime-config-evolution", "release-transport", "host-state", "monitor-policy"):
             self.assertNotIn("CI_DOCKER_CACHE", job_block(source, name))
             self.assertNotIn("setup-buildx-action", job_block(source, name))

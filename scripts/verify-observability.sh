@@ -125,10 +125,28 @@ python3 -m unittest scripts/backup_tools/test_backup_artifact.py
 python3 -m unittest scripts/status_tools/test_production_status.py
 
 printf '\n[observability 2/8] exact-head runtime images\n'
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api --progress plain --no-cache --pull \
-  --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web --progress plain --no-cache --pull \
-  --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+case "${CI_TEST_IMAGE_MODE:-disabled}" in
+  required)
+    if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" || -z "${CI_TEST_IMAGE_WEB_DIR:-}" ]]; then
+      echo "shared API/Web image artifact directory가 없습니다." >&2
+      exit 1
+    fi
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      api "$CI_TEST_IMAGE_API_DIR" "$api_image"
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      web "$CI_TEST_IMAGE_WEB_DIR" "$web_image"
+    ;;
+  disabled)
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api --progress plain --no-cache --pull \
+      --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web --progress plain --no-cache --pull \
+      --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+    ;;
+  *)
+    echo "알 수 없는 shared test image mode입니다." >&2
+    exit 1
+    ;;
+esac
 "${compose[@]}" config --quiet
 
 printf '\n[observability 3/8] strict synthetic backup source\n'

@@ -18,10 +18,10 @@ DOCKERFILES = {
     "web": "infra/docker/web.Dockerfile",
 }
 READERS = {
-    "api": {"backup-restore", "production-bootstrap", "fresh-host-bootstrap", "observability"},
-    "web": {"fresh-host-bootstrap", "observability"},
+    "api": {"test-images"},
+    "web": {"test-images"},
 }
-WRITERS = {"api": "fresh-host-bootstrap", "web": "fresh-host-bootstrap"}
+WRITERS = {"api": "test-images", "web": "test-images"}
 
 
 def event_mode(environment: Mapping[str, str]) -> str:

@@ -40,6 +40,10 @@ required_paths=(
   "scripts/verify.sh"
   "scripts/ci_tools/change_classifier.py"
   "scripts/ci_tools/test_change_classifier.py"
+  "scripts/ci_tools/docker_cache.py"
+  "scripts/ci_tools/test_docker_cache.py"
+  "scripts/ci_tools/test_image_artifact.py"
+  "scripts/ci_tools/test_test_image_artifact.py"
   "scripts/backup-our-ledger-bootstrap.sh"
   "scripts/backup-production.sh"
   "scripts/bootstrap-production.sh"
@@ -182,7 +186,8 @@ fi
   cd "$ROOT_DIR"
   PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest \
     scripts.ci_tools.test_change_classifier \
-    scripts.ci_tools.test_docker_cache
+    scripts.ci_tools.test_docker_cache \
+    scripts.ci_tools.test_test_image_artifact
 )
 
 echo "저장소 구조 검사를 통과했습니다."

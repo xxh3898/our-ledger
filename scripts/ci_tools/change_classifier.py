@@ -30,6 +30,7 @@ HEAVY_JOBS = {
     "offsite-backup", "observability", "monitor-policy", "release-transport",
 }
 ALL_JOBS = {"repository", "backend", "frontend", *HEAVY_JOBS}
+ALL_JOBS.add("test-images")
 FULL_CATEGORIES = {"ops-runtime", "mixed/unknown"}
 FLAGS = ("run_backend", "run_frontend", "run_full")
 
@@ -175,14 +176,22 @@ def check_gate(needs: object) -> None:
         "docs-only", "frontend-only", "backend-only", *FULL_CATEGORIES,
     }:
         raise ValueError("classifier category is unavailable")
+    if outputs.get("share_test_images") not in {"true", "false"}:
+        raise ValueError("shared test image selection is unavailable")
+    if outputs["share_test_images"] == "true" and outputs.get("run_full") != "true":
+        raise ValueError("shared test images cannot run on a Fast route")
     expected = plan(outputs["category"], "gate")
     if any(outputs.get(flag) != expected[flag] for flag in FLAGS):
         raise ValueError("classifier flags differ from category")
     for name, job in needs.items():
         if name == "repository":
             continue
-        flag = {"backend": "run_backend", "frontend": "run_frontend"}.get(name, "run_full")
-        expected_result = "success" if outputs[flag] == "true" else "skipped"
+        if name == "test-images":
+            selected = outputs["run_full"] == "true" and outputs["share_test_images"] == "true"
+        else:
+            flag = {"backend": "run_backend", "frontend": "run_frontend"}.get(name, "run_full")
+            selected = outputs[flag] == "true"
+        expected_result = "success" if selected else "skipped"
         if job.get("result") != expected_result:
             raise ValueError(f"{name} did not complete with expected {expected_result}")
 

@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-09-09
+version: 0.3
+last_updated: 2026-09-10
 related:
   - 07-quality/testing-strategy.md
   - 08-operations/deployment.md
@@ -11,20 +11,20 @@ related:
 
 # Fast PR CI와 Full CI 변경 영향 계약
 
-Issue #122는 dev 대상 PR의 피드백 시간을 줄이며, dev에 합쳐진 source와 main/release는 기존 Full 검증을 유지한다. Issue #123의 Docker layer cache는 이 job 선택 계약을 바꾸지 않는다. job 사이 exact-HEAD image 공유와 heavy verifier 내부 최적화는 별도 Issue #124~#125 범위다.
+Issue #122는 dev 대상 PR의 피드백 시간을 줄이며, dev에 합쳐진 source와 main/release는 기존 Full 검증을 유지한다. Issue #123의 Docker layer cache와 Issue #124의 current-run exact-source test image 공유는 Fast category 자체를 바꾸지 않는다. heavy verifier 내부 최적화는 별도 Issue #125 범위다.
 
 ## 진입점과 결과
 
 | 진입점 | 분류 | 실행 |
 | --- | --- | --- |
 | `full-ci.yml` 직접 실행, `pull_request`, base `dev` | exact base SHA와 PR head SHA의 변경 경로 | repository → 선택 job → CI gate |
-| `pull_request`, base `main` | Full | 기존 16개 job → CI gate |
-| `push: dev` | Full | 기존 16개 job → CI gate |
-| `workflow_dispatch` | Full | 기존 16개 job → CI gate |
-| 다른 workflow의 `workflow_call` | Full | 기존 16개 job → CI gate |
-| 이벤트/호출자/diff를 확정할 수 없음 | Full fallback | 기존 16개 job → CI gate |
+| `pull_request`, base `main` | Full | 기존 16개 검증 job, test-images skip → CI gate |
+| `push: dev` | Full | 기존 16개 검증 job + test-images(API/Web matrix) → CI gate |
+| `workflow_dispatch` | Full | 기존 16개 검증 job, test-images skip → CI gate |
+| 다른 workflow의 `workflow_call` | Full | 기존 16개 검증 job, test-images skip → CI gate |
+| 이벤트/호출자/diff를 확정할 수 없음 | Full fallback | 기존 16개 검증 job, test-images skip → CI gate |
 
-workflow 이름은 `Full CI`를 유지하고 기존 job/check 이름도 보존한다. repository job은 항상 시작해 기존 구조·문서·migration byte·Compose 검증과 분류 회귀 테스트를 수행한다. 선택 job은 repository의 `run_backend`, `run_frontend`, `run_full` 출력을 사용한다. 최종 `CI gate`는 `always()`와 기존 16개 job의 `needs`를 사용하며 다음을 모두 확인한다.
+workflow 이름은 `Full CI`를 유지하고 기존 job/check 이름도 보존한다. repository job은 항상 시작해 기존 구조·문서·migration byte·Compose 검증과 분류 회귀 테스트를 수행한다. 선택 job은 repository의 `run_backend`, `run_frontend`, `run_full` 출력을 사용한다. 직접 dev Full에서만 `share_test_images=true`이고 Fast/main/release/dispatch/unknown caller에서는 false다. 최종 `CI gate`는 `always()`와 기존 16개 검증 job 및 `test-images`의 `needs`를 사용하며 다음을 모두 확인한다.
 
 - repository 성공
 - 알려진 category와 해당 category에 맞는 exact string flags
@@ -54,12 +54,12 @@ reusable workflow의 `github` context는 caller의 context를 사용하므로 `e
 | docs-only | root/docs/frontend/backend README, `docs/00-overview`, `01-product`, `02-domain`, `05-frontend`, `07-quality` 아래 Markdown만 | repository, CI gate | backend/frontend/heavy: 실행 source·build context·runtime authority 변경 없음 |
 | frontend-only | `frontend/src/`의 TS/TSX/CSS + 위 설명 docs | repository, frontend, CI gate | backend/heavy: 일반 화면 source는 Nginx/Compose/API profile·migration·host lifecycle을 바꾸지 않음 |
 | backend-only | 기존 `account/assets/budget/calendar/category/export/goal/statistics/transaction` package의 직접 Java 파일과 기존 test package의 직접 `*Test.java` + 설명 docs | repository, backend, CI gate | frontend/heavy: domain build/test·Flyway·JPA·REST Docs·인증/Household 회귀는 전체 Backend CI가 검증 |
-| ops-runtime | `infra/`, `scripts/`, `.github/`, `launchd/`, Compose, `.env*`, `.dockerignore*`, `runtime-*`, `AGENTS.md` | 기존 16개 + CI gate | 없음: 배포·검증·설정 authority |
-| ops-runtime | frontend package/lockfile/config/index/public/manifest/build script 및 TS/TSX/CSS 이외 새 source asset | 기존 16개 + CI gate | 없음: Docker COPY allowlist, dependency, build 및 실제 runtime output에 연결 |
-| ops-runtime | backend build/Gradle, main/test resources, Flyway migration, security/identity/household/bootstrap/ops/recurring package, application entrypoint | 기존 16개 + CI gate | 없음: 보안, data, production profile, bootstrap/scheduler authority |
-| ops-runtime | backend 파일 이름의 Config/Security/Bootstrap/Migration/Profile/Scheduler/Operational/Health/Authentication/Authorization/Csrf/Identity/Household/Filter/Guard/Controller/Request/Response/Application, 대소문자 무관 | 기존 16개 + CI gate | 없음: 다른 허용 package 아래 배치된 보안/config/API 경로도 승격 |
-| ops-runtime | `docs/03-data`, `04-api`, `06-security`, `08-operations`, `09-decisions` | 기존 16개 + CI gate | 없음: DB/API/security/deployment/Accepted ADR authority |
-| mixed/unknown | frontend + backend, 모르는 package/경로, 비정상 경로, 빈 diff, 분류 실패 | 기존 16개 + CI gate | 없음: 의존성을 확정하지 못하면 Full fallback |
+| ops-runtime | `infra/`, `scripts/`, `.github/`, `launchd/`, Compose, `.env*`, `.dockerignore*`, `runtime-*`, `AGENTS.md` | 기존 16개 + direct dev test-images + CI gate | 없음: 배포·검증·설정 authority |
+| ops-runtime | frontend package/lockfile/config/index/public/manifest/build script 및 TS/TSX/CSS 이외 새 source asset | 기존 16개 + direct dev test-images + CI gate | 없음: Docker COPY allowlist, dependency, build 및 실제 runtime output에 연결 |
+| ops-runtime | backend build/Gradle, main/test resources, Flyway migration, security/identity/household/bootstrap/ops/recurring package, application entrypoint | 기존 16개 + direct dev test-images + CI gate | 없음: 보안, data, production profile, bootstrap/scheduler authority |
+| ops-runtime | backend 파일 이름의 Config/Security/Bootstrap/Migration/Profile/Scheduler/Operational/Health/Authentication/Authorization/Csrf/Identity/Household/Filter/Guard/Controller/Request/Response/Application, 대소문자 무관 | 기존 16개 + direct dev test-images + CI gate | 없음: 다른 허용 package 아래 배치된 보안/config/API 경로도 승격 |
+| ops-runtime | `docs/03-data`, `04-api`, `06-security`, `08-operations`, `09-decisions` | 기존 16개 + direct dev test-images + CI gate | 없음: DB/API/security/deployment/Accepted ADR authority |
+| mixed/unknown | frontend + backend, 모르는 package/경로, 비정상 경로, 빈 diff, 분류 실패 | 기존 16개 + direct dev test-images + CI gate | 없음: 의존성을 확정하지 못하면 Full fallback |
 
 frontend-only는 기존 `verify-frontend.sh` 전체를 실행한다. lint, typecheck, 모든 component/integration test, production build가 유지되며 build에는 manifest `start_url=/`, `scope=/`, `display=standalone`, source/build byte correspondence와 HTML link 검증이 포함된다. package/config/index/manifest/Docker source 변경은 Fast 허용 대상이 아니다. 따라서 이 경로에서는 일반 TS/CSS를 다시 build하는 Docker-heavy job을 PR 단계에서 생략하고 dev post-merge에서는 실행한다. 모바일 #132/#133 등의 기존 frontend 회귀도 그대로 실행된다.
 
@@ -67,7 +67,7 @@ backend-only는 일부 테스트 선택이 아닌 기존 `./gradlew --no-daemon 
 
 ## 기존 CI graph와 검증 의존성
 
-변경 전 `full-ci.yml`의 16개 job은 모두 `needs` 없이 병렬 시작했다. 변경 후 repository가 분류를 출력하고 나머지 15개 job은 해당 flags를 기다린다. job 삭제는 없으며 실제 verifier 본문, Backend/Frontend reusable workflow, `scripts/verify.sh`의 19개 gate는 그대로다.
+Issue #122 변경 전 `full-ci.yml`의 16개 검증 job은 모두 `needs` 없이 병렬 시작했다. 현재 repository가 분류를 출력하고 나머지 검증 job은 해당 flags를 기다린다. Issue #124는 direct dev Full에서만 API/Web `test-images` matrix를 실행하며 4개 heavy consumer가 이를 기다린다. Fast 경로에서는 producer와 heavy consumer가 모두 skipped이고 main/release에서는 producer만 skipped인 채 consumer가 기존 독립 build를 수행한다. 기존 검증 job 삭제는 없으며 Backend/Frontend reusable workflow와 `scripts/verify.sh`의 19개 local gate는 그대로다.
 
 duration은 [PR #150의 run 34296805373](https://github.com/xxh3898/our-ledger/actions/runs/34296805373)의 job started/completed timestamp 차이다. 공통 trigger는 위 표의 PR/dev push/dispatch/reusable이며, Full에서는 모두 실행한다.
 
@@ -122,12 +122,12 @@ Issue #122 source PR은 workflow/scripts를 변경해 `ops-runtime`으로 분류
 - rename/delete, symlink/type/executable mode, empty/malformed/Git failure
 - main PR, dev push, dispatch, 다른 reusable caller의 Full
 - gate dependency exact set, selected failure/cancel/skip, unselected unexpected execution, malformed output 거부
-- 기존 16개 job와 local 19개 entrypoint, 항상 완료되는 gate, PR-only concurrency, production serialization 보존
+- 기존 16개 검증 job와 local 19개 entrypoint, test-images의 Full/skip 결과, 항상 완료되는 gate, PR-only concurrency, production serialization 보존
 
 전체 검증의 source 의미, release/production 권한과 physical device acceptance 구분은 [테스트 전략](testing-strategy.md) 및 기존 Accepted ADR을 따른다.
 
 ## Docker cache와 job 선택의 독립성
 
-Issue #123은 위 category, `run_*` 출력, 기존 job/check/CI gate와 concurrency를 유지한다. repository의 별도 `docker_cache_mode` 출력은 build 방식만 선택하며 job을 생략할 수 없다. cache runtime/Buildx 준비 step 실패는 원래 verifier의 no-cache build로 이어지고 실제 verifier의 실패는 숨기지 않는다. dev push는 계속 Full이며 main/release/dispatch/local 기본값은 cache disabled다. production-runtime clean 2개와 fresh-host 합성 runtime build 1개를 포함한 총 11개 build를 유지한다.
+Issue #123은 위 category, `run_*` 출력, 기존 job/check/CI gate와 concurrency를 유지한다. repository의 별도 `docker_cache_mode` 출력은 direct dev Full의 test-images build 방식만 선택한다. cache runtime/Buildx 준비 step 실패는 producer의 no-cache build로 이어지고 실제 build 실패는 숨기지 않는다. dev push는 계속 Full이며 main/release/dispatch/local 기본값은 cache disabled다. Issue #124의 shared mode에서 artifact 실패는 cache fallback과 달리 consumer rebuild 없이 fail closed한다.
 
-API/Web 캐시 적용 6개 호출, fresh-host-bootstrap 단일 writer job, generation/namespace와 cold/warm evidence 기준은 [CI Docker layer cache 계약](testing-strategy.md#ci-docker-layer-cache)을 따른다. runtime-config는 기존 0.40~1.94초 build에 약 4초의 Buildx 준비 비용이 추가되므로 `NOT_APPLIED_WITH_JUSTIFICATION`으로 제외하고 direct build 3개를 유지한다. cache 전 기준인 PR #152 Full run [34357252467](https://github.com/xxh3898/our-ledger/actions/runs/34357252467)은 workflow 432초, critical production-bootstrap 408초였고, dev push [34360329100](https://github.com/xxh3898/our-ledger/actions/runs/34360329100)의 exact head `406ff7432af67e68cbd4f1fb63edd52942ba07d8`는 workflow 340초, critical job 317초였다. 이는 서로 다른 runner/queue의 관측값이며 cache 적용 효과로 해석하지 않는다. 새 exact-head Hosted cold/warm run과 실제 build 구간 비교 전 성능 개선은 미확인이다.
+API/Web cache scope/generation은 유지하되 reader/writer job은 test-images로 이전한다. 직접 dev PR producer는 `gha-read`, dev push producer는 `gha-write`이고 API/Web namespace는 분리된다. runtime-config는 기존 0.40~1.94초 build에 약 4초의 Buildx 준비 비용이 추가되므로 `NOT_APPLIED_WITH_JUSTIFICATION`으로 제외하고 direct build 3개를 유지한다. cache 전 기준인 PR #152 Full run [34357252467](https://github.com/xxh3898/our-ledger/actions/runs/34357252467)은 workflow 432초, critical production-bootstrap 408초였고, dev push [34360329100](https://github.com/xxh3898/our-ledger/actions/runs/34360329100)의 exact head `406ff7432af67e68cbd4f1fb63edd52942ba07d8`는 workflow 340초, critical job 317초였다. 이는 서로 다른 runner/queue의 관측값이며 cache 적용 효과로 해석하지 않는다. current-run artifact authority와 11→7 build 계약은 [테스트 전략](testing-strategy.md#current-run-exact-source-test-image)을 따른다.

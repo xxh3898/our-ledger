@@ -390,14 +390,32 @@ expect_failure "missing Compose project/postgres service" \
     --backup-dir "$failure_backup_dir"
 
 printf '\n[backup/restore 2/11] exact-HEAD API image, source migration and startup\n'
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
-  --progress plain \
-  --no-cache \
-  --pull \
-  "${cleanup_labels[@]}" \
-  --tag "$api_image" \
-  --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
-  "$ROOT_DIR"
+case "${CI_TEST_IMAGE_MODE:-disabled}" in
+  required)
+    if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" ]]; then
+      echo "shared API image artifact directory가 없습니다." >&2
+      exit 1
+    fi
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      api "$CI_TEST_IMAGE_API_DIR" "$api_image"
+    image_cleanup_task=issue-124-exact-head-test-images
+    ;;
+  disabled)
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
+      --progress plain \
+      --no-cache \
+      --pull \
+      "${cleanup_labels[@]}" \
+      --tag "$api_image" \
+      --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
+      "$ROOT_DIR"
+    image_cleanup_task=issue-41-host-state-runtime-config-staging
+    ;;
+  *)
+    echo "알 수 없는 shared test image mode입니다." >&2
+    exit 1
+    ;;
+esac
 
 docker image inspect "$api_image" \
   | python3 -B -c '
@@ -408,14 +426,14 @@ labels = json.load(sys.stdin)[0]["Config"]["Labels"]
 expected = {
     "io.homeserver.cleanup.environment": "development",
     "io.homeserver.cleanup.project": "our-ledger",
-    "io.homeserver.cleanup.task": "issue-41-host-state-runtime-config-staging",
+    "io.homeserver.cleanup.task": sys.argv[2],
     "io.homeserver.cleanup.lifecycle": "task",
     "io.homeserver.cleanup.retain": "false",
     "io.homeserver.cleanup.git-head": sys.argv[1],
 }
 if any(labels.get(key) != value for key, value in expected.items()):
     raise SystemExit("synthetic API image cleanup labels differ")
-' "$git_head"
+' "$git_head" "$image_cleanup_task"
 
 "${source_compose[@]}" up --detach --wait --wait-timeout 120 postgres
 run_candidate_migration source "$runtime_temp_dir/source-migration.log"
