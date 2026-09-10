@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TIMING_HELPER="$ROOT_DIR/scripts/ci_tools/ci_timing.py"
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yaml"
 
 if ! command -v docker >/dev/null 2>&1 \
@@ -341,7 +342,105 @@ schema_fingerprint() {
     "SELECT md5(string_agg(installed_rank || ':' || version || ':' || checksum || ':' || success, ',' ORDER BY installed_rank)) FROM flyway_schema_history"
 }
 
+# Only verifier-owned, fixed database names enter these SQL/createdb helpers.
+# The main database is healthchecked and must never be a clone source.
+database_authority() {
+  local database_name="$1"
+  postgres_query postgres "
+    SELECT row_to_json(authority)::text FROM (
+      SELECT datdba, encoding, datlocprovider, datcollate, datctype, datlocale,
+             daticurules, datcollversion, dattablespace, datconnlimit,
+             datallowconn, datistemplate, datacl
+        FROM pg_database WHERE datname = '$database_name'
+    ) authority"
+}
+
+assert_template_prerequisites() {
+  local database_name="$1"
+  if [[ "$database_name" != our_ledger_bootstrap_pristine \
+    && "$database_name" != our_ledger_bootstrap_seeded ]]; then
+    echo "bootstrap clone source가 dedicated template이 아닙니다." >&2
+    exit 1
+  fi
+  if [[ "$(postgres_query postgres "
+    SELECT COUNT(*) FROM pg_database d
+     WHERE datname = '$database_name'
+       AND datdba = (SELECT oid FROM pg_roles WHERE rolname = '$POSTGRES_USER')
+       AND datacl IS NULL AND datconnlimit = -1 AND datallowconn AND NOT datistemplate
+       AND NOT EXISTS (SELECT 1 FROM pg_db_role_setting s WHERE s.setdatabase = d.oid)
+       AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.datid = d.oid)
+  ")" != 1 ]]; then
+    echo "bootstrap template owner/default ACL/settings/no-session 조건이 다릅니다." >&2
+    exit 1
+  fi
+}
+
+database_content_fingerprint() {
+  local database_name="$1"
+  # The fixed restrict key makes this synthetic-only dump deterministic. Full
+  # schema/owners/ACLs, all Flyway rows, domain rows and sequences are hashed;
+  # neither dump bytes nor identities are written to logs or a restore target.
+  "${compose[@]}" exec -T postgres \
+    pg_dump --username "$POSTGRES_USER" --dbname "$database_name" \
+      --format=plain --restrict-key=OurLedgerSyntheticCloneProof125 \
+    | python3 -B -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+}
+
+clone_database() {
+  local source_database="$1"
+  local target_database="$2"
+  local authority_before
+  local content_before
+  case "$target_database" in
+    our_ledger_bootstrap_seeded|our_ledger_bootstrap_partial|our_ledger_bootstrap_mismatch|our_ledger_bootstrap_extra|our_ledger_bootstrap_damaged) ;;
+    *)
+      echo "bootstrap clone target이 isolated fixture allowlist 밖입니다." >&2
+      exit 1
+      ;;
+  esac
+  [[ "$source_database" != "$target_database" ]] || {
+    echo "bootstrap clone source와 target이 같습니다." >&2
+    exit 1
+  }
+  assert_template_prerequisites "$source_database"
+  authority_before="$(database_authority "$source_database")"
+  content_before="$(database_content_fingerprint "$source_database")"
+  assert_template_prerequisites "$source_database"
+  "${compose[@]}" exec -T postgres \
+    createdb --username "$POSTGRES_USER" --owner "$POSTGRES_USER" \
+      --maintenance-db=postgres --template "$source_database" "$target_database"
+  if [[ "$(database_authority "$target_database")" != "$authority_before" \
+    || "$(database_content_fingerprint "$target_database")" != "$content_before" \
+    || "$(schema_fingerprint "$target_database")" != "$(schema_fingerprint "$source_database")" \
+    || "$(bootstrap_fingerprint "$target_database")" != "$(bootstrap_fingerprint "$source_database")" ]]; then
+    echo "bootstrap clone의 database/schema/Flyway/row/sequence authority가 다릅니다." >&2
+    exit 1
+  fi
+  if [[ "$(database_authority "$source_database")" != "$authority_before" \
+    || "$(database_content_fingerprint "$source_database")" != "$content_before" \
+    || "$(postgres_query postgres "SELECT COUNT(*) FROM pg_db_role_setting WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = '$target_database')")" != 0 ]]; then
+    echo "bootstrap clone이 source template 또는 target database settings를 변경했습니다." >&2
+    exit 1
+  fi
+  assert_template_prerequisites "$source_database"
+}
+
+assert_fixture_sources_unchanged() {
+  if [[ "$(database_content_fingerprint "$POSTGRES_DB")" != "$main_fixture_before" \
+    || "$(database_authority "$POSTGRES_DB")" != "$main_authority_before" \
+    || "$(database_content_fingerprint "$pristine_database")" != "$pristine_before" \
+    || "$(database_content_fingerprint "$seeded_database")" != "$seeded_before" \
+    || "$(database_authority "$pristine_database")" != "$template_authority" \
+    || "$(database_authority "$seeded_database")" != "$template_authority" ]]; then
+    echo "bootstrap negative fixture가 main/template authority를 변경했습니다." >&2
+    exit 1
+  fi
+  assert_template_prerequisites "$pristine_database"
+  assert_template_prerequisites "$seeded_database"
+}
+
 printf '\n[bootstrap 1/12] Compose authority and cleanup labels\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" config --format json \
   | python3 -B "$ROOT_DIR/scripts/check-production-compose.py"
 "${compose[@]}" config --format json \
@@ -365,7 +464,10 @@ for group in ("services", "networks", "volumes"):
             raise SystemExit("bootstrap synthetic cleanup labels differ")
 ' "$git_head"
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-01 "$stage_started"
+
 printf '\n[bootstrap 2/12] same candidate API image build\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 case "${CI_TEST_IMAGE_MODE:-disabled}" in
   required)
     if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" ]]; then
@@ -394,7 +496,10 @@ case "${CI_TEST_IMAGE_MODE:-disabled}" in
     ;;
 esac
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-02 "$stage_started"
+
 printf '\n[bootstrap 3/12] unmigrated schema fail-closed\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" up --detach --wait --wait-timeout 120 postgres
 expect_failure \
   "unmigrated bootstrap" \
@@ -406,7 +511,10 @@ if [[ "$(postgres_query "$POSTGRES_DB" "SELECT COUNT(*) FROM pg_tables WHERE sch
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-03 "$stage_started"
+
 printf '\n[bootstrap 4/12] V1-V8 migration without bootstrap data\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 run_candidate_migration "$POSTGRES_DB" "$runtime_temp_dir/migration.log"
 if [[ "$(postgres_query "$POSTGRES_DB" "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success")" != "1,2,3,4,5,6,7,8" ]]; then
   echo "bootstrap 검증 migration history가 V1-V8 contract와 다릅니다." >&2
@@ -418,7 +526,10 @@ if [[ "$(postgres_query "$POSTGRES_DB" "SELECT (SELECT COUNT(*) FROM users) || '
 fi
 schema_before_bootstrap="$(schema_fingerprint "$POSTGRES_DB")"
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-04 "$stage_started"
+
 printf '\n[bootstrap 5/12] empty create and exact state\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 run_bootstrap_success \
   "$POSTGRES_DB" \
   "$runtime_temp_dir/valid.json" \
@@ -437,7 +548,10 @@ if [[ "$exact_state" != "2:1:2:MEMBER,OWNER:KRW:Asia/Seoul" ]]; then
 fi
 created_fingerprint="$(bootstrap_fingerprint "$POSTGRES_DB")"
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-05 "$stage_started"
+
 printf '\n[bootstrap 6/12] idempotent exact rerun\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 run_bootstrap_success \
   "$POSTGRES_DB" \
   "$runtime_temp_dir/valid.json" \
@@ -458,7 +572,10 @@ if [[ -n "$(docker ps --all --quiet \
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-06 "$stage_started"
+
 printf '\n[bootstrap 7/12] strict stdin failure matrix\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 for input_name in \
   empty malformed oversize unknown duplicate missing null wrong-type trailing same-email invalid-utf8 \
   utf-16le utf-16be utf-32le utf-32be; do
@@ -473,14 +590,60 @@ if [[ "$(bootstrap_fingerprint "$POSTGRES_DB")" != "$created_fingerprint" ]]; th
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-07 "$stage_started"
+
 printf '\n[bootstrap 8/12] partial, mismatch, and extra state fail-closed\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+pristine_database=our_ledger_bootstrap_pristine
+seeded_database=our_ledger_bootstrap_seeded
 partial_database=our_ledger_bootstrap_partial
 mismatch_database=our_ledger_bootstrap_mismatch
 extra_database=our_ledger_bootstrap_extra
-for database_name in "$partial_database" "$mismatch_database" "$extra_database"; do
-  create_database "$database_name"
-  run_candidate_migration "$database_name" "$runtime_temp_dir/migration-$database_name.log"
-done
+main_fixture_before="$(database_content_fingerprint "$POSTGRES_DB")"
+main_authority_before="$(database_authority "$POSTGRES_DB")"
+create_database "$pristine_database"
+run_candidate_migration "$pristine_database" "$runtime_temp_dir/migration-pristine.log"
+if [[ "$(postgres_query "$pristine_database" "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success")" != "1,2,3,4,5,6,7,8" \
+  || "$(postgres_query "$pristine_database" "SELECT COUNT(*) FROM flyway_schema_history")" != 8 \
+  || "$(postgres_query "$pristine_database" "SELECT COUNT(*) FROM flyway_schema_history WHERE NOT success")" != 0 ]]; then
+  echo "bootstrap pristine template의 exact V1-V8 Flyway history가 다릅니다." >&2
+  exit 1
+fi
+# Enumerate every public domain table, including future ones, before cloning.
+empty_domain_sql="$(postgres_query "$pristine_database" "
+  SELECT 'SELECT ' || string_agg('(SELECT COUNT(*) FROM ' || quote_ident(schemaname) || '.' || quote_ident(tablename) || ')', ' + ' ORDER BY tablename)
+    FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'flyway_schema_history'
+")"
+if [[ "$(postgres_query "$pristine_database" "$empty_domain_sql")" != 0 ]]; then
+  echo "bootstrap pristine template에 domain row가 있습니다." >&2
+  exit 1
+fi
+assert_template_prerequisites "$pristine_database"
+template_authority="$(database_authority "$pristine_database")"
+[[ "$template_authority" == "$main_authority_before" ]] || {
+  echo "bootstrap pristine/main database authority가 다릅니다." >&2
+  exit 1
+}
+pristine_before="$(database_content_fingerprint "$pristine_database")"
+clone_database "$pristine_database" "$seeded_database"
+run_bootstrap_success \
+  "$seeded_database" "$runtime_temp_dir/valid.json" \
+  "household-bootstrap: created" "$runtime_temp_dir/template-seed.log"
+if [[ "$(postgres_query "$seeded_database" "SELECT
+  (SELECT COUNT(*) FROM users) || ':' || (SELECT COUNT(*) FROM households) || ':' ||
+  (SELECT COUNT(*) FROM household_members) || ':' ||
+  (SELECT string_agg(role, ',' ORDER BY role) FROM household_members) || ':' ||
+  (SELECT base_currency || ':' || timezone FROM households)")" != "2:1:2:MEMBER,OWNER:KRW:Asia/Seoul" \
+  || "$(schema_fingerprint "$seeded_database")" != "$(schema_fingerprint "$pristine_database")" \
+  || "$(postgres_query "$seeded_database" "$empty_domain_sql")" != 5 ]]; then
+  echo "bootstrap seeded template의 exact state 또는 Flyway authority가 다릅니다." >&2
+  exit 1
+fi
+seeded_before="$(database_content_fingerprint "$seeded_database")"
+clone_database "$pristine_database" "$partial_database"
+clone_database "$seeded_database" "$mismatch_database"
+clone_database "$seeded_database" "$extra_database"
+assert_fixture_sources_unchanged
 
 postgres_query "$partial_database" \
   "INSERT INTO users(email, display_name, status) VALUES ('partial@example.test', 'Partial', 'ACTIVE')" >/dev/null
@@ -497,11 +660,6 @@ if [[ "$(bootstrap_fingerprint "$partial_database")" != "$partial_before" ]]; th
   exit 1
 fi
 
-run_bootstrap_success \
-  "$mismatch_database" \
-  "$runtime_temp_dir/valid.json" \
-  "household-bootstrap: created" \
-  "$runtime_temp_dir/mismatch-seed.log"
 postgres_query "$mismatch_database" \
   "UPDATE household_members SET role = 'MEMBER' WHERE role = 'OWNER';
    UPDATE household_members SET role = 'OWNER'
@@ -519,11 +677,6 @@ if [[ "$(bootstrap_fingerprint "$mismatch_database")" != "$mismatch_before" ]]; 
   exit 1
 fi
 
-run_bootstrap_success \
-  "$extra_database" \
-  "$runtime_temp_dir/valid.json" \
-  "household-bootstrap: created" \
-  "$runtime_temp_dir/extra-seed.log"
 postgres_query "$extra_database" \
   "INSERT INTO users(email, display_name, status) VALUES ('extra@example.test', 'Extra', 'ACTIVE')" >/dev/null
 extra_before="$(bootstrap_fingerprint "$extra_database")"
@@ -539,7 +692,11 @@ if [[ "$(bootstrap_fingerprint "$extra_database")" != "$extra_before" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-08 "$stage_started"
+
 printf '\n[bootstrap 9/12] profile and normal production fail-closed\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+assert_fixture_sources_unchanged
 for invalid_profiles in \
   production,migration,bootstrap \
   bootstrap \
@@ -562,10 +719,12 @@ expect_failure \
     --env OUR_LEDGER_BOOTSTRAP_ENABLED=true \
     api
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-09 "$stage_started"
+
 printf '\n[bootstrap 10/12] schema and database failure boundaries\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 damaged_database=our_ledger_bootstrap_damaged
-create_database "$damaged_database"
-run_candidate_migration "$damaged_database" "$runtime_temp_dir/migration-damaged.log"
+clone_database "$pristine_database" "$damaged_database"
 postgres_query "$damaged_database" "ALTER TABLE users DROP COLUMN status" >/dev/null
 expect_failure \
   "JPA schema mismatch" \
@@ -582,7 +741,11 @@ expect_failure \
     --env "SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:1/$POSTGRES_DB" \
     api-bootstrap
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-10 "$stage_started"
+
 printf '\n[bootstrap 11/12] normal API startup without bootstrap replay\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+assert_fixture_sources_unchanged
 normal_before="$(bootstrap_fingerprint "$POSTGRES_DB")"
 normal_schema_before="$(schema_fingerprint "$POSTGRES_DB")"
 "${compose[@]}" up --detach --wait --wait-timeout 240 api
@@ -595,7 +758,11 @@ if [[ "$(schema_fingerprint "$POSTGRES_DB")" != "$normal_schema_before" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-bootstrap-11 "$stage_started"
+
 printf '\n[bootstrap 12/12] privacy, migration bytes, and residue precheck\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+assert_fixture_sources_unchanged
 while IFS= read -r -d '' log_path; do
   assert_log_safe "$log_path"
 done < <(find "$runtime_temp_dir" -type f -name '*.log' -print0)
@@ -606,5 +773,7 @@ if [[ -n "$(docker ps --all --quiet \
   echo "bootstrap one-shot container residue가 남았습니다." >&2
   exit 1
 fi
+
+python3 -B "$TIMING_HELPER" end production-bootstrap-12 "$stage_started"
 
 echo "Production Household bootstrap one-shot 검증을 통과했습니다."

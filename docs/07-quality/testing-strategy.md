@@ -1,6 +1,6 @@
 ---
 status: active
-version: 2.4
+version: 2.5
 last_updated: 2026-09-10
 related:
   - ADR-008
@@ -188,7 +188,7 @@ Production Household Bootstrap One-shot Gate는 별도 actual PostgreSQL/contain
 - bootstrap success marker exact 1회, raw JSON/PII/credential/ID/JDBC URL 비노출, one-shot container residue 0
 - migrated normal API readiness 뒤 bootstrap/Flyway state 불변과 V1~V8 filename/byte SHA-256 고정
 
-`scripts/verify-production-bootstrap.sh`는 cleanup label을 가진 고유 Compose project, 합성 identity/credential과 disposable PostgreSQL volume만 사용한다. 실제 production input/DB, GHCR/Tailscale/SSH/HomeOps/Cloudflare/LaunchAgent에 접근하지 않으며 local `verify.sh`와 Hosted Full CI의 독립 `production-bootstrap` job에서 실행한다.
+`scripts/verify-production-bootstrap.sh`는 cleanup label을 가진 고유 Compose project, 합성 identity/credential과 disposable PostgreSQL volume만 사용한다. main DB의 unmigrated failure, 실제 V1→V8 migration, create/verified와 strict stdin 15개 actual JVM failure를 유지한다. 보조 partial/damaged fixture는 전용 pristine migrated DB, mismatch/extra는 pristine에서 복제해 실제 bootstrap을 한 번 수행한 seeded DB에서 순차 복제한다. template에는 정확한 V1~V8, failed Flyway row 0, empty domain 또는 exact 2/1/2 state, 기본 DB ACL/settings와 active session 0을 요구한다. 복제 직후 owner/encoding/locale/ACL/settings, 전체 schema·Flyway·row·sequence dump hash와 bootstrap fingerprint를 비교하고 fault 주입 뒤 main/template 불변을 재검증한다. prerequisite 또는 equality 실패는 retry/fallback 없이 종료한다. 실제 production input/DB, GHCR/Tailscale/SSH/HomeOps/Cloudflare/LaunchAgent에 접근하지 않으며 local `verify.sh`와 Hosted Full CI의 독립 `production-bootstrap` job에서 실행한다.
 
 Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
 
@@ -207,9 +207,10 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 - source와 별도 고유 project/network/volume의 empty PostgreSQL에 fail-fast single-transaction restore
 - Flyway V1→V8, core row, Transaction/Entry/Refund lineage, Account balance와 net worth source/target equality
 - Household composite FK/Entry·Goal Account unique enforcement, restored V8의 same-image migration rerun과 normal production API JPA/readiness startup 뒤 state 불변
-- missing restore DB failure와 성공·실패 trap 뒤 exact project container/network/volume/image tag residue 0
+- 정상 restore/equality/migration/API proof가 끝난 동일 target의 API만 중지한 뒤 healthy PostgreSQL ID와 missing DB 부재를 확인하고 actual restore nonzero/non-timeout 및 target fingerprint 불변 검증
+- 같은 target PostgreSQL의 exited ID/종료 시각을 확인한 뒤 stopped-service backup nonzero/non-timeout, source marker/bundle/archive와 empty failure directory 보존, 성공·실패 trap 뒤 exact project resource residue 0
 
-`scripts/verify-backup-docker-authority.sh`는 actual local/Hosted platform의 fixed CLI path, canonical path, Docker/Compose version과 synthetic hostile environment matrix를 검증하며 Docker container를 생성·변경하지 않는다. `scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. fixed authority fault injection은 production override 없이 invocation-owned copied core의 두 platform literal만 strict하게 test wrapper로 치환한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
+`scripts/verify-backup-docker-authority.sh`는 actual local/Hosted platform의 fixed CLI path, canonical path, Docker/Compose version과 synthetic hostile environment matrix를 검증하며 Docker container를 생성·변경하지 않는다. `scripts/verify-backup-restore.sh`는 source/target PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. failure 검증은 정상 proof가 끝난 target만 순차 재사용하며 source와 target의 project/network/volume authority는 계속 분리한다. fixed authority fault injection은 production override 없이 invocation-owned copied core의 두 platform literal만 strict하게 test wrapper로 치환한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
 
 Operational Status Harness는 추가로 다음을 검증한다.
 
@@ -519,6 +520,27 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 6. 표현·디자인
 
 ## CI
+
+### Heavy verifier stage 계측과 fixture 재사용
+
+Issue #125의 `ci_timing.py`는 macOS/Linux의 process 공통 `CLOCK_MONOTONIC`을 읽는다. shell의 명령 실행을 감싸거나 `set -e`, `pipefail`, trap을 소유하지 않고 각 stage 시작값을 저장한 뒤 성공 경계에서만 `ci-timing stage=<고정 이름> elapsed_ms=<정수>`를 출력한다. 잘못된 stage/시작값은 입력을 재출력하지 않고 실패한다. command, environment, stdin, path, credential/PII는 timing에 포함하지 않는다. Python 3.9 macOS의 process별 `time.monotonic_ns()` 기준점도 사용하지 않는다.
+
+| 계측 stage | 보존하는 proof | 제거하는 반복 작업 |
+| --- | --- | --- |
+| `production-bootstrap-08`, `-10` | main 실제 migration/create/verified, strict stdin 15개와 모든 state/profile/schema/DB failure, template와 main 불변 | 보조 migration 4회를 dedicated migration 1회로, 보조 seed 2회를 dedicated seed 1회로 축소 |
+| `backup-restore-10` | source/target 격리, 정상 restore/equality/migration/API 완료, healthy missing DB와 exited-service 실패, artifact 불변 | 세 번째 failure PostgreSQL project의 startup/shutdown/cleanup 제거 |
+| `production-runtime-03` | non-root/content/no-Node, `nginx -t`, 모든 Nginx directive, image history | Web read-only probe container 3개를 `--rm --add-host api:127.0.0.1` 1개로 통합 |
+| `fresh-host-bootstrap-01`~`-04`, `observability-01`~`-08` | 기존 crash/recovery/poll/reset/failure/lifecycle 전체 | 계측만 추가, polling·timeout·sleep 변경 없음 |
+
+각 script의 숫자 stage는 기존 `[... n/total]` 출력에 대응한다. fresh-host는 pure contract, API/Web image, runtime artifact, 실제 crash/recovery lifecycle 순서다. production-runtime clean API/Web `--no-cache --pull`, 모든 Flyway/JPA failure와 API restart/graceful shutdown은 유지한다. DB clone은 healthcheck가 접속하는 main을 template로 삼지 않고 운영 DB에도 사용하지 않는다. PostgreSQL은 [template의 DB 설정·권한을 복사하지 않으므로](https://www.postgresql.org/docs/18/sql-createdatabase.html) 기본 ACL/settings prerequisite와 clone 후 equality를 별도로 검사한다.
+
+최적화 전 Hosted baseline은 exact dev `870400490274016b3d47ab8c570ae97f5830791f`의 Full CI `34467461730`이다. workflow 405초, production-bootstrap 336초, production-runtime 242초, backup-restore 120초, fresh-host-bootstrap 94초, observability 122초다. 관련 7개 job(API/Web producer 포함)의 elapsed 합은 985초, 전체 job elapsed 합은 1,177초다. stage log 관측 병목은 strict stdin 143.109초, bootstrap state fixture 78.744초, runtime clean build 80.946초, migration failure matrix 53.819초이며 unique safety 비용은 유지한다. 이 값은 GitHub timestamp 기반 단일 run으로 billable runner-minute나 통제 benchmark가 아니다. 변경 후 exact-HEAD Hosted Full CI와 stage marker를 수집하기 전에는 개선률·target latency를 확정하지 않는다.
+
+2026-09-10 동일 Mac의 local 비교는 원본 `87040049...` verifier에 같은 timing marker만 삽입한 실행과 같은 base의 Issue #125 작업트리 변경본을 순차 실행했다. bootstrap 전체 12개 stage 합은 140.317초→133.195초(약 5.1% 감소), 추가 template 불변 검사를 포함한 stage 08~12 합은 58.066초→51.400초(약 11.5% 감소)였다. stage 08은 33.844초→27.868초, stage 10은 10.737초→7.705초다. 두 실행 모두 실제 failure matrix와 cleanup을 통과했다. 이 합은 stage 밖 setup/EXIT cleanup과 runner queue를 제외하므로 workflow wall-clock 개선률로 사용하지 않는다. Hosted after와 #121 target latency는 계속 별도 확인한다.
+
+같은 방식의 backup local 비교에서 stage 10은 6.368초→1.583초였다. 변경본은 정상 target proof 이후 actual missing-DB diagnostic, 동일 PostgreSQL의 healthy→exited 상태, source와 중지된 target API의 ID/start/finish 불변, source marker/bundle/archive와 빈 failure directory를 모두 확인하고 cleanup을 통과했다. runtime의 Web probe 통합은 static contract로 확인했으며 실제 Docker runtime/Hosted timing은 이 local 비교에 포함하지 않는다.
+
+`check-repo.sh`는 timing hostile input/공통 monotonic clock/Bash failure 전파, 모든 failure 호출 보존, template prerequisite/격리/즉시 equality, target 재사용 순서와 cleanup 계약을 deterministic하게 검사한다. 이 static/unit PASS는 actual PostgreSQL clone·restore, Hosted CI 또는 production acceptance를 대신하지 않는다.
 
 `./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Hosted Full CI의 기존 16개 검증 job은 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. 직접 dev Full 경로에서는 current-run API/Web artifact를 병렬 생성하는 `test-images` matrix job이 추가되고 최종 `CI gate`가 이 job의 성공도 확인한다.
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TIMING_HELPER="$ROOT_DIR/scripts/ci_tools/ci_timing.py"
 cd "$ROOT_DIR"
 
 if ! command -v docker >/dev/null 2>&1 \
@@ -19,8 +20,10 @@ if [[ ! "$git_head" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
   scripts.host_tools.test_fresh_host_bootstrap
+python3 -B "$TIMING_HELPER" end fresh-host-bootstrap-01 "$stage_started"
 
 run_token="$(date +%s)-$$"
 project_name="our-ledger-fresh-$run_token"
@@ -218,6 +221,7 @@ oci_labels=(
   --label "org.opencontainers.image.version=$git_head"
 )
 
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 case "${CI_TEST_IMAGE_MODE:-disabled}" in
   required)
     if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" || -z "${CI_TEST_IMAGE_WEB_DIR:-}" ]]; then
@@ -253,7 +257,9 @@ case "${CI_TEST_IMAGE_MODE:-disabled}" in
     exit 1
     ;;
 esac
+python3 -B "$TIMING_HELPER" end fresh-host-bootstrap-02 "$stage_started"
 
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 docker compose \
   --project-name "$project_name" \
   --env-file "$env_file" \
@@ -303,6 +309,9 @@ if [[ ! "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end fresh-host-bootstrap-03 "$stage_started"
+
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 PYTHONDONTWRITEBYTECODE=1 python3 - \
   "$host_root" \
   "$env_file" \
@@ -446,4 +455,5 @@ else
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end fresh-host-bootstrap-04 "$stage_started"
 printf 'Fresh-host bootstrap 검증을 통과했습니다.\n'

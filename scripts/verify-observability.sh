@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TIMING_HELPER="$ROOT_DIR/scripts/ci_tools/ci_timing.py"
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yaml"
 BACKUP_HELPER="$ROOT_DIR/scripts/backup_tools/backup_artifact.py"
 
@@ -121,10 +122,14 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 printf '\n[observability 1/8] focused unit contracts\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 python3 -m unittest scripts/backup_tools/test_backup_artifact.py
 python3 -m unittest scripts/status_tools/test_production_status.py
 
+python3 -B "$TIMING_HELPER" end observability-01 "$stage_started"
+
 printf '\n[observability 2/8] exact-head runtime images\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 case "${CI_TEST_IMAGE_MODE:-disabled}" in
   required)
     if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" || -z "${CI_TEST_IMAGE_WEB_DIR:-}" ]]; then
@@ -149,7 +154,10 @@ case "${CI_TEST_IMAGE_MODE:-disabled}" in
 esac
 "${compose[@]}" config --quiet
 
+python3 -B "$TIMING_HELPER" end observability-02 "$stage_started"
+
 printf '\n[observability 3/8] strict synthetic backup source\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 python3 "$BACKUP_HELPER" validate-backup-dir \
   --repo-root "$ROOT_DIR" --path "$backup_directory" >/dev/null
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -201,7 +209,10 @@ PY
 }
 backup_before="$(backup_fingerprint)"
 
+python3 -B "$TIMING_HELPER" end observability-03 "$stage_started"
+
 printf '\n[observability 4/8] disposable migration and production-like stack\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" up --detach --wait --wait-timeout 120 postgres
 "${compose[@]}" run --rm --no-deps api-migration \
   > "$status_root/candidate-migration.log" 2>&1
@@ -351,7 +362,10 @@ PY
 
 wait_for_snapshot base 30
 
+python3 -B "$TIMING_HELPER" end observability-04 "$stage_started"
+
 printf '\n[observability 5/8] recurring success and isolated rule failure\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" exec -T postgres \
   psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   < "$ROOT_DIR/scripts/backup_tools/fixture.sql" >/dev/null
@@ -390,7 +404,10 @@ wait_for_snapshot occurrence 30
   " >/dev/null
 wait_for_snapshot rule-failure 30
 
+python3 -B "$TIMING_HELPER" end observability-05 "$stage_started"
+
 printf '\n[observability 6/8] HttpFetch response/network contract\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 api_non_success="$("${compose[@]}" exec -T api \
   java -cp /opt/healthcheck HttpFetch http://127.0.0.1:8080/api)"
 if [[ "$api_non_success" != 401$'\n'*'AUTHENTICATION_REQUIRED'* ]]; then
@@ -410,7 +427,10 @@ if "${compose[@]}" exec -T api \
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end observability-06 "$stage_started"
+
 printf '\n[observability 7/8] unavailable and process-local reset\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" stop --timeout 45 api >/dev/null
 wait_for_snapshot unreachable 15
 
@@ -437,7 +457,12 @@ if [[ "$backup_after" != "$backup_before" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end observability-07 "$stage_started"
+
 printf '\n[observability 8/8] stable JSON and residue contract\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 python3 -m json.tool "$snapshot_file" >/dev/null
+
+python3 -B "$TIMING_HELPER" end observability-08 "$stage_started"
 
 echo "Observability/status 검증을 통과했습니다."
