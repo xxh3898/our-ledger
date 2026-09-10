@@ -378,10 +378,15 @@ class WorkflowContractTest(unittest.TestCase):
 
     def test_consumers_download_only_named_current_run_artifacts_and_never_fallback_in_shared_mode(self):
         workflow = (artifact.ROOT / ".github/workflows/full-ci.yml").read_text(encoding="utf-8")
-        expected = {"production-bootstrap": 1, "fresh-host-bootstrap": 2,
-                    "backup-restore": 1, "observability": 2}
-        for name, downloads in expected.items():
+        expected = {
+            "production-bootstrap": ("verify-production-bootstrap.sh", ("api",)),
+            "fresh-host-bootstrap": ("verify-fresh-host-bootstrap.sh", ("api", "web")),
+            "backup-restore": ("verify-backup-restore.sh", ("api",)),
+            "observability": ("verify-observability.sh", ("api", "web")),
+        }
+        for name, (script, families) in expected.items():
             body = job_block(workflow, name)
+            downloads = len(families)
             with self.subTest(name=name):
                 self.assertEqual(
                     body.count("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"),
@@ -390,6 +395,15 @@ class WorkflowContractTest(unittest.TestCase):
                 self.assertEqual(body.count("-${{ github.run_attempt }}"), downloads)
                 self.assertIn("CI_TEST_IMAGE_MODE", body)
                 self.assertIn("      - test-images", body)
+                job_level = body.split("    steps:\n", 1)[0]
+                self.assertNotIn("runner.temp", job_level)
+                verification_step = body.rsplit("      - name:", 1)[-1]
+                self.assertIn(f"run: ./scripts/{script}", verification_step)
+                for family in families:
+                    variable = f"CI_TEST_IMAGE_{family.upper()}_DIR"
+                    directory = f"${{{{ runner.temp }}}}/our-ledger-test-image-{family}"
+                    self.assertEqual(body.count(f"path: {directory}"), 1)
+                    self.assertEqual(verification_step.count(f"{variable}: {directory}"), 1)
                 for forbidden in ("github-token:", "repository:", "run-id:", "pattern:", "merge-multiple:"):
                     self.assertNotIn(forbidden, body)
             verifier = (artifact.ROOT / f"scripts/verify-{name}.sh").read_text(encoding="utf-8")
