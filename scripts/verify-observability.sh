@@ -125,9 +125,9 @@ python3 -m unittest scripts/backup_tools/test_backup_artifact.py
 python3 -m unittest scripts/status_tools/test_production_status.py
 
 printf '\n[observability 2/8] exact-head runtime images\n'
-docker build --progress plain --no-cache --pull \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api --progress plain --no-cache --pull \
   --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
-docker build --progress plain --no-cache --pull \
+python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web --progress plain --no-cache --pull \
   --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
 "${compose[@]}" config --quiet
 
