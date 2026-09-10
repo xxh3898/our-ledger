@@ -47,10 +47,16 @@ def job_block(workflow: str, name: str) -> str:
 
 
 def needs_for(decision: dict[str, str]) -> dict:
-    result = {"repository": {"result": "success", "outputs": decision}}
+    shared = "true" if decision["run_full"] == "true" else "false"
+    outputs = {**decision, "share_test_images": shared}
+    result = {"repository": {"result": "success", "outputs": outputs}}
     for name in ci.ALL_JOBS - {"repository"}:
-        flag = {"backend": "run_backend", "frontend": "run_frontend"}.get(name, "run_full")
-        result[name] = {"result": "success" if decision[flag] == "true" else "skipped"}
+        if name == "test-images":
+            selected = shared == "true"
+        else:
+            flag = {"backend": "run_backend", "frontend": "run_frontend"}.get(name, "run_full")
+            selected = decision[flag] == "true"
+        result[name] = {"result": "success" if selected else "skipped"}
     return result
 
 
@@ -235,13 +241,26 @@ class GateTest(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 ci.check_gate(broken)
         for outputs in [{}, None, {"category": "future"}, {"category": "docs-only", "run_full": "false"},
-                        {**needs["repository"]["outputs"], "run_full": "true"}]:
+                        {**needs["repository"]["outputs"], "run_full": "true"},
+                        {**needs["repository"]["outputs"], "share_test_images": "unknown"},
+                        {**needs["repository"]["outputs"], "share_test_images": "true"}]:
             broken = copy.deepcopy(needs)
             broken["repository"]["outputs"] = outputs
             with self.subTest(outputs=outputs), self.assertRaises(ValueError):
                 ci.check_gate(broken)
         for broken in [None, [], {}, {**needs, "extra": {}}, {**needs, "frontend": None}]:
             with self.subTest(broken=broken), self.assertRaises(ValueError):
+                ci.check_gate(broken)
+
+    def test_full_main_or_release_can_keep_shared_test_images_disabled(self):
+        needs = needs_for(ci.full("fixture"))
+        needs["repository"]["outputs"]["share_test_images"] = "false"
+        needs["test-images"]["result"] = "skipped"
+        ci.check_gate(needs)
+        for result in ("success", "failure", "cancelled"):
+            broken = copy.deepcopy(needs)
+            broken["test-images"]["result"] = result
+            with self.subTest(result=result), self.assertRaises(ValueError):
                 ci.check_gate(broken)
 
     def test_gate_command_uses_real_needs_json_and_nonzero_failure(self):
@@ -274,12 +293,18 @@ class WorkflowContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         names = set(re.findall(r"^  ([A-Za-z0-9_-]+):$", workflow.split("\njobs:\n", 1)[1], re.M))
         self.assertEqual(names, {*ci.ALL_JOBS, "ci-gate"})
+        shared_consumers = {"production-bootstrap", "fresh-host-bootstrap", "backup-restore", "observability"}
         for name in ci.HEAVY_JOBS:
             body = job_block(workflow, name)
             self.assertIn(f"run: ./scripts/verify-{name}.sh", body)
             self.assertEqual(len(re.findall(r"^    if:", body, re.M)), 1)
-            self.assertIn("    needs: repository\n", body)
-            self.assertIn("if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}", body)
+            if name in shared_consumers:
+                self.assertIn("    needs:\n      - repository\n      - test-images\n", body)
+                self.assertIn("if: ${{ always() && !cancelled()", body)
+                self.assertIn("CI_TEST_IMAGE_MODE:", body)
+            else:
+                self.assertIn("    needs: repository\n", body)
+                self.assertIn("if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}", body)
         for name in ("backend", "frontend"):
             body = job_block(workflow, name)
             self.assertIn(f"uses: ./.github/workflows/{name}-ci.yml", body)
@@ -319,6 +344,8 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertIn(f"'{flag}=true'", workflow)
             self.assertIn(f"{flag}: ${{{{ steps.changes.outputs.{flag} }}}}", workflow)
         self.assertIn("'category=mixed/unknown'", workflow)
+        repository = job_block(workflow, "repository")
+        self.assertIn("share_test_images: ${{ steps.changes.outputs.run_full != 'false' && steps.docker-cache.outputs.mode != 'disabled' }}", repository)
 
     def test_only_pr_concurrency_cancels_and_production_serialization_is_preserved(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")

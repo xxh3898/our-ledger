@@ -366,17 +366,33 @@ for group in ("services", "networks", "volumes"):
 ' "$git_head"
 
 printf '\n[bootstrap 2/12] same candidate API image build\n'
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
-  --progress plain \
-  --label io.homeserver.cleanup.environment=development \
-  --label io.homeserver.cleanup.project=our-ledger \
-  --label io.homeserver.cleanup.task=issue-49-production-household-bootstrap \
-  --label io.homeserver.cleanup.lifecycle=task \
-  --label io.homeserver.cleanup.retain=false \
-  --label "io.homeserver.cleanup.git-head=$git_head" \
-  --tag "$api_image" \
-  --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
-  "$ROOT_DIR"
+case "${CI_TEST_IMAGE_MODE:-disabled}" in
+  required)
+    if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" ]]; then
+      echo "shared API image artifact directory가 없습니다." >&2
+      exit 1
+    fi
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      api "$CI_TEST_IMAGE_API_DIR" "$api_image"
+    ;;
+  disabled)
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
+      --progress plain \
+      --label io.homeserver.cleanup.environment=development \
+      --label io.homeserver.cleanup.project=our-ledger \
+      --label io.homeserver.cleanup.task=issue-49-production-household-bootstrap \
+      --label io.homeserver.cleanup.lifecycle=task \
+      --label io.homeserver.cleanup.retain=false \
+      --label "io.homeserver.cleanup.git-head=$git_head" \
+      --tag "$api_image" \
+      --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
+      "$ROOT_DIR"
+    ;;
+  *)
+    echo "알 수 없는 shared test image mode입니다." >&2
+    exit 1
+    ;;
+esac
 
 printf '\n[bootstrap 3/12] unmigrated schema fail-closed\n'
 "${compose[@]}" up --detach --wait --wait-timeout 120 postgres

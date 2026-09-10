@@ -218,21 +218,41 @@ oci_labels=(
   --label "org.opencontainers.image.version=$git_head"
 )
 
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
-  "${cleanup_labels[@]}" \
-  "${oci_labels[@]}" \
-  --tag "$api_image" \
-  --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
-  "$ROOT_DIR"
-api_created=true
+case "${CI_TEST_IMAGE_MODE:-disabled}" in
+  required)
+    if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" || -z "${CI_TEST_IMAGE_WEB_DIR:-}" ]]; then
+      echo "shared API/Web image artifact directory가 없습니다." >&2
+      exit 1
+    fi
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      api "$CI_TEST_IMAGE_API_DIR" "$api_image"
+    api_created=true
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      web "$CI_TEST_IMAGE_WEB_DIR" "$web_image"
+    web_created=true
+    ;;
+  disabled)
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
+      "${cleanup_labels[@]}" \
+      "${oci_labels[@]}" \
+      --tag "$api_image" \
+      --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
+      "$ROOT_DIR"
+    api_created=true
 
-python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web \
-  "${cleanup_labels[@]}" \
-  "${oci_labels[@]}" \
-  --tag "$web_image" \
-  --file "$ROOT_DIR/infra/docker/web.Dockerfile" \
-  "$ROOT_DIR"
-web_created=true
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web \
+      "${cleanup_labels[@]}" \
+      "${oci_labels[@]}" \
+      --tag "$web_image" \
+      --file "$ROOT_DIR/infra/docker/web.Dockerfile" \
+      "$ROOT_DIR"
+    web_created=true
+    ;;
+  *)
+    echo "알 수 없는 shared test image mode입니다." >&2
+    exit 1
+    ;;
+esac
 
 docker compose \
   --project-name "$project_name" \

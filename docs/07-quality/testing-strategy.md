@@ -1,7 +1,7 @@
 ---
 status: active
-version: 2.3
-last_updated: 2026-09-09
+version: 2.4
+last_updated: 2026-09-10
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -520,29 +520,29 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Hosted Full CI의 기존 16개 job은 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다.
+`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Hosted Full CI의 기존 16개 검증 job은 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. 직접 dev Full 경로에서는 current-run API/Web artifact를 병렬 생성하는 `test-images` matrix job이 추가되고 최종 `CI gate`가 이 job의 성공도 확인한다.
 
-dev 대상 PR은 repository의 deterministic 변경 분류에 따라 docs-only/frontend-only/backend-only의 필요한 job을 실행한다. ops/runtime, API/DB/security authority, mixed/unknown, empty diff와 분류 실패는 Full로 처리한다. dev push, main 대상 PR, dispatch와 `main` release의 reusable workflow 호출은 기존 16개 job 전부를 유지한다. 모든 경로에서 최종 `CI gate`가 선택 job 성공과 생략 job 상태를 확인하며 workflow 전체를 path filter로 생략하지 않는다. PR stale run만 자동 취소하고 production deployment serialization은 유지한다.
+dev 대상 PR은 repository의 deterministic 변경 분류에 따라 docs-only/frontend-only/backend-only의 필요한 job을 실행한다. ops/runtime, API/DB/security authority, mixed/unknown, empty diff와 분류 실패는 Full로 처리한다. dev push, main 대상 PR, dispatch와 `main` release의 reusable workflow 호출은 기존 16개 검증 job 전부를 유지하며 직접 dev Full만 test-images를 추가한다. 모든 경로에서 최종 `CI gate`가 선택 job 성공과 생략 job 상태를 확인하며 workflow 전체를 path filter로 생략하지 않는다. PR stale run만 자동 취소하고 production deployment serialization은 유지한다.
 
 `check-repo.sh`에 연결된 classifier/workflow/gate 회귀 테스트, 정확한 경로별 검증 의존성, baseline duration과 Hosted evidence 한계는 [CI 변경 영향 matrix](ci-change-matrix.md)를 따른다.
 
 ### CI Docker layer cache
 
-Issue #123은 Full 1회당 API 5개, Web 3개, runtime-config 3개인 총 11개 build 중 API/Web 6개에만 캐시를 적용한다. build 이후 image content, OCI revision/source/version, architecture, non-root, migration/JPA, backup/bootstrap/manifest 검증과 cleanup은 그대로 실행한다.
+Issue #123은 원래 Full 1회당 API 5개, Web 3개, runtime-config 3개인 총 11개 build 중 반복되는 API/Web 6개에 캐시를 적용했다. Issue #124 이후 direct dev Full에서는 이 여섯 호출을 API/Web producer 2개로 합치고 같은 cache scope를 producer가 사용한다. build 이후 image content, OCI revision/source/version, architecture, non-root, migration/JPA, backup/bootstrap/manifest 검증과 cleanup은 그대로 실행한다.
 
 | family | cache 적용 build | dev push writer | 계속 원래 build를 사용하는 호출 |
 | --- | --- | --- | --- |
-| API | backup-restore, production-bootstrap, fresh-host-bootstrap, observability | fresh-host-bootstrap | production-runtime의 `--no-cache --pull` |
-| Web | fresh-host-bootstrap, observability | fresh-host-bootstrap | production-runtime의 `--no-cache --pull` |
+| API | direct dev Full의 test-images producer | test-images | production-runtime의 `--no-cache --pull`; local/main/release consumer verifier의 원래 build |
+| Web | direct dev Full의 test-images producer | test-images | production-runtime의 `--no-cache --pull`; local/main/release consumer verifier의 원래 build |
 | runtime-config | 적용하지 않음: `NOT_APPLIED_WITH_JUSTIFICATION` | 없음 | runtime-config-evolution, release-transport의 canonical build와 fresh-host 합성 build 모두 원래 direct build 유지 |
 
 runtime-config는 실제 이득이 확인된 경우에만 적용한다는 기준에 따라 제외한다. 수집된 canonical build는 0.40~1.94초이며 pinned setup-buildx 준비 step의 관측 시간은 약 4초다. 준비 비용만으로 원래 build 시간을 초과하므로 두 runtime job에 캐시를 추가하면 총 시간이 늘어날 수 있다. 따라서 새 runtime family/scope/writer와 Buildx 준비를 두 job에서 제거하고 원래 `--platform linux/arm64`, `--network none`, `REVISION` 및 전체 검증을 유지한다. 이는 runtime cache acceptance PASS가 아니라 `NOT_APPLIED_WITH_JUSTIFICATION` 결정이다.
 
-직접 `full-ci.yml`의 dev 대상 PR은 `gha-read`, dev push의 지정 writer만 `gha-write`다. 나머지 eligible job은 읽기만 한다. main PR, release의 reusable 호출, dispatch, 알 수 없는 event/workflow/job과 local 기본값은 `disabled`다. workflow의 판정과 별도로 `scripts/ci_tools/docker_cache.py`가 실제 GitHub event/ref/workflow/repository/job를 다시 확인한다. `disabled`, `gha-read`, `gha-write` 외 mode는 build 전에 실패한다.
+직접 `full-ci.yml`의 dev 대상 PR은 `gha-read`, dev push의 `test-images` producer만 `gha-write`다. main PR, release의 reusable 호출, dispatch, 알 수 없는 event/workflow/job과 local 기본값은 `disabled`다. workflow의 판정과 별도로 `scripts/ci_tools/docker_cache.py`가 실제 GitHub event/ref/workflow/repository/job를 다시 확인한다. `disabled`, `gha-read`, `gha-write` 외 mode는 build 전에 실패한다. Issue #124 이후 consumer verifier는 direct dev Full에서 layer cache를 직접 사용하지 않고 검증된 current-run image를 받으며, local/main/release에서는 기존 build 호출을 그대로 사용한다.
 
 scope는 `our-ledger-ci-v1-<api|web>-linux-<amd64|arm64>-dev-<generation>`이다. family와 실제 daemon/명시 platform을 구분하며 privileged publish의 `our-ledger-*-arm64` scope와 공유하지 않는다. generation은 Dockerfile과 실제 적용되는 Dockerfile-specific/root `.dockerignore`, API의 Gradle config/wrapper/`backend/gradle` 전체 파일, Web의 package/package-lock bytes를 hash한다. pinned base image 변경은 Dockerfile hash를 바꾼다. commit SHA와 일반 application source는 scope key에 넣지 않으며 BuildKit COPY checksum으로 현재 source를 다시 검증한다. runtime-config는 새 CI cache helper에서 지원하지 않는다.
 
-캐시 경로는 Buildx `--load`, `type=gha,version=2` import와 writer-only `mode=max,ignore-error=true` export를 사용한다. import/export timeout은 각각 60초다. dev cache 경로에서만 기존 `--no-cache`를 제외하며 `--pull`, tag, file/context, platform, network와 label은 보존한다. build arg는 현재 API/Web 6개 호출의 계약에 맞춰 모두 금지하고 Docker 실행 전에 거부해 secret을 일반 build arg로 전달할 수 없다. disabled 경로는 기존 `docker build` 인자를 그대로 실행한다. auth/setup/generation/cache/buildx가 불가하거나 cache build가 실패하면 원래 인자에 `--no-cache`를 보장해 다시 build하고 그 실패를 그대로 전달한다. cache miss는 BuildKit의 정상 source build이며 검증 생략 조건이 아니다.
+캐시 경로는 Buildx `--load`, `type=gha,version=2` import와 writer-only `mode=max,ignore-error=true` export를 사용한다. import/export timeout은 각각 60초다. dev cache 경로에서만 기존 `--no-cache`를 제외하며 `--pull`, tag, file/context, platform, network와 label은 보존한다. build arg는 현재 API/Web producer 계약에 맞춰 모두 금지하고 Docker 실행 전에 거부해 secret을 일반 build arg로 전달할 수 없다. disabled 경로는 기존 `docker build` 인자를 그대로 실행한다. auth/setup/generation/cache/buildx가 불가하거나 cache build가 실패하면 원래 인자에 `--no-cache`를 보장해 다시 build하고 그 실패를 그대로 전달한다. cache miss는 BuildKit의 정상 source build이며 검증 생략 조건이 아니다.
 
 local Node action은 `ACTIONS_RUNTIME_TOKEN`과 `ACTIONS_RESULTS_URL`만 runner 환경 파일에 비출력 전달한다. 이 값은 command argument, build arg, Docker context, cache scope나 artifact에 넣지 않는다. GHA backend가 요구하는 별도 Buildx driver와 runtime 변수 경계는 [Docker GHA cache 문서](https://docs.docker.com/build/cache/backends/gha/)를 따른다. Buildx action은 binary cache를 쓰지 않으며 job 종료 시 전용 builder를 정리한다. token/registry login, publish/deploy workflow와 production 권한을 추가하지 않는다.
 
@@ -552,4 +552,16 @@ local Node action은 `ACTIONS_RUNTIME_TOKEN`과 `ACTIONS_RESULTS_URL`만 runner 
 
 fixture는 `FROM scratch`, 작은 합성 payload, `--network none`, linux/arm64와 개발 cleanup label로 cold export → 다른 빈 builder의 warm import → source 변경을 순차 실행한다. 각 build는 60초 상한이며 output bytes와 cold/warm hash equality, warm `CACHED` log, 변경 source hash 차이를 검증한다. image tag/container/registry를 만들지 않고 임시 context/cache/output은 제거한다. 두 builder 내부 cache는 caller의 별도 승인된 정리 대상이다. 이 로컬 fixture PASS가 Hosted GHA backend나 실제 application image의 cold/warm PASS를 뜻하지 않는다.
 
-Hosted acceptance는 exact head/run, event/category, 각 scope와 mode, import hit/miss, build step 시간, workflow/critical-path/job-minutes, 후속 image gate 결과를 함께 기록한다. 최초 read-only PR은 dev cache를 만들지 못하므로 `COLD_CACHE_HOSTED_NOT_PROVEN` 또는 `PENDING_SECOND_REPRESENTATIVE_RUN`을 그대로 남기며 before/after 속도 개선으로 단정하지 않는다. 첫 trusted dev writer 이후 자연스럽게 발생하는 대표 run에서 warm evidence를 확보한다. #124 image 공유와 #125 verifier 내부 최적화는 이 변경 범위 밖이다.
+Hosted acceptance는 exact head/run, event/category, 각 scope와 mode, import hit/miss, build step 시간, workflow/critical-path/job-minutes, 후속 image gate 결과를 함께 기록한다. 최초 read-only PR은 dev cache를 만들지 못하므로 `COLD_CACHE_HOSTED_NOT_PROVEN` 또는 `PENDING_SECOND_REPRESENTATIVE_RUN`을 그대로 남기며 before/after 속도 개선으로 단정하지 않는다. 첫 trusted dev writer 이후 자연스럽게 발생하는 대표 run에서 warm evidence를 확보한다. #125 verifier 내부 최적화는 별도 범위다.
+
+### Current-run exact-source test image
+
+Issue #124는 직접 실행된 dev 대상 Full PR/push에서만 `test-images` matrix가 API와 Web을 한 번씩 병렬 build한다. PR은 #123 GHA cache read-only, direct dev push는 같은 cache scope의 trusted writer다. API artifact는 production-bootstrap, fresh-host-bootstrap, backup-restore, observability가 사용하고 Web artifact는 fresh-host-bootstrap과 observability가 사용한다. production-runtime의 strongest-clean API/Web 2개와 runtime-config canonical/synthetic 3개는 공유하지 않으므로 direct dev Full build 수는 11개에서 7개로 줄어든다. runtime-config는 기존 build가 약 0.40~1.94초로 짧고 canonical/synthetic context·platform·task label도 달라 `NOT_SHARED_WITH_JUSTIFICATION`이다.
+
+전송은 외부 registry나 credential 없이 current workflow run의 GitHub Actions artifact를 사용한다. producer는 `docker save | gzip -1 -n` archive와 strict JSON manifest를 만들고 1일만 보존한다. upload/download action은 exact commit으로 pin하고 artifact 이름을 `github.run_attempt`로 격리하며 consumer download에는 `github-token`, `repository`, `run-id`, pattern을 전달하지 않는다. artifact 이름이나 Docker tag만으로 신뢰하지 않는다.
+
+manifest는 실제 `git rev-parse HEAD`와 `HEAD^{tree}`, GitHub run ID/attempt/event/workflow/repository, PR head/base audit SHA, family/platform, Dockerfile과 실제 적용 `.dockerignore` SHA-256, archive byte size/SHA-256, image ID와 config digest, OCI source/revision/version, cache mode를 고정한다. PR의 synthetic merge checkout은 실제 build authority이고 PR head SHA는 별도 audit 값이다. consumer는 자기 checkout SHA/tree와 모든 metadata·archive bytes를 load 전에 검증하고, docker-save 내부 config digest와 OCI image index/image ID를 연결한 뒤 load된 image ID/platform 및 canonical cleanup·OCI/family/tree label을 다시 검증하고 job-local tag로만 retag한다.
+
+`CI_TEST_IMAGE_MODE=required`에서는 producer 실패, artifact 누락, extra/symlink file, duplicate/extra/malformed JSON, foreign run, stale source/tree, family/platform, Dockerfile/dockerignore, archive hash, image ID 또는 OCI label 불일치를 rebuild로 숨기지 않고 실패한다. 이는 cache 장애 시 no-cache rebuild를 허용하는 #123 fallback과 다르다. mode가 unset/`disabled`인 local/main/release verifier는 artifact 없이 기존 build를 수행하고, 알 수 없는 mode는 실패한다. main/release reusable Full과 production-runtime, runtime-config, deploy/publish source는 shared artifact를 사용하지 않는다.
+
+canonical producer image는 여섯 cleanup label과 exact checkout SHA, OCI source/revision/version, family/tree label을 가진다. consumer container/network/volume에는 기존 job-specific cleanup label을 유지한다. image label을 직접 확인하는 backup-restore는 local build에서는 기존 issue-41 task label, shared mode에서는 canonical issue-124 task label을 요구하며 어느 경로도 검사를 생략하지 않는다. `check-repo.sh`의 hostile tests는 source/tree/family/platform/Dockerfile/dockerignore/archive/image/OCI/run mismatch와 malformed/duplicate manifest, unsafe archive, missing artifact, shared-mode fail-closed, local build 독립성, #122 gate/Fast skip, #123 writer 이전을 고정한다.
