@@ -9,16 +9,36 @@ STATE_SQL="$ROOT_DIR/scripts/backup_tools/state-fingerprint.sql"
 
 if ! command -v docker >/dev/null 2>&1 \
   || ! docker compose version >/dev/null 2>&1 \
-  || ! command -v python3 >/dev/null 2>&1; then
-  echo "Docker Compose와 Python 3을 사용할 수 없습니다." >&2
+  || ! command -v python3 >/dev/null 2>&1 \
+  || ! command -v git >/dev/null 2>&1; then
+  echo "Docker Compose, Python 3, Git을 사용할 수 없습니다." >&2
   exit 1
 fi
+
+git_head="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+if [[ ! "$git_head" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "runtime 검증 Git HEAD가 exact lowercase SHA가 아닙니다." >&2
+  exit 1
+fi
+cleanup_labels=(
+  io.homeserver.cleanup.environment=development
+  io.homeserver.cleanup.project=our-ledger
+  io.homeserver.cleanup.task=issue-125-heavy-verification-bottlenecks
+  io.homeserver.cleanup.lifecycle=task
+  io.homeserver.cleanup.retain=false
+  "io.homeserver.cleanup.git-head=$git_head"
+)
+docker_labels=()
+for cleanup_label in "${cleanup_labels[@]}"; do
+  docker_labels+=(--label "$cleanup_label")
+done
 
 project_name="our-ledger-runtime-$(date +%s)-$$"
 api_image="our-ledger-api:$project_name"
 web_image="our-ledger-web:$project_name"
 runtime_temp_root="${TMPDIR:-/tmp}"
 runtime_temp_dir="$(mktemp -d "$runtime_temp_root/our-ledger-runtime.XXXXXX")"
+override_file="$runtime_temp_dir/compose.labels.json"
 runtime_password="runtime-only-$project_name"
 api_image_probe="$project_name-api-image-probe"
 
@@ -30,7 +50,9 @@ case "$runtime_temp_dir" in
     ;;
 esac
 
-compose=(docker compose --project-name "$project_name" --env-file /dev/null -f "$COMPOSE_FILE")
+chmod 700 "$runtime_temp_dir"
+compose=(docker compose --project-name "$project_name" --env-file /dev/null
+  -f "$COMPOSE_FILE" -f "$override_file")
 
 cleanup() {
   local original_status=$?
@@ -70,6 +92,25 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+
+python3 -B - "$override_file" "${cleanup_labels[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+labels = dict(value.split("=", 1) for value in sys.argv[2:])
+config = {
+    group: {name: {"labels": labels} for name in names}
+    for group, names in (
+        ("services", ("web", "api", "api-migration", "api-bootstrap", "postgres")),
+        ("networks", ("application", "database")),
+        ("volumes", ("postgres-data",)),
+    )
+}
+target = Path(sys.argv[1])
+target.write_text(json.dumps(config), encoding="utf-8")
+target.chmod(0o600)
+PY
 
 run_bounded() {
   local log_path="$1"
@@ -231,19 +272,31 @@ export OUR_LEDGER_EXPECTED_COMPOSE_PROJECT="$project_name"
 
 "${compose[@]}" --profile migration --profile bootstrap config --format json \
   | python3 "$ROOT_DIR/scripts/check-production-compose.py"
+"${compose[@]}" --profile migration --profile bootstrap config --format json \
+  | python3 -B -c '
+import json
+import sys
+
+expected = dict(value.split("=", 1) for value in sys.argv[1:])
+config = json.load(sys.stdin)
+for group in ("services", "networks", "volumes"):
+    for resource in config[group].values():
+        if resource.get("labels") != expected:
+            raise SystemExit("runtime synthetic cleanup labels differ")
+' "${cleanup_labels[@]}"
 
 python3 -B "$TIMING_HELPER" end production-runtime-01 "$stage_started"
 
 printf '\n[production 2/13] clean immutable image build\n'
 stage_started="$(python3 -B "$TIMING_HELPER" begin)"
-docker build --progress plain --no-cache --pull --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
-docker build --progress plain --no-cache --pull --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+docker build --progress plain --no-cache --pull "${docker_labels[@]}" --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
+docker build --progress plain --no-cache --pull "${docker_labels[@]}" --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
 
 python3 -B "$TIMING_HELPER" end production-runtime-02 "$stage_started"
 
 printf '\n[production 3/13] runtime image contents and Nginx config\n'
 stage_started="$(python3 -B "$TIMING_HELPER" begin)"
-docker create --name "$api_image_probe" "$api_image" >/dev/null
+docker create "${docker_labels[@]}" --name "$api_image_probe" "$api_image" >/dev/null
 docker export "$api_image_probe" | tar -tf - > "$runtime_temp_dir/api-image-contents.txt"
 docker rm "$api_image_probe" >/dev/null
 
@@ -291,8 +344,8 @@ if ! awk '
   exit 1
 fi
 
-docker run --rm --entrypoint java "$api_image" -version
-nginx_config="$(docker run --rm --add-host api:127.0.0.1 --entrypoint /bin/sh "$web_image" -c '
+docker run --rm "${docker_labels[@]}" --entrypoint java "$api_image" -version
+nginx_config="$(docker run --rm "${docker_labels[@]}" --add-host api:127.0.0.1 --entrypoint /bin/sh "$web_image" -c '
   set -eu
   test "$(id -u)" != "0"
   test -f /usr/share/nginx/html/index.html

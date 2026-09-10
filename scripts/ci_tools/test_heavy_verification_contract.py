@@ -1,9 +1,12 @@
 """Deterministic contracts complement, but do not replace, Docker proofs."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import subprocess
+import sys
+import tempfile
 import unittest
 
 from scripts.ci_tools import ci_timing
@@ -164,6 +167,114 @@ class HeavyVerificationContractTest(unittest.TestCase):
         self.assertIn('restart api', value)
         self.assertIn('Commencing graceful shutdown', value)
         self.assertIn('Graceful shutdown complete', value)
+
+    def test_cleanup_labels_require_exact_head_and_cover_all_resources(self):
+        expected = {
+            "io.homeserver.cleanup.environment": "development",
+            "io.homeserver.cleanup.project": "our-ledger",
+            "io.homeserver.cleanup.task": "issue-125-heavy-verification-bottlenecks",
+            "io.homeserver.cleanup.lifecycle": "task",
+            "io.homeserver.cleanup.retain": "false",
+            "io.homeserver.cleanup.git-head": "a" * 40,
+        }
+        for job in ("production-runtime", "observability"):
+            value = source(job)
+            start = 'git_head="$(git -C "$ROOT_DIR" rev-parse HEAD)"'
+            metadata = start + value.split(start, 1)[1].split("\nproject_name=", 1)[0]
+            for head in ("a" * 40, "UNKNOWN", "a" * 39, "A" * 40, "a" * 40 + "\nextra"):
+                harness = 'set -euo pipefail\nROOT_DIR=synthetic\ngit() { printf "%s" "$TEST_HEAD"; }\n'
+                harness += metadata + '\nprintf "%s\\n" "${cleanup_labels[@]}"\n'
+                with self.subTest(job=job, head=head):
+                    result = subprocess.run(["bash", "-c", harness], env={"TEST_HEAD": head},
+                                            capture_output=True, text=True)
+                    if head == "a" * 40:
+                        self.assertEqual(result.returncode, 0)
+                        self.assertEqual(dict(line.split("=", 1) for line in result.stdout.splitlines()), expected)
+                    else:
+                        self.assertEqual(result.returncode, 1)
+                        self.assertEqual(result.stdout, "")
+            self.assertLess(value.index('git_head="$('), value.index('mktemp -d'))
+            self.assertNotIn("status --porcelain", value)
+            self.assertIn('-f "$COMPOSE_FILE" -f "$override_file"', value)
+            for command in re.findall(r"(?:^|\$\()(docker (?:build|create|run) [^\n]+)", value, re.M):
+                self.assertIn('"${docker_labels[@]}"', command)
+            self.assertIn('"${compose[@]}" down --volumes --remove-orphans --timeout 45', function(value, "cleanup"))
+            self.assertIn('for group in ("services", "networks", "volumes"):', value)
+            renderer = re.search(r'python3 -B - "\$override_file" "\$\{cleanup_labels\[@\]\}" <<\'PY\'\n(.*?)\nPY', value, re.S)
+            self.assertIsNotNone(renderer)
+            with tempfile.TemporaryDirectory() as temporary:
+                target = Path(temporary) / "labels.json"
+                result = subprocess.run([sys.executable, "-B", "-", str(target),
+                                         *(f"{key}={item}" for key, item in expected.items())],
+                                        input=renderer.group(1), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                config = json.loads(target.read_text(encoding="utf-8"))
+                self.assertEqual(set(config), {"services", "networks", "volumes"})
+                self.assertEqual(set(config["services"]), {"web", "api", "api-migration", "api-bootstrap", "postgres"})
+                self.assertEqual(set(config["networks"]), {"application", "database"})
+                self.assertEqual(set(config["volumes"]), {"postgres-data"})
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+                for resources in config.values():
+                    for resource in resources.values():
+                        self.assertEqual(resource, {"labels": expected})
+
+    def test_observability_fixture_preserves_status_authority_and_shared_image_identity(self):
+        value = source("observability")
+        compose = value.split("\ncompose=(", 1)[1].split("\n)", 1)[0]
+        self.assertEqual(compose.count("-f "), 1)
+        self.assertIn('-f "$fixture_compose_file"', compose)
+        self.assertIn('fixture_compose_file="$fixture_root/compose.prod.yaml"', value)
+        self.assertIn('"$fixture_root/scripts/production-status.sh"', function(value, "collect_snapshot"))
+        self.assertIn('config --no-interpolate --format json > "$fixture_compose_file"', value)
+        self.assertIn('if source != fixture:', value)
+        required = value.split("\n  required)", 1)[1].split("\n    ;;", 1)[0]
+        self.assertEqual(required.count("test_image_artifact.py\" consume"), 2)
+        self.assertNotIn("docker_labels", required)
+        self.assertNotIn("build", required)
+        disabled = value.split("\n  disabled)", 1)[1].split("\n    ;;", 1)[0]
+        self.assertEqual(disabled.count('"${docker_labels[@]}"'), 2)
+        self.assertEqual(disabled.count("--progress plain --no-cache --pull"), 2)
+        copier = re.search(r'python3 -B - "\$ROOT_DIR" "\$fixture_root" <<\'PY\'\n(.*?)\nPY', value, re.S)
+        self.assertIsNotNone(copier)
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "fixture-repo"
+            result = subprocess.run([sys.executable, "-B", "-", str(ROOT), str(fixture)],
+                                    input=copier.group(1), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            files = sorted(path.relative_to(fixture) for path in fixture.rglob("*") if path.is_file())
+            self.assertEqual(files, sorted(map(Path, ("scripts/production-status.sh",
+                                                    "scripts/status_tools/production_status.py",
+                                                    "scripts/backup_tools/backup_artifact.py"))))
+            for relative in files:
+                self.assertEqual((fixture / relative).read_bytes(), (ROOT / relative).read_bytes())
+            collector = (fixture / "scripts/status_tools/production_status.py").read_text(encoding="utf-8")
+            self.assertIn('config_files == {self.compose_file}', collector)
+            self.assertIn('canonical_compose == canonical_repo / "compose.prod.yaml"', collector)
+
+    def test_observability_fixture_rejects_render_or_label_drift_without_fallback(self):
+        value = source("observability")
+        checker = re.search(r'python3 -B - "\$status_root" "\$\{cleanup_labels\[@\]\}" <<\'PY\'\n(.*?)\nPY', value, re.S)
+        self.assertIsNotNone(checker)
+        config = {group: {"synthetic": {"labels": {"expected": "label"}}}
+                  for group in ("services", "networks", "volumes")}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for mode in ("exact", "render-drift", "label-drift"):
+                baseline = json.loads(json.dumps(config))
+                fixture = json.loads(json.dumps(config))
+                if mode == "render-drift":
+                    fixture["services"]["synthetic"]["image"] = "synthetic-sensitive-value"
+                elif mode == "label-drift":
+                    baseline["volumes"]["synthetic"]["labels"] = {"wrong": "synthetic-sensitive-value"}
+                    fixture = baseline
+                (root / "source-compose.json").write_text(json.dumps(baseline), encoding="utf-8")
+                (root / "fixture-compose.json").write_text(json.dumps(fixture), encoding="utf-8")
+                with self.subTest(mode=mode):
+                    result = subprocess.run([sys.executable, "-B", "-", str(root), "expected=label"],
+                                            input=checker.group(1), capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0 if mode == "exact" else 1)
+                    self.assertEqual(result.stdout, "")
+                    self.assertNotIn("synthetic-sensitive-value", result.stderr)
 
     def test_backup_exit_trap_preserves_failure_and_propagates_cleanup_failure(self):
         cleanup = function(source("backup-restore"), "cleanup")

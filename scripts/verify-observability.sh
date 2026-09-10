@@ -9,16 +9,38 @@ BACKUP_HELPER="$ROOT_DIR/scripts/backup_tools/backup_artifact.py"
 if ! command -v docker >/dev/null 2>&1 \
   || ! docker compose version >/dev/null 2>&1 \
   || ! command -v python3 >/dev/null 2>&1 \
+  || ! command -v git >/dev/null 2>&1 \
   || ! command -v curl >/dev/null 2>&1; then
-  echo "Observability 검증에 필요한 Docker Compose, Python, curl이 없습니다." >&2
+  echo "Observability 검증에 필요한 Docker Compose, Python, Git, curl이 없습니다." >&2
   exit 1
 fi
+
+git_head="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+if [[ ! "$git_head" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "observability 검증 Git HEAD가 exact lowercase SHA가 아닙니다." >&2
+  exit 1
+fi
+cleanup_labels=(
+  io.homeserver.cleanup.environment=development
+  io.homeserver.cleanup.project=our-ledger
+  io.homeserver.cleanup.task=issue-125-heavy-verification-bottlenecks
+  io.homeserver.cleanup.lifecycle=task
+  io.homeserver.cleanup.retain=false
+  "io.homeserver.cleanup.git-head=$git_head"
+)
+docker_labels=()
+for cleanup_label in "${cleanup_labels[@]}"; do
+  docker_labels+=(--label "$cleanup_label")
+done
 
 project_name="our-ledger-observability-$(date +%s)-$$"
 api_image="our-ledger-api:$project_name"
 web_image="our-ledger-web:$project_name"
 temporary_root="${TMPDIR:-/tmp}"
 status_root="$(mktemp -d "$temporary_root/our-ledger-observability.XXXXXX")"
+override_file="$status_root/compose.labels.json"
+fixture_root="$status_root/fixture-repo"
+fixture_compose_file="$fixture_root/compose.prod.yaml"
 env_file="$status_root/production.env"
 backup_directory="$status_root/backups"
 runtime_password="observability-only-$project_name"
@@ -66,7 +88,7 @@ compose=(
   docker compose
   --project-name "$project_name"
   --env-file "$env_file"
-  -f "$COMPOSE_FILE"
+  -f "$fixture_compose_file"
 )
 
 cleanup() {
@@ -121,6 +143,69 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
+python3 -B - "$override_file" "${cleanup_labels[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+labels = dict(value.split("=", 1) for value in sys.argv[2:])
+config = {
+    group: {name: {"labels": labels} for name in names}
+    for group, names in (
+        ("services", ("web", "api", "api-migration", "api-bootstrap", "postgres")),
+        ("networks", ("application", "database")),
+        ("volumes", ("postgres-data",)),
+    )
+}
+target = Path(sys.argv[1])
+target.write_text(json.dumps(config), encoding="utf-8")
+target.chmod(0o600)
+PY
+
+# Keep the strict singleton Compose-file authority in the unmodified status tool.
+python3 -B - "$ROOT_DIR" "$fixture_root" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+source_root, fixture_root = map(Path, sys.argv[1:])
+fixture_root.mkdir(mode=0o700)
+for relative in (
+    "scripts/production-status.sh",
+    "scripts/status_tools/production_status.py",
+    "scripts/backup_tools/backup_artifact.py",
+):
+    source = source_root / relative
+    target = fixture_root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    if target.read_bytes() != source.read_bytes():
+        raise SystemExit("observability status fixture source differs")
+PY
+
+source_compose=(docker compose --project-name "$project_name" --env-file "$env_file"
+  -f "$COMPOSE_FILE" -f "$override_file" --profile migration --profile bootstrap)
+"${source_compose[@]}" config --no-interpolate --format json > "$fixture_compose_file"
+"${source_compose[@]}" config --format json > "$status_root/source-compose.json"
+"${compose[@]}" --profile migration --profile bootstrap config --format json \
+  > "$status_root/fixture-compose.json"
+python3 -B - "$status_root" "${cleanup_labels[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+expected = dict(value.split("=", 1) for value in sys.argv[2:])
+source = json.loads((root / "source-compose.json").read_text(encoding="utf-8"))
+fixture = json.loads((root / "fixture-compose.json").read_text(encoding="utf-8"))
+if source != fixture:
+    raise SystemExit("observability canonical fixture Compose differs")
+for group in ("services", "networks", "volumes"):
+    for resource in fixture[group].values():
+        if resource.get("labels") != expected:
+            raise SystemExit("observability synthetic cleanup labels differ")
+PY
+
 printf '\n[observability 1/8] focused unit contracts\n'
 stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 python3 -m unittest scripts/backup_tools/test_backup_artifact.py
@@ -143,9 +228,9 @@ case "${CI_TEST_IMAGE_MODE:-disabled}" in
     ;;
   disabled)
     python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api --progress plain --no-cache --pull \
-      --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
+      "${docker_labels[@]}" --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
     python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build web --progress plain --no-cache --pull \
-      --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+      "${docker_labels[@]}" --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
     ;;
   *)
     echo "알 수 없는 shared test image mode입니다." >&2
@@ -249,7 +334,7 @@ fi
 snapshot_file="$status_root/status.json"
 snapshot_error_file="$status_root/status-error.log"
 collect_snapshot() {
-  "$ROOT_DIR/scripts/production-status.sh" \
+  "$fixture_root/scripts/production-status.sh" \
     --project-name "$project_name" \
     --env-file "$env_file" \
     --backup-dir "$backup_directory" \
