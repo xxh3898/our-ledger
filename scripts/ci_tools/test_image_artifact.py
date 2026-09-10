@@ -55,6 +55,20 @@ MANIFEST_KEYS = {
     "archiveSha256", "imageReference", "imageId", "imageOs", "imageArchitecture",
     "imageConfigDigest", "ociSource", "ociRevision", "ociVersion", "cacheMode", "producerJob",
 }
+DOCKER_MANIFEST_KEYS = {"Config", "RepoTags", "Layers"}
+LAYER_SOURCE_KEYS = {"mediaType", "size", "digest"}
+LAYER_SOURCE_MEDIA_TYPES = {
+    "application/vnd.oci.image.layer.v1.tar",
+    "application/vnd.oci.image.layer.v1.tar+gzip",
+    "application/vnd.oci.image.layer.v1.tar+zstd",
+    "application/vnd.docker.image.rootfs.diff.tar",
+    "application/vnd.docker.image.rootfs.diff.tar.gzip",
+}
+UNCOMPRESSED_LAYER_SOURCE_MEDIA_TYPE = "application/vnd.oci.image.layer.v1.tar"
+UNCOMPRESSED_LAYER_SOURCE_MEDIA_TYPES = {
+    UNCOMPRESSED_LAYER_SOURCE_MEDIA_TYPE,
+    "application/vnd.docker.image.rootfs.diff.tar",
+}
 
 
 class ArtifactError(ValueError):
@@ -471,10 +485,50 @@ def _validate_docker_archive(
             if not isinstance(embedded, list) or len(embedded) != 1 or type(embedded[0]) is not _NoDuplicateObject:
                 raise ArtifactError("Docker archive must contain exactly one image")
             entry = embedded[0]
-            if set(entry) != {"Config", "RepoTags", "Layers"}:
+            entry_keys = set(entry)
+            if entry_keys not in (DOCKER_MANIFEST_KEYS, DOCKER_MANIFEST_KEYS | {"LayerSources"}):
                 raise ArtifactError("Docker archive manifest schema differs")
-            if entry.get("RepoTags") != [reference] or not isinstance(entry.get("Layers"), list) or not entry["Layers"]:
+            layers = entry.get("Layers")
+            if (entry.get("RepoTags") != [reference] or not isinstance(layers, list) or not layers
+                    or any(not isinstance(layer, str) for layer in layers)
+                    or len(layers) != len(set(layers))
+                    or any(layer not in names for layer in layers)):
                 raise ArtifactError("Docker archive image reference or layers differ")
+            layer_sources = entry.get("LayerSources")
+            if layer_sources is not None:
+                if type(layer_sources) is not _NoDuplicateObject or not layer_sources:
+                    raise ArtifactError("Docker archive layer source schema differs")
+                layer_paths: dict[str, str] = {}
+                for layer in layers:
+                    match = re.fullmatch(r"blobs/sha256/([0-9a-f]{64})", layer)
+                    if match is None:
+                        raise ArtifactError("Docker archive layer source path differs")
+                    layer_paths["sha256:" + match.group(1)] = layer
+                if set(layer_sources) != set(layer_paths):
+                    raise ArtifactError("Docker archive layer source inventory differs")
+                for diff_id, layer_path in layer_paths.items():
+                    descriptor = layer_sources[diff_id]
+                    if type(descriptor) is not _NoDuplicateObject or set(descriptor) != LAYER_SOURCE_KEYS:
+                        raise ArtifactError("Docker archive layer source descriptor differs")
+                    media_type = descriptor.get("mediaType")
+                    source_size = descriptor.get("size")
+                    source_digest = descriptor.get("digest")
+                    if (not isinstance(media_type, str)
+                            or media_type not in LAYER_SOURCE_MEDIA_TYPES
+                            or type(source_size) is not int
+                            or not 0 < source_size <= MAX_UNCOMPRESSED_BYTES
+                            or not isinstance(source_digest, str)
+                            or not SHA256.fullmatch(source_digest)):
+                        raise ArtifactError("Docker archive layer source descriptor differs")
+                    # Moby 28 can retain a compressed registry descriptor from
+                    # distribution.Describable while the map key remains the
+                    # uncompressed DiffID. Only uncompressed OCI/Docker layer
+                    # descriptors identify the archive member itself, so
+                    # equality does not apply to compressed source bytes.
+                    if (media_type in UNCOMPRESSED_LAYER_SOURCE_MEDIA_TYPES
+                            and (source_digest != diff_id
+                                 or source_size != saved.getmember(layer_path).size)):
+                        raise ArtifactError("Docker archive uncompressed layer source differs")
             config = entry.get("Config")
             if not isinstance(config, str) or config not in names:
                 raise ArtifactError("Docker archive config is unavailable")
@@ -507,8 +561,6 @@ def _validate_docker_archive(
                 )
                 if descriptor.get("digest") != image_id or archive_reference not in {reference, f"docker.io/library/{reference}"}:
                     raise ArtifactError("Docker archive top-level index does not select the expected image")
-            if any(not isinstance(layer, str) or layer not in names for layer in entry["Layers"]):
-                raise ArtifactError("Docker archive layer inventory differs")
             return config_digest
     except (OSError, tarfile.TarError, KeyError) as error:
         raise ArtifactError("Docker archive cannot be validated") from error

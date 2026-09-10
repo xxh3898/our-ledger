@@ -21,6 +21,8 @@ HEAD = "a" * 40
 TREE = "b" * 40
 PR_HEAD = "c" * 40
 PR_BASE = "d" * 40
+LAYER_PAYLOAD = b"synthetic-layer"
+LAYER_DIGEST = "sha256:" + hashlib.sha256(LAYER_PAYLOAD).hexdigest()
 PUSH = {
     "GITHUB_ACTIONS": "true",
     "GITHUB_REPOSITORY": artifact.REPOSITORY,
@@ -53,33 +55,48 @@ def identity(family: str = "api", environment: dict[str, str] | None = None) -> 
         return artifact.authority(family, environment or PR)
 
 
-def docker_config(authority: artifact.Authority) -> bytes:
+def docker_config(authority: artifact.Authority, diff_id: str = "sha256:" + "f" * 64) -> bytes:
     value = {
         "architecture": "amd64",
         "os": "linux",
         "config": {"Labels": artifact.expected_labels(authority)},
-        "rootfs": {"type": "layers", "diff_ids": ["sha256:" + "f" * 64]},
+        "rootfs": {"type": "layers", "diff_ids": [diff_id]},
     }
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
-def write_archive(directory: Path, authority: artifact.Authority, *, member_name: str | None = None) -> tuple[Path, str]:
-    config = docker_config(authority)
+def write_archive(
+    directory: Path,
+    authority: artifact.Authority,
+    *,
+    member_name: str | None = None,
+    layer_sources: object | None = None,
+    entry_extra: dict[str, object] | None = None,
+) -> tuple[Path, str]:
+    config = docker_config(authority, LAYER_DIGEST if layer_sources is not None else "sha256:" + "f" * 64)
     image_id = "sha256:" + hashlib.sha256(config).hexdigest()
     config_name = image_id.removeprefix("sha256:") + ".json"
-    layer_name = member_name or "fixture/layer.tar"
-    embedded = [{
+    layer_name = member_name or (
+        f"blobs/sha256/{LAYER_DIGEST.removeprefix('sha256:')}" if layer_sources is not None
+        else "fixture/layer.tar"
+    )
+    entry: dict[str, object] = {
         "Config": config_name,
         "RepoTags": [artifact.canonical_reference(authority.family, authority.checkout_sha)],
         "Layers": [layer_name],
-    }]
+    }
+    if layer_sources is not None:
+        entry["LayerSources"] = layer_sources
+    if entry_extra is not None:
+        entry.update(entry_extra)
+    embedded = [entry]
     archive = directory / artifact.ARCHIVE_NAME
     with archive.open("wb") as raw:
         with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=1, mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode="w") as saved:
                 for name, payload in (
                     (config_name, config),
-                    (layer_name, b"synthetic-layer"),
+                    (layer_name, LAYER_PAYLOAD),
                     ("manifest.json", json.dumps(embedded, separators=(",", ":")).encode()),
                 ):
                     info = tarfile.TarInfo(name)
@@ -88,6 +105,16 @@ def write_archive(directory: Path, authority: artifact.Authority, *, member_name
                     info.mtime = 0
                     saved.addfile(info, io.BytesIO(payload))
     return archive, image_id
+
+
+def valid_layer_sources() -> dict[str, dict[str, object]]:
+    return {
+        LAYER_DIGEST: {
+            "mediaType": artifact.UNCOMPRESSED_LAYER_SOURCE_MEDIA_TYPE,
+            "size": len(LAYER_PAYLOAD),
+            "digest": LAYER_DIGEST,
+        },
+    }
 
 
 def write_authority(directory: Path, identity_value: artifact.Authority) -> tuple[dict, Path]:
@@ -169,6 +196,98 @@ class ManifestTest(unittest.TestCase):
 
     def test_valid_manifest_binds_archive_and_docker_save_config(self):
         self.assertRegex(self.validate(), r"^sha256:[0-9a-f]{64}$")
+
+    def test_current_moby_layer_sources_extension_is_strictly_validated(self):
+        valid = valid_layer_sources()
+
+        def assert_archive(layer_sources: object, *, entry_extra: dict[str, object] | None = None,
+                           accepted: bool = False) -> None:
+            self.archive.unlink()
+            archive, image_id = write_archive(
+                self.directory,
+                self.identity,
+                layer_sources=layer_sources,
+                entry_extra=entry_extra,
+            )
+            size, digest = artifact._hash_file(archive)
+            self.rewrite({
+                **self.value,
+                "archiveSize": size,
+                "archiveSha256": digest,
+                "imageId": image_id,
+                "imageConfigDigest": image_id,
+            })
+            if accepted:
+                self.assertEqual(self.validate(), image_id)
+            else:
+                with self.assertRaises(artifact.ArtifactError):
+                    self.validate()
+
+        assert_archive(valid, accepted=True)
+        descriptor = valid[LAYER_DIGEST]
+        # Docker schema2 also defines a distributable uncompressed layer
+        # descriptor. Like OCI uncompressed layers, its digest is the DiffID
+        # and its size is the docker-save archive member size.
+        docker_uncompressed = {
+            LAYER_DIGEST: {
+                "mediaType": "application/vnd.docker.image.rootfs.diff.tar",
+                "size": len(LAYER_PAYLOAD),
+                "digest": LAYER_DIGEST,
+            },
+        }
+        assert_archive(docker_uncompressed, accepted=True)
+        assert_archive({
+            LAYER_DIGEST: {
+                **docker_uncompressed[LAYER_DIGEST],
+                "size": len(LAYER_PAYLOAD) + 1,
+            },
+        })
+        assert_archive({
+            LAYER_DIGEST: {
+                **docker_uncompressed[LAYER_DIGEST],
+                "digest": "sha256:" + "0" * 64,
+            },
+        })
+        # Docker 28 save.go keys LayerSources by uncompressed DiffID, but a
+        # distribution.Describable layer can keep its compressed registry
+        # digest and size. Those bytes are not the docker-save tar member.
+        for media_type in (
+            "application/vnd.oci.image.layer.v1.tar+gzip",
+            "application/vnd.oci.image.layer.v1.tar+zstd",
+            "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        ):
+            assert_archive({
+                LAYER_DIGEST: {
+                    "mediaType": media_type,
+                    "size": 7,
+                    "digest": "sha256:" + "e" * 64,
+                },
+            }, accepted=True)
+        hostile = (
+            {},
+            {"sha256:" + "0" * 64: descriptor},
+            {LAYER_DIGEST: {}},
+            {LAYER_DIGEST: {**descriptor, "extra": "foreign"}},
+            {LAYER_DIGEST: {**descriptor, "mediaType": "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip"}},
+            {LAYER_DIGEST: {**descriptor, "mediaType": "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip"}},
+            {LAYER_DIGEST: {**descriptor, "mediaType": []}},
+            {LAYER_DIGEST: {**descriptor, "size": True}},
+            {LAYER_DIGEST: {**descriptor, "size": 0}},
+            {LAYER_DIGEST: {**descriptor, "size": len(LAYER_PAYLOAD) + 1}},
+            {LAYER_DIGEST: {**descriptor, "digest": "sha256:" + "0" * 64}},
+            {LAYER_DIGEST: {**descriptor, "digest": "not-a-digest"}},
+            {LAYER_DIGEST: {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "size": artifact.MAX_UNCOMPRESSED_BYTES + 1,
+                "digest": "sha256:" + "e" * 64,
+            }},
+            {LAYER_DIGEST: {**descriptor, "urls": ["https://example.invalid/layer"]}},
+        )
+        for layer_sources in hostile:
+            with self.subTest(layer_sources=layer_sources):
+                assert_archive(layer_sources)
+        assert_archive(valid, entry_extra={"Parent": "sha256:" + "0" * 64})
+        assert_archive(valid, entry_extra={"Layers": [{}]})
 
     def test_every_source_family_platform_and_runtime_authority_mismatch_is_rejected(self):
         changes = {
