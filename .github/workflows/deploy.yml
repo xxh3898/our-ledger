@@ -207,7 +207,7 @@ jobs:
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
-          tags: tag:ci
+          tags: tag:our-ledger-ci
           hostname: our-ledger-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           ping: home-mini
 
