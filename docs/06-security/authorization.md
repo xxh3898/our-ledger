@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.6
-last_updated: 2026-08-29
+version: 0.7
+last_updated: 2026-09-11
 related:
   - ADR-001
   - ADR-008
@@ -57,6 +57,12 @@ V1에서 OWNER와 MEMBER는 재무 데이터에 동일한 CRUD 권한을 가진�
 - 향후 Household 삭제
 
 Cloudflare Access 정책 자체의 변경은 애플리케이션 권한이 아니라 별도 production 운영 권한으로 취급한다.
+
+## Production CD network identity
+
+our-ledger의 GitHub Actions deploy runner는 Tailscale WIF로 생성되는 일시적 node이며 source authority에서 전용 `tag:our-ledger-ci` 하나만 사용한다. 여러 repository와 HomeOps가 공유하는 `tag:ci`를 함께 부여하지 않으므로 shared tag의 TCP 9443 권한을 상속하지 않는다. target은 `home-mini`이고 필요한 network authority는 restricted SSH transport용 TCP 22뿐이다.
+
+이 문서는 desired source contract를 고정한다. `tag:our-ledger-ci`의 tag owner, grant와 WIF를 실제 Tailscale control plane에 생성하는 작업은 #141의 별도 owner Gate이며, shared `tag:ci` authority는 변경하지 않는다.
 
 ## IDOR 방지
 

@@ -34,6 +34,7 @@ import {
 import { todayInTimeZone } from './dateTime.ts'
 import {
   type CalendarMonth,
+  type Category,
   type CurrentHousehold,
   type CurrentUser,
   type LedgerTransaction,
@@ -51,6 +52,7 @@ import {
   unlinkMarriageGoalAccount,
 } from './ledgerApi.ts'
 import { entryByRole } from './transactionUtils.ts'
+import { householdRoleLabel } from './uiVocabulary.ts'
 import {
   isStatisticsScreen,
   normalizeStatisticsState,
@@ -173,7 +175,7 @@ function CoupleHeader({
         <p className="brand-kicker">둘이 쓰는 하나의 생활 기록</p>
         <h1>우리의 장부</h1>
         <p className="household-meta">
-          {household.name} · {user.email} · {user.role}
+          {household.name} · {user.email} · {householdRoleLabel(user.role)}
         </p>
       </div>
       <div className="couple-actions">
@@ -183,10 +185,7 @@ function CoupleHeader({
               <span className="avatar-placeholder" aria-hidden="true">
                 {member.displayName.slice(0, 1)}
               </span>
-              <span>
-                {member.displayName}
-                {member.userId === user.userId && <small>나</small>}
-              </span>
+              <span>{member.displayName}</span>
             </li>
           ))}
         </ul>
@@ -240,12 +239,10 @@ function SpendingHero({
 }
 
 function ScopeSelector({
-  user,
   household,
   navigation,
   onChange,
 }: {
-  user: CurrentUser
   household: CurrentHousehold
   navigation: CalendarNavigationState
   onChange: (state: CalendarNavigationState) => void
@@ -270,7 +267,7 @@ function ScopeSelector({
             memberId: member.memberId,
           })}
         >
-          {member.displayName}{member.userId === user.userId ? ' · 나' : ''}
+          {member.displayName}
         </button>
       ))}
       <button
@@ -1047,6 +1044,16 @@ function CalendarWorkspace({
     setRevision((current) => current + 1)
   }
 
+  function acceptCreatedCategory(category: Category) {
+    setReferences((current) => ({
+      ...current,
+      categories: [
+        ...current.categories.filter((item) => item.id !== category.id),
+        category,
+      ],
+    }))
+  }
+
   function acceptGoalView(view: MarriageGoalView) {
     if (goalSheet === 'create') goalCreateSucceededRef.current = true
     setGoalState({ status: 'ready', data: view })
@@ -1081,7 +1088,6 @@ function CalendarWorkspace({
               createSuccessFocusRef={calendarGoalFocusRef}
             />
             <ScopeSelector
-              user={user}
               household={references.household}
               navigation={navigation}
               onChange={updateNavigation}
@@ -1160,9 +1166,11 @@ function CalendarWorkspace({
           currentUserId={user.userId}
           household={references.household}
           accounts={references.accounts}
+          groups={references.groups}
           categories={references.categories}
           selectedDate={entryMode.selectedDate}
           editing={entryMode.editing}
+          onCategoryCreated={acceptCreatedCategory}
           onRequestClose={requestCloseEntry}
           onSaved={() => setRevision((current) => current + 1)}
         />

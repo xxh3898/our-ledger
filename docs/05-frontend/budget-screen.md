@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.2
-last_updated: 2026-08-28
+version: 0.3
+last_updated: 2026-09-02
 related:
   - 02-domain/budget.md
 ---
@@ -14,9 +14,11 @@ related:
 
 ## 기본 카드
 
-- Household 전체
+- 가계 전체 한도 (`HOUSEHOLD`)
 - current Household의 각 실제 Member PERSONAL
 - 공동
+
+가계 전체 한도는 개인 Budget 합계가 아니라 개인·공동 지출 전체에 적용하는 독립 월 한도임을 화면과 입력 Sheet에서 설명한다. HOUSEHOLD와 PERSONAL/SHARED 카드는 같은 거래를 상위·세부 관점으로 보여 주며 카드 사용액을 서로 더하지 않는다.
 
 각 카드에는 예산, 순소비, 남은 금액, 사용률을 표시한다.
 
@@ -42,7 +44,7 @@ related:
 
 월은 `screen=budget&month=YYYY-MM` query에 저장해 새로고침과 browser back/forward를 보존한다. Router dependency는 추가하지 않는다.
 
-생성·수정 Sheet는 월, 우리 전체/실제 Member/공동, 전체 또는 EXPENSE Category, 0 이상 금액을 받는다. 저장 중 중복 submit을 막고 server 오류 시 Sheet와 입력을 유지한다. `BUDGET_DUPLICATE`, `BUDGET_VERSION_CONFLICT`는 사용자가 이해할 수 있는 문구로 표시한다.
+생성·수정 Sheet는 월, 가계 전체 한도/실제 Member/공동, 전체 또는 EXPENSE Category, 0 이상 금액을 받는다. 가계 전체 한도를 선택하면 개인 Budget 합계가 아닌 별도 한도라는 도움말을 표시한다. 저장 중 중복 submit을 막고 server 오류 시 Sheet와 입력을 유지한다. `BUDGET_DUPLICATE`, `BUDGET_VERSION_CONFLICT`는 사용자가 이해할 수 있는 문구로 표시한다.
 
 삭제는 exact 월·Scope·Category를 다시 보여 주는 2단계 확인을 거친다. Budget row만 삭제하고 Transaction과 사용액은 유지한다.
 

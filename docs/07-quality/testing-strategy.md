@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.9
-last_updated: 2026-09-01
+version: 2.5
+last_updated: 2026-09-10
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -188,7 +188,7 @@ Production Household Bootstrap One-shot Gate는 별도 actual PostgreSQL/contain
 - bootstrap success marker exact 1회, raw JSON/PII/credential/ID/JDBC URL 비노출, one-shot container residue 0
 - migrated normal API readiness 뒤 bootstrap/Flyway state 불변과 V1~V8 filename/byte SHA-256 고정
 
-`scripts/verify-production-bootstrap.sh`는 cleanup label을 가진 고유 Compose project, 합성 identity/credential과 disposable PostgreSQL volume만 사용한다. 실제 production input/DB, GHCR/Tailscale/SSH/HomeOps/Cloudflare/LaunchAgent에 접근하지 않으며 local `verify.sh`와 Hosted Full CI의 독립 `production-bootstrap` job에서 실행한다.
+`scripts/verify-production-bootstrap.sh`는 cleanup label을 가진 고유 Compose project, 합성 identity/credential과 disposable PostgreSQL volume만 사용한다. main DB의 unmigrated failure, 실제 V1→V8 migration, create/verified와 strict stdin 15개 actual JVM failure를 유지한다. 보조 partial/damaged fixture는 전용 pristine migrated DB, mismatch/extra는 pristine에서 복제해 실제 bootstrap을 한 번 수행한 seeded DB에서 순차 복제한다. template에는 정확한 V1~V8, failed Flyway row 0, empty domain 또는 exact 2/1/2 state, 기본 DB ACL/settings와 active session 0을 요구한다. 복제 직후 owner/encoding/locale/ACL/settings, 전체 schema·Flyway·row·sequence dump hash와 bootstrap fingerprint를 비교하고 fault 주입 뒤 main/template 불변을 재검증한다. prerequisite 또는 equality 실패는 retry/fallback 없이 종료한다. 실제 production input/DB, GHCR/Tailscale/SSH/HomeOps/Cloudflare/LaunchAgent에 접근하지 않으며 local `verify.sh`와 Hosted Full CI의 독립 `production-bootstrap` job에서 실행한다.
 
 Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 다음을 검증한다.
 
@@ -207,9 +207,10 @@ Backup/Restore Safety Gate는 추가로 실제 PostgreSQL 18.6 container에서 �
 - source와 별도 고유 project/network/volume의 empty PostgreSQL에 fail-fast single-transaction restore
 - Flyway V1→V8, core row, Transaction/Entry/Refund lineage, Account balance와 net worth source/target equality
 - Household composite FK/Entry·Goal Account unique enforcement, restored V8의 same-image migration rerun과 normal production API JPA/readiness startup 뒤 state 불변
-- missing restore DB failure와 성공·실패 trap 뒤 exact project container/network/volume/image tag residue 0
+- 정상 restore/equality/migration/API proof가 끝난 동일 target의 API만 중지한 뒤 healthy PostgreSQL ID와 missing DB 부재를 확인하고 actual restore nonzero/non-timeout 및 target fingerprint 불변 검증
+- 같은 target PostgreSQL의 exited ID/종료 시각을 확인한 뒤 stopped-service backup nonzero/non-timeout, source marker/bundle/archive와 empty failure directory 보존, 성공·실패 trap 뒤 exact project resource residue 0
 
-`scripts/verify-backup-docker-authority.sh`는 actual local/Hosted platform의 fixed CLI path, canonical path, Docker/Compose version과 synthetic hostile environment matrix를 검증하며 Docker container를 생성·변경하지 않는다. `scripts/verify-backup-restore.sh`는 source/target/failure PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. fixed authority fault injection은 production override 없이 invocation-owned copied core의 두 platform literal만 strict하게 test wrapper로 치환한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
+`scripts/verify-backup-docker-authority.sh`는 actual local/Hosted platform의 fixed CLI path, canonical path, Docker/Compose version과 synthetic hostile environment matrix를 검증하며 Docker container를 생성·변경하지 않는다. `scripts/verify-backup-restore.sh`는 source/target PostgreSQL에 host port를 publish하지 않고 합성 credential과 검증 중 생성한 exact-HEAD API image만 사용한다. failure 검증은 정상 proof가 끝난 target만 순차 재사용하며 source와 target의 project/network/volume authority는 계속 분리한다. fixed authority fault injection은 production override 없이 invocation-owned copied core의 두 platform literal만 strict하게 test wrapper로 치환한다. dump는 임시 owner-only directory에만 두고 log 또는 GitHub Actions artifact로 업로드하지 않는다. 실제 production backup/restore, schedule, retention, 외부복제는 테스트 대상이 아니다.
 
 Operational Status Harness는 추가로 다음을 검증한다.
 
@@ -387,16 +388,22 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - 403 내부 User 미등록 상태
 - 금액·날짜·필터 변환 단위 테스트
 - 빠른 입력 form 컴포넌트 테스트
+- 빠른 입력 중 Category 생성의 draft, validation error, reference 갱신, 자동 선택 테스트
 - 달력·예산·자산 상태 테스트
 - 인증되지 않은 상태와 Access 재인증 이동 처리
 - 핵심 사용자 흐름 E2E
 - 모바일 viewport 접근성
 
-`calendarState.test.ts`는 Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
+모바일 layout은 최소 `402x874`와 `393x852`에서 Calendar/Home, Quick Entry, Budget, Assets, Settings를 검증한다. Sheet의 open/closed, input focus, keyboard처럼 높이가 줄어든 상태, 긴 Member·Account·Category와 오류 text를 포함하고 각 상태에서 `document.documentElement.scrollWidth <= window.innerWidth`를 요구한다. viewport 밖 rectangle과 자체 `scrollWidth`가 큰 element를 함께 기록해 의도된 component 내부 scroller와 page-level culprit를 구분한다.
+
+`App.test.tsx`는 Assets의 단일 semantic table, column/row header, 12개 월과 mobile label-value 구조를 검증한다. jsdom 구조 검증은 실제 layout 측정을 대신하지 않는다. browser viewport simulation도 WebKit focus auto-zoom이나 Home Screen PWA를 실제 기기에서 검증한 것으로 간주하지 않는다. iPhone 16 Pro와 iPhone 15의 Safari/PWA smoke를 별도 기록하고, 수행하지 못했으면 `OWNER_DEVICE_SMOKE_PENDING`으로 남긴다.
+
+`dateTime.test.ts`와 `calendarState.test.ts`는 UTC 날짜 경계와 다른 Household timezone 자정, Household timezone 기본값, 잘못된 URL 정규화, 실제 Member ID, ALL/PERSONAL/SHARED API mapping, 월 이동 date clamp, Sunday-first grid를 검증한다.
 
 `App.test.tsx`는 identity loading/401/403을 보존하며 다음 Calendar/Quick Entry 계약을 mock HTTP 경계에서 검증한다.
 
-- Couple-first section 순서와 실제 Member 이름
+- Couple-first section 순서, 실제 Member 이름, header와 Calendar Scope의 self marker 부재
+- canonical root 새 앱 진입의 Household 오늘·Quick Entry 날짜와 명시적 과거 Calendar URL의 같은-URL remount 보존
 - ALL/각 Member/SHARED의 월 요약·선택일 동일 적용
 - transfer-only 무지출과 future Paw 제외
 - 날짜 선택 URL/API, listener 등록 뒤 popstate의 month/Member/date 복원과 추가 history entry 없음
@@ -404,9 +411,14 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 - numeric autofocus, ESC close, opener focus 복귀
 - 중복 submit 방지, 500ms 성공 feedback, 같은 context 갱신
 - 실패 시 Sheet·입력 보존
+- Category 추가 취소·server/duplicate/invalid 실패의 두 form 입력 보존과 재시도
+- Category 생성 성공 응답의 reference 반영·자동 선택 뒤 보존된 거래 저장
+- 중첩 Category Sheet의 browser back/ESC/backdrop/닫기와 Quick Entry history·opener focus 보존
 - 선택일 edit/delete 후 월·일 갱신
 - 설정 Sheet의 Account/Category 기능 보존
 - 활성 하단 destination과 `aria-current` 전환
+
+Frontend production build는 `manifest.webmanifest`의 exact `start_url=/`, `scope=/`, `display=standalone` 계약, source/build manifest byte correspondence, source/build HTML의 manifest link를 검증한다. 이 검증은 service worker, icon, install prompt를 PWA 완료 조건으로 확대하지 않는다.
 
 같은 test는 Refund Correctness Gate에서 다음 계약을 추가로 검증한다.
 
@@ -509,4 +521,71 @@ Basic Ledger는 `LedgerApiDocsTest`의 실제 current Household/CSRF request로 
 
 ## CI
 
-`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Pull Request required check에서 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. Hosted Full CI는 16개 job으로 분리되며 `main` release workflow도 같은 reusable Full CI를 validation authority로 호출한다.
+### Heavy verifier stage 계측과 fixture 재사용
+
+Issue #125의 `ci_timing.py`는 macOS/Linux의 process 공통 `CLOCK_MONOTONIC`을 읽는다. shell의 명령 실행을 감싸거나 `set -e`, `pipefail`, trap을 소유하지 않고 각 stage 시작값을 저장한 뒤 성공 경계에서만 `ci-timing stage=<고정 이름> elapsed_ms=<정수>`를 출력한다. 잘못된 stage/시작값은 입력을 재출력하지 않고 실패한다. command, environment, stdin, path, credential/PII는 timing에 포함하지 않는다. Python 3.9 macOS의 process별 `time.monotonic_ns()` 기준점도 사용하지 않는다.
+
+| 계측 stage | 보존하는 proof | 제거하는 반복 작업 |
+| --- | --- | --- |
+| `production-bootstrap-08`, `-10` | main 실제 migration/create/verified, strict stdin 15개와 모든 state/profile/schema/DB failure, template와 main 불변 | 보조 migration 4회를 dedicated migration 1회로, 보조 seed 2회를 dedicated seed 1회로 축소 |
+| `backup-restore-10` | source/target 격리, 정상 restore/equality/migration/API 완료, healthy missing DB와 exited-service 실패, artifact 불변 | 세 번째 failure PostgreSQL project의 startup/shutdown/cleanup 제거 |
+| `production-runtime-03` | non-root/content/no-Node, `nginx -t`, 모든 Nginx directive, image history | Web read-only probe container 3개를 `--rm --add-host api:127.0.0.1` 1개로 통합 |
+| `fresh-host-bootstrap-01`~`-04`, `observability-01`~`-08` | 기존 crash/recovery/poll/reset/failure/lifecycle 전체 | 계측만 추가, polling·timeout·sleep 변경 없음 |
+
+각 script의 숫자 stage는 기존 `[... n/total]` 출력에 대응한다. fresh-host는 pure contract, API/Web image, runtime artifact, 실제 crash/recovery lifecycle 순서다. production-runtime clean API/Web `--no-cache --pull`, 모든 Flyway/JPA failure와 API restart/graceful shutdown은 유지한다. DB clone은 healthcheck가 접속하는 main을 template로 삼지 않고 운영 DB에도 사용하지 않는다. PostgreSQL은 [template의 DB 설정·권한을 복사하지 않으므로](https://www.postgresql.org/docs/18/sql-createdatabase.html) 기본 ACL/settings prerequisite와 clone 후 equality를 별도로 검사한다.
+
+production-runtime과 observability는 실행 시 40자리 lowercase Git HEAD를 확인한 뒤 local build image 및 검증 container/network/volume에 여섯 cleanup ownership label을 기록한다. label은 dirty working tree의 exact source correspondence를 대신하지 않으며 PATH Docker wrapper로 fixed executable authority를 우회하지 않는다. runtime은 task-local labels-only Compose override와 직접 image/probe label을 사용한다. observability는 원본+labels override를 interpolation이 남은 단일 임시 `compose.prod.yaml`로 만들고 render 전체 equality를 확인한다. status entrypoint와 두 Python 의존 파일은 byte-identical 사본으로 실행하므로 canonical Compose 단일 경로 검증을 완화하지 않으며 recurring delay 재설정도 유지한다. shared mode의 #124 canonical image identity/label은 변경하지 않고 consumer resource만 label한다. 원본 production Compose/helper, workflow와 cleanup/residue 계약은 유지한다.
+
+최적화 전 Hosted baseline은 exact dev `870400490274016b3d47ab8c570ae97f5830791f`의 Full CI `34467461730`이다. workflow 405초, production-bootstrap 336초, production-runtime 242초, backup-restore 120초, fresh-host-bootstrap 94초, observability 122초다. 관련 7개 job(API/Web producer 포함)의 elapsed 합은 985초, 전체 job elapsed 합은 1,177초다. stage log 관측 병목은 strict stdin 143.109초, bootstrap state fixture 78.744초, runtime clean build 80.946초, migration failure matrix 53.819초이며 unique safety 비용은 유지한다. 이 값은 GitHub timestamp 기반 단일 run으로 billable runner-minute나 통제 benchmark가 아니다. 변경 후 exact-HEAD Hosted Full CI와 stage marker를 수집하기 전에는 개선률·target latency를 확정하지 않는다.
+
+2026-09-10 동일 Mac의 local 비교는 원본 `87040049...` verifier에 같은 timing marker만 삽입한 실행과 같은 base의 Issue #125 작업트리 변경본을 순차 실행했다. bootstrap 전체 12개 stage 합은 140.317초→133.195초(약 5.1% 감소), 추가 template 불변 검사를 포함한 stage 08~12 합은 58.066초→51.400초(약 11.5% 감소)였다. stage 08은 33.844초→27.868초, stage 10은 10.737초→7.705초다. 두 실행 모두 실제 failure matrix와 cleanup을 통과했다. 이 합은 stage 밖 setup/EXIT cleanup과 runner queue를 제외하므로 workflow wall-clock 개선률로 사용하지 않는다. Hosted after와 #121 target latency는 계속 별도 확인한다.
+
+같은 방식의 backup local 비교에서 stage 10은 6.368초→1.583초였다. 변경본은 정상 target proof 이후 actual missing-DB diagnostic, 동일 PostgreSQL의 healthy→exited 상태, source와 중지된 target API의 ID/start/finish 불변, source marker/bundle/archive와 빈 failure directory를 모두 확인하고 cleanup을 통과했다. runtime의 Web probe 통합은 static contract로 확인했으며 실제 Docker runtime/Hosted timing은 이 local 비교에 포함하지 않는다.
+
+`check-repo.sh`는 timing hostile input/공통 monotonic clock/Bash failure 전파, 모든 failure 호출 보존, template prerequisite/격리/즉시 equality, target 재사용 순서와 cleanup 계약, exact-HEAD cleanup label과 status fixture byte equality를 deterministic하게 검사한다. 이 static/unit PASS는 actual PostgreSQL clone·restore, Hosted CI 또는 production acceptance를 대신하지 않는다.
+
+`./scripts/verify.sh`가 19개 gate의 단일 local 진입점이다. Hosted Full CI의 기존 16개 검증 job은 backend, frontend, docs, repository hygiene와 fixed backup/offsite bootstrap, backup Docker executable authority, Runtime-config evolution bridge, Release/Deploy source, host-state/shared operation lock, restricted host deployment transaction, disposable production runtime, production Household bootstrap, fresh-host bootstrap transaction, backup/restore, encrypted offsite, observability, monitor-policy/HomeOps smoke를 검증한다. 직접 dev Full 경로에서는 current-run API/Web artifact를 병렬 생성하는 `test-images` matrix job이 추가되고 최종 `CI gate`가 이 job의 성공도 확인한다.
+
+dev 대상 PR은 repository의 deterministic 변경 분류에 따라 docs-only/frontend-only/backend-only의 필요한 job을 실행한다. ops/runtime, API/DB/security authority, mixed/unknown, empty diff와 분류 실패는 Full로 처리한다. dev push, main 대상 PR, dispatch와 `main` release의 reusable workflow 호출은 기존 16개 검증 job 전부를 유지하며 직접 dev Full만 test-images를 추가한다. 모든 경로에서 최종 `CI gate`가 선택 job 성공과 생략 job 상태를 확인하며 workflow 전체를 path filter로 생략하지 않는다. PR stale run만 자동 취소하고 production deployment serialization은 유지한다.
+
+`check-repo.sh`에 연결된 classifier/workflow/gate 회귀 테스트, 정확한 경로별 검증 의존성, baseline duration과 Hosted evidence 한계는 [CI 변경 영향 matrix](ci-change-matrix.md)를 따른다.
+
+### CI Docker layer cache
+
+Issue #123은 원래 Full 1회당 API 5개, Web 3개, runtime-config 3개인 총 11개 build 중 반복되는 API/Web 6개에 캐시를 적용했다. Issue #124 이후 direct dev Full에서는 이 여섯 호출을 API/Web producer 2개로 합치고 같은 cache scope를 producer가 사용한다. build 이후 image content, OCI revision/source/version, architecture, non-root, migration/JPA, backup/bootstrap/manifest 검증과 cleanup은 그대로 실행한다.
+
+| family | cache 적용 build | dev push writer | 계속 원래 build를 사용하는 호출 |
+| --- | --- | --- | --- |
+| API | direct dev Full의 test-images producer | test-images | production-runtime의 `--no-cache --pull`; local/main/release consumer verifier의 원래 build |
+| Web | direct dev Full의 test-images producer | test-images | production-runtime의 `--no-cache --pull`; local/main/release consumer verifier의 원래 build |
+| runtime-config | 적용하지 않음: `NOT_APPLIED_WITH_JUSTIFICATION` | 없음 | runtime-config-evolution, release-transport의 canonical build와 fresh-host 합성 build 모두 원래 direct build 유지 |
+
+runtime-config는 실제 이득이 확인된 경우에만 적용한다는 기준에 따라 제외한다. 수집된 canonical build는 0.40~1.94초이며 pinned setup-buildx 준비 step의 관측 시간은 약 4초다. 준비 비용만으로 원래 build 시간을 초과하므로 두 runtime job에 캐시를 추가하면 총 시간이 늘어날 수 있다. 따라서 새 runtime family/scope/writer와 Buildx 준비를 두 job에서 제거하고 원래 `--platform linux/arm64`, `--network none`, `REVISION` 및 전체 검증을 유지한다. 이는 runtime cache acceptance PASS가 아니라 `NOT_APPLIED_WITH_JUSTIFICATION` 결정이다.
+
+직접 `full-ci.yml`의 dev 대상 PR은 `gha-read`, dev push의 `test-images` producer만 `gha-write`다. main PR, release의 reusable 호출, dispatch, 알 수 없는 event/workflow/job과 local 기본값은 `disabled`다. workflow의 판정과 별도로 `scripts/ci_tools/docker_cache.py`가 실제 GitHub event/ref/workflow/repository/job를 다시 확인한다. `disabled`, `gha-read`, `gha-write` 외 mode는 build 전에 실패한다. Issue #124 이후 consumer verifier는 direct dev Full에서 layer cache를 직접 사용하지 않고 검증된 current-run image를 받으며, local/main/release에서는 기존 build 호출을 그대로 사용한다.
+
+scope는 `our-ledger-ci-v1-<api|web>-linux-<amd64|arm64>-dev-<generation>`이다. family와 실제 daemon/명시 platform을 구분하며 privileged publish의 `our-ledger-*-arm64` scope와 공유하지 않는다. generation은 Dockerfile과 실제 적용되는 Dockerfile-specific/root `.dockerignore`, API의 Gradle config/wrapper/`backend/gradle` 전체 파일, Web의 package/package-lock bytes를 hash한다. pinned base image 변경은 Dockerfile hash를 바꾼다. commit SHA와 일반 application source는 scope key에 넣지 않으며 BuildKit COPY checksum으로 현재 source를 다시 검증한다. runtime-config는 새 CI cache helper에서 지원하지 않는다.
+
+캐시 경로는 Buildx `--load`, `type=gha,version=2` import와 writer-only `mode=max,ignore-error=true` export를 사용한다. import/export timeout은 각각 60초다. dev cache 경로에서만 기존 `--no-cache`를 제외하며 `--pull`, tag, file/context, platform, network와 label은 보존한다. build arg는 현재 API/Web producer 계약에 맞춰 모두 금지하고 Docker 실행 전에 거부해 secret을 일반 build arg로 전달할 수 없다. disabled 경로는 기존 `docker build` 인자를 그대로 실행한다. auth/setup/generation/cache/buildx가 불가하거나 cache build가 실패하면 원래 인자에 `--no-cache`를 보장해 다시 build하고 그 실패를 그대로 전달한다. cache miss는 BuildKit의 정상 source build이며 검증 생략 조건이 아니다.
+
+local Node action은 `ACTIONS_RUNTIME_TOKEN`과 `ACTIONS_RESULTS_URL`만 runner 환경 파일에 비출력 전달한다. 이 값은 command argument, build arg, Docker context, cache scope나 artifact에 넣지 않는다. GHA backend가 요구하는 별도 Buildx driver와 runtime 변수 경계는 [Docker GHA cache 문서](https://docs.docker.com/build/cache/backends/gha/)를 따른다. Buildx action은 binary cache를 쓰지 않으며 job 종료 시 전용 builder를 정리한다. token/registry login, publish/deploy workflow와 production 권한을 추가하지 않는다.
+
+`check-repo.sh`의 pure/mock 테스트는 event/mode/family/platform, dependency generation, 원래 인자 보존, missing runtime/setup 및 cache/buildx failure fallback, writer 연결, clean/synthetic/publish 제외와 #122 classifier/gate/concurrency를 검증한다. Node가 있으면 action의 값 allowlist·로그 비노출·newline 거부도 실행하고, 없으면 해당 1개 fixture의 SKIP을 명시한다.
+
+실제 cold/warm layer 검증은 fast check에 넣지 않는다. 수동 전용 `python3 -B scripts/ci_tools/verify_cache_fixture.py --cold-builder dev-our-ledger-issue-123-cache-fixture-cold --warm-builder dev-our-ledger-issue-123-cache-fixture-warm`는 사전에 승인·준비·소유권 등록한 running `docker-container` builder 두 개만 받는다. cleanup receipt의 `dev-<project>-<task>` 계약에 맞춰 project는 `our-ledger`, task는 각각 `issue-123-cache-fixture-cold`와 `issue-123-cache-fixture-warm`으로 등록하며 위 exact 이름만 허용한다. builder 생성·pull·receipt 등록·제거 권한은 별도이며 이 verifier가 수행하지 않는다. caller는 resource/cleanup 계획을 먼저 확인하고 해당 builder가 공유/운영 resource가 아님을 확인한다.
+
+fixture는 `FROM scratch`, 작은 합성 payload, `--network none`, linux/arm64와 개발 cleanup label로 cold export → 다른 빈 builder의 warm import → source 변경을 순차 실행한다. 각 build는 60초 상한이며 output bytes와 cold/warm hash equality, warm `CACHED` log, 변경 source hash 차이를 검증한다. image tag/container/registry를 만들지 않고 임시 context/cache/output은 제거한다. 두 builder 내부 cache는 caller의 별도 승인된 정리 대상이다. 이 로컬 fixture PASS가 Hosted GHA backend나 실제 application image의 cold/warm PASS를 뜻하지 않는다.
+
+Hosted acceptance는 exact head/run, event/category, 각 scope와 mode, import hit/miss, build step 시간, workflow/critical-path/job-minutes, 후속 image gate 결과를 함께 기록한다. 최초 read-only PR은 dev cache를 만들지 못하므로 `COLD_CACHE_HOSTED_NOT_PROVEN` 또는 `PENDING_SECOND_REPRESENTATIVE_RUN`을 그대로 남기며 before/after 속도 개선으로 단정하지 않는다. 첫 trusted dev writer 이후 자연스럽게 발생하는 대표 run에서 warm evidence를 확보한다. #125 verifier 내부 최적화는 별도 범위다.
+
+### Current-run exact-source test image
+
+Issue #124는 직접 실행된 dev 대상 Full PR/push에서만 `test-images` matrix가 API와 Web을 한 번씩 병렬 build한다. PR은 #123 GHA cache read-only, direct dev push는 같은 cache scope의 trusted writer다. API artifact는 production-bootstrap, fresh-host-bootstrap, backup-restore, observability가 사용하고 Web artifact는 fresh-host-bootstrap과 observability가 사용한다. production-runtime의 strongest-clean API/Web 2개와 runtime-config canonical/synthetic 3개는 공유하지 않으므로 direct dev Full build 수는 11개에서 7개로 줄어든다. runtime-config는 기존 build가 약 0.40~1.94초로 짧고 canonical/synthetic context·platform·task label도 달라 `NOT_SHARED_WITH_JUSTIFICATION`이다.
+
+전송은 외부 registry나 credential 없이 current workflow run의 GitHub Actions artifact를 사용한다. producer는 `docker save | gzip -1 -n` archive와 strict JSON manifest를 만들고 1일만 보존한다. upload/download action은 exact commit으로 pin하고 artifact 이름을 `github.run_attempt`로 격리하며 consumer download에는 `github-token`, `repository`, `run-id`, pattern을 전달하지 않는다. artifact 이름이나 Docker tag만으로 신뢰하지 않는다.
+
+manifest는 실제 `git rev-parse HEAD`와 `HEAD^{tree}`, GitHub run ID/attempt/event/workflow/repository, PR head/base audit SHA, family/platform, Dockerfile과 실제 적용 `.dockerignore` SHA-256, archive byte size/SHA-256, image ID와 config digest, OCI source/revision/version, cache mode를 고정한다. PR의 synthetic merge checkout은 실제 build authority이고 PR head SHA는 별도 audit 값이다. consumer는 자기 checkout SHA/tree와 모든 metadata·archive bytes를 load 전에 검증하고, docker-save 내부 config digest와 OCI image index/image ID를 연결한 뒤 load된 image ID/platform 및 canonical cleanup·OCI/family/tree label을 다시 검증하고 job-local tag로만 retag한다.
+
+`CI_TEST_IMAGE_MODE=required`에서는 producer 실패, artifact 누락, extra/symlink file, duplicate/extra/malformed JSON, foreign run, stale source/tree, family/platform, Dockerfile/dockerignore, archive hash, image ID 또는 OCI label 불일치를 rebuild로 숨기지 않고 실패한다. 이는 cache 장애 시 no-cache rebuild를 허용하는 #123 fallback과 다르다. mode가 unset/`disabled`인 local/main/release verifier는 artifact 없이 기존 build를 수행하고, 알 수 없는 mode는 실패한다. main/release reusable Full과 production-runtime, runtime-config, deploy/publish source는 shared artifact를 사용하지 않는다.
+
+canonical producer image는 여섯 cleanup label과 exact checkout SHA, OCI source/revision/version, family/tree label을 가진다. consumer container/network/volume에는 기존 job-specific cleanup label을 유지한다. image label을 직접 확인하는 backup-restore는 local build에서는 기존 issue-41 task label, shared mode에서는 canonical issue-124 task label을 요구하며 어느 경로도 검사를 생략하지 않는다. `check-repo.sh`의 hostile tests는 source/tree/family/platform/Dockerfile/dockerignore/archive/image/OCI/run mismatch와 malformed/duplicate manifest, unsafe archive, missing artifact, shared-mode fail-closed, local build 독립성, #122 gate/Fast skip, #123 writer 이전을 고정한다.

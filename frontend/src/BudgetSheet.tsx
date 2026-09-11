@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import {
   type BudgetCategory,
   type BudgetInput,
@@ -45,7 +46,7 @@ function errorMessage(error: unknown) {
 
 function targetCopy(target: BudgetEditTarget) {
   const scope = target.scope === 'HOUSEHOLD'
-    ? '우리 전체'
+    ? '가계 전체 한도'
     : target.scope === 'SHARED'
       ? '공동'
       : target.owner?.displayName ?? '개인'
@@ -179,9 +180,13 @@ export function BudgetSheet({
             범위
             <select
               value={selectedScope}
+              aria-label="범위"
+              aria-describedby={selectedScope === 'HOUSEHOLD'
+                ? 'household-budget-scope-hint'
+                : undefined}
               onChange={(event) => setSelectedScope(event.target.value)}
             >
-              <option value="HOUSEHOLD">우리 전체</option>
+              <option value="HOUSEHOLD">가계 전체 한도</option>
               {household.members.map((member) => (
                 <option key={member.memberId} value={`PERSONAL:${member.memberId}`}>
                   {member.displayName}
@@ -189,6 +194,11 @@ export function BudgetSheet({
               ))}
               <option value="SHARED">공동</option>
             </select>
+            {selectedScope === 'HOUSEHOLD' && (
+              <span id="household-budget-scope-hint" className="field-hint">
+                개인 예산 합계가 아니라, 개인·공동 지출 전체에 적용할 별도 월 한도예요.
+              </span>
+            )}
           </label>
           <label>
             Category
@@ -217,15 +227,13 @@ export function BudgetSheet({
           <label className="amount-field">
             예산 금액
             <span>
-              <input
+              <AmountInput
                 required
                 autoFocus
                 aria-label="예산 금액"
                 min="0"
-                inputMode="numeric"
-                type="number"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
               /> 원
             </span>
           </label>

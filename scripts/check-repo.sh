@@ -16,6 +16,8 @@ required_paths=(
   "backend/src/main/resources/db/migration/V1__foundation.sql"
   "frontend/package.json"
   "frontend/package-lock.json"
+  "frontend/public/manifest.webmanifest"
+  "frontend/scripts/verify-app-start-build.mjs"
   "infra/docker/api.Dockerfile"
   "infra/docker/HttpHealthCheck.java"
   "infra/docker/HttpFetch.java"
@@ -36,6 +38,15 @@ required_paths=(
   "scripts/verify-release-transport.sh"
   "scripts/verify-fixed-bootstrap.sh"
   "scripts/verify.sh"
+  "scripts/ci_tools/change_classifier.py"
+  "scripts/ci_tools/test_change_classifier.py"
+  "scripts/ci_tools/docker_cache.py"
+  "scripts/ci_tools/test_docker_cache.py"
+  "scripts/ci_tools/test_image_artifact.py"
+  "scripts/ci_tools/test_test_image_artifact.py"
+  "scripts/ci_tools/ci_timing.py"
+  "scripts/ci_tools/test_ci_timing.py"
+  "scripts/ci_tools/test_heavy_verification_contract.py"
   "scripts/backup-our-ledger-bootstrap.sh"
   "scripts/backup-production.sh"
   "scripts/bootstrap-production.sh"
@@ -102,7 +113,14 @@ issue_form_paths=(
   ".github/ISSUE_TEMPLATE/decision.yml"
 )
 
-for path in "${issue_form_paths[@]}"; do
+issue_form_expected_labels=(
+  "bug"
+  "enhancement"
+  ""
+)
+
+for index in "${!issue_form_paths[@]}"; do
+  path="${issue_form_paths[$index]}"
   description_count="$(
     awk '/^description:[[:space:]]*[^[:space:]]/ { count++ } END { print count + 0 }' \
       "$ROOT_DIR/$path"
@@ -112,6 +130,32 @@ for path in "${issue_form_paths[@]}"; do
   )"
   if [[ "$description_count" -ne 1 || "$about_count" -ne 0 ]]; then
     echo "GitHub Issue Form 최상위 schema가 잘못됐습니다: $path" >&2
+    exit 1
+  fi
+
+  labels_key_count="$(
+    awk '/^labels:[[:space:]]*$/ { count++ } END { print count + 0 }' "$ROOT_DIR/$path"
+  )"
+  actual_labels="$(
+    awk '
+      /^labels:[[:space:]]*$/ { in_labels = 1; next }
+      in_labels && /^[^[:space:]]/ { exit }
+      in_labels && /^[[:space:]]*-[[:space:]]*/ {
+        sub(/^[[:space:]]*-[[:space:]]*/, "")
+        sub(/[[:space:]]+$/, "")
+        print
+      }
+    ' "$ROOT_DIR/$path"
+  )"
+  expected_label="${issue_form_expected_labels[$index]}"
+
+  if [[ -n "$expected_label" ]]; then
+    if [[ "$labels_key_count" -ne 1 || "$actual_labels" != "$expected_label" ]]; then
+      echo "GitHub Issue Form canonical label이 잘못됐습니다: $path (expected: $expected_label)" >&2
+      exit 1
+    fi
+  elif [[ "$labels_key_count" -ne 0 || -n "$actual_labels" ]]; then
+    echo "GitHub Issue Form에 canonical 대응이 없는 label이 지정됐습니다: $path" >&2
     exit 1
   fi
 done
@@ -140,5 +184,15 @@ fi
 if command -v git >/dev/null 2>&1 && git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" diff --check
 fi
+
+(
+  cd "$ROOT_DIR"
+  PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest \
+    scripts.ci_tools.test_change_classifier \
+    scripts.ci_tools.test_docker_cache \
+    scripts.ci_tools.test_test_image_artifact \
+    scripts.ci_tools.test_ci_timing \
+    scripts.ci_tools.test_heavy_verification_contract
+)
 
 echo "저장소 구조 검사를 통과했습니다."

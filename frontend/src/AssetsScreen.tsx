@@ -1,5 +1,6 @@
 import type { AssetsData, AssetsSummary } from './ledgerApi.ts'
 import type { AssetsNavigationState } from './assetsState.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 export type AssetsViewState =
   | { status: 'loading' }
@@ -57,9 +58,18 @@ function TrendChart({ trend }: { trend: AssetsData['monthlyTrend'] }) {
                   {monthLabel(point.month, point.complete)}
                   {!point.complete && <small>진행 중</small>}
                 </th>
-                <td>{formatWon(point.assets)}</td>
-                <td>{formatWon(point.liabilities)}</td>
-                <td>{formatWon(point.netWorth)}</td>
+                <td data-label="자산">
+                  <span className="assets-mobile-label" aria-hidden="true">자산</span>
+                  <span>{formatWon(point.assets)}</span>
+                </td>
+                <td data-label="부채">
+                  <span className="assets-mobile-label" aria-hidden="true">부채</span>
+                  <span>{formatWon(point.liabilities)}</span>
+                </td>
+                <td data-label="순자산">
+                  <span className="assets-mobile-label" aria-hidden="true">순자산</span>
+                  <span>{formatWon(point.netWorth)}</span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -225,7 +235,10 @@ export function AssetsScreen({
 
       <section className="assets-current-summary" aria-labelledby="assets-current-title">
         <div className="section-heading">
-          <div><p className="section-kicker">Current ownership</p><h2 id="assets-current-title">{label} 현재</h2></div>
+          <div>
+            <p className="section-kicker">{UI_VOCABULARY.accountOwnership}</p>
+            <h2 id="assets-current-title">{label} 현재</h2>
+          </div>
         </div>
         <dl>
           <div><dt>자산</dt><dd>{formatWon(summary.totalAssets)}</dd></div>

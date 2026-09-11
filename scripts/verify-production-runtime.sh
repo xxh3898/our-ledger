@@ -2,22 +2,43 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TIMING_HELPER="$ROOT_DIR/scripts/ci_tools/ci_timing.py"
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yaml"
 FIXTURE_SQL="$ROOT_DIR/scripts/backup_tools/fixture.sql"
 STATE_SQL="$ROOT_DIR/scripts/backup_tools/state-fingerprint.sql"
 
 if ! command -v docker >/dev/null 2>&1 \
   || ! docker compose version >/dev/null 2>&1 \
-  || ! command -v python3 >/dev/null 2>&1; then
-  echo "Docker Compose와 Python 3을 사용할 수 없습니다." >&2
+  || ! command -v python3 >/dev/null 2>&1 \
+  || ! command -v git >/dev/null 2>&1; then
+  echo "Docker Compose, Python 3, Git을 사용할 수 없습니다." >&2
   exit 1
 fi
+
+git_head="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+if [[ ! "$git_head" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "runtime 검증 Git HEAD가 exact lowercase SHA가 아닙니다." >&2
+  exit 1
+fi
+cleanup_labels=(
+  io.homeserver.cleanup.environment=development
+  io.homeserver.cleanup.project=our-ledger
+  io.homeserver.cleanup.task=issue-125-heavy-verification-bottlenecks
+  io.homeserver.cleanup.lifecycle=task
+  io.homeserver.cleanup.retain=false
+  "io.homeserver.cleanup.git-head=$git_head"
+)
+docker_labels=()
+for cleanup_label in "${cleanup_labels[@]}"; do
+  docker_labels+=(--label "$cleanup_label")
+done
 
 project_name="our-ledger-runtime-$(date +%s)-$$"
 api_image="our-ledger-api:$project_name"
 web_image="our-ledger-web:$project_name"
 runtime_temp_root="${TMPDIR:-/tmp}"
 runtime_temp_dir="$(mktemp -d "$runtime_temp_root/our-ledger-runtime.XXXXXX")"
+override_file="$runtime_temp_dir/compose.labels.json"
 runtime_password="runtime-only-$project_name"
 api_image_probe="$project_name-api-image-probe"
 
@@ -29,7 +50,9 @@ case "$runtime_temp_dir" in
     ;;
 esac
 
-compose=(docker compose --project-name "$project_name" --env-file /dev/null -f "$COMPOSE_FILE")
+chmod 700 "$runtime_temp_dir"
+compose=(docker compose --project-name "$project_name" --env-file /dev/null
+  -f "$COMPOSE_FILE" -f "$override_file")
 
 cleanup() {
   local original_status=$?
@@ -69,6 +92,25 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+
+python3 -B - "$override_file" "${cleanup_labels[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+labels = dict(value.split("=", 1) for value in sys.argv[2:])
+config = {
+    group: {name: {"labels": labels} for name in names}
+    for group, names in (
+        ("services", ("web", "api", "api-migration", "api-bootstrap", "postgres")),
+        ("networks", ("application", "database")),
+        ("volumes", ("postgres-data",)),
+    )
+}
+target = Path(sys.argv[1])
+target.write_text(json.dumps(config), encoding="utf-8")
+target.chmod(0o600)
+PY
 
 run_bounded() {
   local log_path="$1"
@@ -189,6 +231,7 @@ for variable_name in "${required_environment[@]}"; do
 done
 
 printf '\n[production 1/13] required environment fail-closed\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 if "${without_required_environment[@]}" \
   docker compose --project-name "$project_name" --env-file /dev/null -f "$COMPOSE_FILE" \
   config --quiet >/dev/null 2>&1; then
@@ -229,13 +272,31 @@ export OUR_LEDGER_EXPECTED_COMPOSE_PROJECT="$project_name"
 
 "${compose[@]}" --profile migration --profile bootstrap config --format json \
   | python3 "$ROOT_DIR/scripts/check-production-compose.py"
+"${compose[@]}" --profile migration --profile bootstrap config --format json \
+  | python3 -B -c '
+import json
+import sys
+
+expected = dict(value.split("=", 1) for value in sys.argv[1:])
+config = json.load(sys.stdin)
+for group in ("services", "networks", "volumes"):
+    for resource in config[group].values():
+        if resource.get("labels") != expected:
+            raise SystemExit("runtime synthetic cleanup labels differ")
+' "${cleanup_labels[@]}"
+
+python3 -B "$TIMING_HELPER" end production-runtime-01 "$stage_started"
 
 printf '\n[production 2/13] clean immutable image build\n'
-docker build --progress plain --no-cache --pull --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
-docker build --progress plain --no-cache --pull --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+docker build --progress plain --no-cache --pull "${docker_labels[@]}" --tag "$api_image" --file "$ROOT_DIR/infra/docker/api.Dockerfile" "$ROOT_DIR"
+docker build --progress plain --no-cache --pull "${docker_labels[@]}" --tag "$web_image" --file "$ROOT_DIR/infra/docker/web.Dockerfile" "$ROOT_DIR"
+
+python3 -B "$TIMING_HELPER" end production-runtime-02 "$stage_started"
 
 printf '\n[production 3/13] runtime image contents and Nginx config\n'
-docker create --name "$api_image_probe" "$api_image" >/dev/null
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+docker create "${docker_labels[@]}" --name "$api_image_probe" "$api_image" >/dev/null
 docker export "$api_image_probe" | tar -tf - > "$runtime_temp_dir/api-image-contents.txt"
 docker rm "$api_image_probe" >/dev/null
 
@@ -283,8 +344,8 @@ if ! awk '
   exit 1
 fi
 
-docker run --rm --entrypoint java "$api_image" -version
-docker run --rm --entrypoint /bin/sh "$web_image" -c '
+docker run --rm "${docker_labels[@]}" --entrypoint java "$api_image" -version
+nginx_config="$(docker run --rm "${docker_labels[@]}" --add-host api:127.0.0.1 --entrypoint /bin/sh "$web_image" -c '
   set -eu
   test "$(id -u)" != "0"
   test -f /usr/share/nginx/html/index.html
@@ -294,10 +355,9 @@ docker run --rm --entrypoint /bin/sh "$web_image" -c '
   ! test -e /workspace
   ! test -e /usr/share/nginx/html/50x.html
   ! find /usr/share/nginx/html -type f \( -name "*.ts" -o -name "*.tsx" \) -print -quit | read -r _
-'
-docker run --rm --add-host api:127.0.0.1 --entrypoint nginx "$web_image" -t
-
-nginx_config="$(docker run --rm --entrypoint /bin/sh "$web_image" -c 'cat /etc/nginx/nginx.conf')"
+  nginx -t
+  cat /etc/nginx/nginx.conf
+')"
 for required_directive in \
   'proxy_set_header Cf-Access-Jwt-Assertion' \
   'proxy_set_header Host' \
@@ -322,7 +382,10 @@ if [[ "$api_history" == *"$runtime_password"* || "$web_history" == *"$runtime_pa
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-03 "$stage_started"
+
 printf '\n[production 4/13] normal production startup cannot mutate a clean schema\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" up --detach --wait --wait-timeout 120 postgres
 
 expect_bounded_failure \
@@ -343,7 +406,10 @@ if [[ "$clean_public_table_count" != "0" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-04 "$stage_started"
+
 printf '\n[production 5/13] one-shot candidate migration and JPA validation\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 run_candidate_migration "$runtime_temp_dir/migration-clean.log"
 
 flyway_versions="$(postgres_query "$POSTGRES_DB" \
@@ -365,7 +431,10 @@ if [[ -n "$(docker ps --all --quiet \
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-05 "$stage_started"
+
 printf '\n[production 6/13] migration failure matrix\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 corrupt_database=our_ledger_runtime_corrupt
 damaged_database=our_ledger_runtime_damaged
 create_database "$corrupt_database"
@@ -440,7 +509,10 @@ if [[ "$schema_authority_after" != "$schema_authority_before" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-06 "$stage_started"
+
 printf '\n[production 7/13] idempotent rerun without bootstrap or scheduling\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" exec -T postgres sh -ceu '
   exec psql -X \
     --username "$POSTGRES_USER" \
@@ -466,7 +538,10 @@ postgres_query "$POSTGRES_DB" \
           next_recurrence_date = NULL
     WHERE id = 7001" >/dev/null
 
+python3 -B "$TIMING_HELPER" end production-runtime-07 "$stage_started"
+
 printf '\n[production 8/13] normal production stack startup after migration\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 normal_schema_before="$(postgres_query "$POSTGRES_DB" \
   "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
 "${compose[@]}" up --detach --wait --wait-timeout 240
@@ -530,7 +605,10 @@ assert_header_contains() {
   fi
 }
 
+python3 -B "$TIMING_HELPER" end production-runtime-08 "$stage_started"
+
 printf '\n[production 9/13] static, SPA and cache policy\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 request_path root /
 assert_status 200 "root"
 if [[ "$(<"$runtime_temp_dir/root.body")" != *'<div id="root"></div>'* ]]; then
@@ -557,7 +635,10 @@ if [[ "$(<"$runtime_temp_dir/spa.body")" != *'<div id="root"></div>'* ]]; then
 fi
 assert_header_contains spa Cache-Control no-store
 
+python3 -B "$TIMING_HELPER" end production-runtime-09 "$stage_started"
+
 printf '\n[production 10/13] same-origin API and authentication boundary\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 request_path api_exact /api
 assert_status 401 "exact /api"
 assert_header_contains api_exact Content-Type application/json
@@ -584,7 +665,10 @@ if [[ "$(<"$runtime_temp_dir/forged_identity.body")" != *'AUTHENTICATION_REQUIRE
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-10 "$stage_started"
+
 printf '\n[production 11/13] public and internal health boundary\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 request_path actuator /actuator/health
 assert_status 404 "public actuator"
 if [[ "$(<"$runtime_temp_dir/actuator.body")" == *'"status"'* ]]; then
@@ -630,7 +714,10 @@ assert "recurringScheduler" in payload["components"]
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-11 "$stage_started"
+
 printf '\n[production 12/13] normal startup and restart schema immutability\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 normal_schema_after_start="$(postgres_query "$POSTGRES_DB" \
   "SELECT string_agg(version || ':' || checksum, ',' ORDER BY installed_rank) FROM flyway_schema_history")"
 if [[ "$normal_schema_after_start" != "$normal_schema_before" ]]; then
@@ -658,7 +745,10 @@ if [[ "$normal_schema_after_restart" != "$normal_schema_before" ]]; then
   exit 1
 fi
 
+python3 -B "$TIMING_HELPER" end production-runtime-12 "$stage_started"
+
 printf '\n[production 13/13] graceful stop\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${compose[@]}" stop --timeout 45 api
 api_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$api_id")"
 if [[ "$api_exit_code" != "0" && "$api_exit_code" != "143" ]]; then
@@ -671,5 +761,7 @@ if [[ "$api_logs" != *"Commencing graceful shutdown"* \
   echo "Spring graceful shutdown 완료 log를 확인하지 못했습니다." >&2
   exit 1
 fi
+
+python3 -B "$TIMING_HELPER" end production-runtime-13 "$stage_started"
 
 echo "Production runtime 검증을 통과했습니다."

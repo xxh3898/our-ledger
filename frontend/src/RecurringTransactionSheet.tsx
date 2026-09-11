@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import { todayInTimeZone } from './dateTime.ts'
 import {
   type Account,
@@ -12,6 +13,7 @@ import {
   updateRecurringTransaction,
 } from './ledgerApi.ts'
 import { isPrimaryAccountForType } from './transactionUtils.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 type FormState = {
   name: string
@@ -191,7 +193,7 @@ export function RecurringTransactionSheet({
     } else if (!form.categoryId || !form.accountId) {
       throw new Error('Category와 Account를 확인해 주세요.')
     } else if (form.scope === 'PERSONAL' && !form.ownerMemberId) {
-      throw new Error('개인 거래의 Owner를 확인해 주세요.')
+      throw new Error(`개인 거래의 ${UI_VOCABULARY.transactionOwner}를 확인해 주세요.`)
     }
     return {
       name: form.name.trim(),
@@ -266,25 +268,35 @@ export function RecurringTransactionSheet({
               </button>
             ))}
           </div>
-          <label>금액<input required min="1" type="number" inputMode="numeric"
-            value={form.amount} onChange={(event) => change('amount', event.target.value)} /></label>
+          <label>금액<AmountInput required min="1"
+            value={form.amount} onValueChange={(value) => change('amount', value)} /></label>
           {form.type !== 'TRANSFER' && (
             <>
               <label>범위<select value={form.scope}
                 onChange={(event) => change('scope', event.target.value as FormState['scope'])}>
                 <option value="PERSONAL">개인</option><option value="SHARED">공동</option>
               </select></label>
-              {form.scope === 'PERSONAL' && <label>Owner<select required value={form.ownerMemberId}
-                onChange={(event) => change('ownerMemberId', event.target.value)}>
-                {household.members.map((member) => <option key={member.memberId}
-                  value={member.memberId}>{member.displayName}</option>)}
-              </select></label>}
-              {form.type === 'EXPENSE' && <label>Payer (선택)<select value={form.payerMemberId}
-                onChange={(event) => change('payerMemberId', event.target.value)}>
-                <option value="">지정 안 함</option>
-                {household.members.map((member) => <option key={member.memberId}
-                  value={member.memberId}>{member.displayName}</option>)}
-              </select></label>}
+              {form.scope === 'PERSONAL' && (
+                <label>
+                  {UI_VOCABULARY.transactionOwner}
+                  <select required value={form.ownerMemberId}
+                    onChange={(event) => change('ownerMemberId', event.target.value)}>
+                    {household.members.map((member) => <option key={member.memberId}
+                      value={member.memberId}>{member.displayName}</option>)}
+                  </select>
+                </label>
+              )}
+              {form.type === 'EXPENSE' && (
+                <label>
+                  {UI_VOCABULARY.payer} (선택)
+                  <select value={form.payerMemberId}
+                    onChange={(event) => change('payerMemberId', event.target.value)}>
+                    <option value="">지정 안 함</option>
+                    {household.members.map((member) => <option key={member.memberId}
+                      value={member.memberId}>{member.displayName}</option>)}
+                  </select>
+                </label>
+              )}
               <label>Category<select required value={form.categoryId}
                 onChange={(event) => change('categoryId', event.target.value)}>
                 <option value="">선택</option>

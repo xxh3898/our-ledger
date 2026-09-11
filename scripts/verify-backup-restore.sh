@@ -4,6 +4,7 @@ set -euo pipefail
 umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+TIMING_HELPER="$ROOT_DIR/scripts/ci_tools/ci_timing.py"
 cd "$ROOT_DIR"
 ARTIFACT_HELPER="$ROOT_DIR/scripts/backup_tools/backup_artifact.py"
 FIXTURE_SQL="$ROOT_DIR/scripts/backup_tools/fixture.sql"
@@ -47,7 +48,6 @@ esac
 run_token="$(date +%s)-$$"
 source_project="our-ledger-backup-source-$run_token"
 target_project="our-ledger-backup-target-$run_token"
-failure_project="our-ledger-backup-failure-$run_token"
 api_image="our-ledger-api:backup-$run_token"
 unused_web_image="our-ledger-web:unused-$run_token"
 runtime_password="synthetic-backup-$run_token"
@@ -183,12 +183,6 @@ target_compose=(
   --env-file "$env_file"
   --file "$COMPOSE_FILE"
 )
-failure_compose=(
-  docker compose
-  --project-name "$failure_project"
-  --env-file "$env_file"
-  --file "$COMPOSE_FILE"
-)
 
 "${source_compose[@]}" config --format json \
   | python3 -B -c '
@@ -259,13 +253,10 @@ cleanup_resources() {
     || cleanup_status=1
   "${target_compose[@]}" down --volumes --remove-orphans --timeout 45 >/dev/null 2>&1 \
     || cleanup_status=1
-  "${failure_compose[@]}" down --volumes --remove-orphans --timeout 45 >/dev/null 2>&1 \
-    || cleanup_status=1
   docker image rm "$api_image" >/dev/null 2>&1 || true
 
   resource_residue "$source_project" || cleanup_status=1
   resource_residue "$target_project" || cleanup_status=1
-  resource_residue "$failure_project" || cleanup_status=1
   if docker image inspect "$api_image" >/dev/null 2>&1; then
     cleanup_status=1
   fi
@@ -327,6 +318,65 @@ assert_failed_backup_preserved_state() {
   fi
 }
 
+assert_failure_artifacts_unchanged() {
+  assert_failed_backup_preserved_state
+  [[ "$(file_sha256 "$dump_path")" == "$dump_sha_before" ]] \
+    || fail "failure proof가 verified source archive를 변경했습니다."
+  python3 "$ARTIFACT_HELPER" verify --bundle-dir "$bundle_path" >/dev/null
+  [[ -z "$(find "$failure_backup_dir" -mindepth 1 -print -quit)" ]] \
+    || fail "failure backup directory에 artifact 또는 partial residue가 남았습니다."
+  [[ "$(failure_observer_state)" == "$failure_observer_before" ]] \
+    || fail "failure proof가 source 또는 중지된 target API를 restart/recreate했습니다."
+}
+
+failure_observer_state() {
+  # Observe only the already stopped source services and target API. The target
+  # PostgreSQL has its own healthy -> exited identity assertions below.
+  docker inspect --format '{{.Id}}:{{.State.Status}}:{{.State.StartedAt}}:{{.State.FinishedAt}}' \
+    "$source_postgres_id" "$source_api_id" "$target_api_id"
+}
+
+assert_target_postgres_state() {
+  local expected_state="$1"
+  local actual_id
+  actual_id="$("${target_compose[@]}" ps --all --quiet postgres)"
+  [[ "$actual_id" == "$target_postgres_id" ]] \
+    || fail "failure proof가 target PostgreSQL container identity를 변경했습니다."
+  if [[ "$expected_state" == healthy ]]; then
+    [[ "$(docker inspect --format '{{.State.Status}}:{{.State.Health.Status}}' "$actual_id")" == running:healthy ]] \
+      || fail "missing database proof의 target PostgreSQL가 healthy하지 않습니다."
+  else
+    [[ "$(docker inspect --format '{{.State.Status}}' "$actual_id")" == exited ]] \
+      || fail "stopped-service proof가 target PostgreSQL를 재시작했습니다."
+  fi
+}
+
+expect_bounded_input_failure() {
+  local input_path="$1"
+  local failure_status
+  shift
+  if python3 -B - "$input_path" "$runtime_temp_dir/bounded-failure.log" "$@" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+try:
+    with Path(sys.argv[1]).open("rb") as source, Path(sys.argv[2]).open("wb") as output:
+        result = subprocess.run(sys.argv[3:], stdin=source, stdout=output,
+                                stderr=subprocess.STDOUT, timeout=240, check=False)
+except subprocess.TimeoutExpired:
+    raise SystemExit(124)
+raise SystemExit(result.returncode)
+PY
+  then
+    fail "target failure path가 성공으로 처리됐습니다."
+  else
+    failure_status=$?
+  fi
+  [[ "$failure_status" != 124 ]] \
+    || fail "target failure path가 deterministic nonzero 대신 timeout됐습니다."
+}
+
 compose_fingerprint() {
   local project_kind="$1"
   if [[ "$project_kind" == "source" ]]; then
@@ -351,6 +401,7 @@ compose_fingerprint() {
 }
 
 printf '\n[backup/restore 1/11] artifact/path failure contracts\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 PYTHONDONTWRITEBYTECODE=1 python3 \
   "$ROOT_DIR/scripts/backup_tools/test_backup_artifact.py"
 
@@ -389,15 +440,36 @@ expect_failure "missing Compose project/postgres service" \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"
 
+python3 -B "$TIMING_HELPER" end backup-restore-01 "$stage_started"
+
 printf '\n[backup/restore 2/11] exact-HEAD API image, source migration and startup\n'
-docker build \
-  --progress plain \
-  --no-cache \
-  --pull \
-  "${cleanup_labels[@]}" \
-  --tag "$api_image" \
-  --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
-  "$ROOT_DIR"
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+case "${CI_TEST_IMAGE_MODE:-disabled}" in
+  required)
+    if [[ -z "${CI_TEST_IMAGE_API_DIR:-}" ]]; then
+      echo "shared API image artifact directory가 없습니다." >&2
+      exit 1
+    fi
+    python3 -B "$ROOT_DIR/scripts/ci_tools/test_image_artifact.py" consume \
+      api "$CI_TEST_IMAGE_API_DIR" "$api_image"
+    image_cleanup_task=issue-124-exact-head-test-images
+    ;;
+  disabled)
+    python3 -B "$ROOT_DIR/scripts/ci_tools/docker_cache.py" build api \
+      --progress plain \
+      --no-cache \
+      --pull \
+      "${cleanup_labels[@]}" \
+      --tag "$api_image" \
+      --file "$ROOT_DIR/infra/docker/api.Dockerfile" \
+      "$ROOT_DIR"
+    image_cleanup_task=issue-41-host-state-runtime-config-staging
+    ;;
+  *)
+    echo "알 수 없는 shared test image mode입니다." >&2
+    exit 1
+    ;;
+esac
 
 docker image inspect "$api_image" \
   | python3 -B -c '
@@ -408,14 +480,14 @@ labels = json.load(sys.stdin)[0]["Config"]["Labels"]
 expected = {
     "io.homeserver.cleanup.environment": "development",
     "io.homeserver.cleanup.project": "our-ledger",
-    "io.homeserver.cleanup.task": "issue-41-host-state-runtime-config-staging",
+    "io.homeserver.cleanup.task": sys.argv[2],
     "io.homeserver.cleanup.lifecycle": "task",
     "io.homeserver.cleanup.retain": "false",
     "io.homeserver.cleanup.git-head": sys.argv[1],
 }
 if any(labels.get(key) != value for key, value in expected.items()):
     raise SystemExit("synthetic API image cleanup labels differ")
-' "$git_head"
+' "$git_head" "$image_cleanup_task"
 
 "${source_compose[@]}" up --detach --wait --wait-timeout 120 postgres
 run_candidate_migration source "$runtime_temp_dir/source-migration.log"
@@ -471,7 +543,10 @@ docker inspect "$source_postgres_id" \
       --compose-file "$runtime_release_next/compose.yaml" \
       --expected-image "$POSTGRES_IMAGE"
 
+python3 -B "$TIMING_HELPER" end backup-restore-02 "$stage_started"
+
 printf '\n[backup/restore 3/11] non-empty financial fixture and source fingerprint\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${source_compose[@]}" exec -T postgres sh -ceu '
   exec psql -X \
     --username "$POSTGRES_USER" \
@@ -487,7 +562,10 @@ printf '%s' "$source_state" | python3 "$STATE_CHECKER"
     --set ON_ERROR_STOP=1
 ' < "$INTEGRITY_SQL"
 
+python3 -B "$TIMING_HELPER" end backup-restore-03 "$stage_started"
+
 printf '\n[backup/restore 4/11] production-safe one-shot custom backup\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 source_api_started_at="$(docker inspect --format '{{.State.StartedAt}}' "$source_api_id")"
 "${BACKUP_COMMAND[@]}" \
   --project-name "$source_project" \
@@ -537,7 +615,10 @@ assert inventory["incomplete"] == []
 assert inventory["foreign"] == []
 ' "$runtime_temp_dir/inventory.json"
 
+python3 -B "$TIMING_HELPER" end backup-restore-04 "$stage_started"
+
 printf '\n[backup/restore 5/11] marker preservation and injected backup failures\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 marker_sha_before="$(file_sha256 "$marker_path")"
 bundle_count_before="$(bundle_count)"
 
@@ -670,7 +751,10 @@ expect_failure "post-check failed Flyway migration" \
       --backup-dir "$backup_dir"
 assert_failed_backup_preserved_state
 
+python3 -B "$TIMING_HELPER" end backup-restore-05 "$stage_started"
+
 printf '\n[backup/restore 6/11] corrupt/checksum/metadata rejection\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 corruption_root="$runtime_temp_dir/corruption"
 mkdir -m 700 "$corruption_root"
 for label in zero truncated checksum metadata archive; do
@@ -755,7 +839,10 @@ fi
 
 "${source_compose[@]}" stop --timeout 45 api postgres >/dev/null
 
+python3 -B "$TIMING_HELPER" end backup-restore-06 "$stage_started"
+
 printf '\n[backup/restore 7/11] isolated empty target restore\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 "${target_compose[@]}" up --detach --wait --wait-timeout 120 postgres
 target_postgres_id="$("${target_compose[@]}" ps --quiet postgres)"
 [[ -n "$target_postgres_id" && "$target_postgres_id" != "$source_postgres_id" ]] \
@@ -777,7 +864,10 @@ python3 "$ARTIFACT_HELPER" verify --bundle-dir "$bundle_path" >/dev/null
     --dbname "$POSTGRES_DB"
 ' < "$dump_path"
 
+python3 -B "$TIMING_HELPER" end backup-restore-07 "$stage_started"
+
 printf '\n[backup/restore 8/11] restored data, financial state and constraints\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 target_state="$(compose_fingerprint target)"
 printf '%s' "$target_state" | python3 "$STATE_CHECKER"
 [[ "$target_state" == "$source_state" ]] \
@@ -789,7 +879,10 @@ printf '%s' "$target_state" | python3 "$STATE_CHECKER"
     --set ON_ERROR_STOP=1
 ' < "$INTEGRITY_SQL"
 
+python3 -B "$TIMING_HELPER" end backup-restore-08 "$stage_started"
+
 printf '\n[backup/restore 9/11] restored database migration and production API readiness\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 target_state_before_migration="$(compose_fingerprint target)"
 run_candidate_migration target "$runtime_temp_dir/target-migration.log"
 target_state_after_migration="$(compose_fingerprint target)"
@@ -803,11 +896,30 @@ target_state_after_api="$(compose_fingerprint target)"
 [[ "$target_state_after_api" == "$target_state" ]] \
   || fail "production API startup 뒤 restored Flyway/data state가 변경됐습니다."
 
-"${target_compose[@]}" stop --timeout 45 api postgres >/dev/null
+"${target_compose[@]}" stop --timeout 45 api >/dev/null
+target_api_id="$("${target_compose[@]}" ps --all --quiet api)"
+[[ -n "$target_api_id" \
+  && "$(docker inspect --format '{{.State.Status}}' "$target_api_id")" == exited ]] \
+  || fail "failure proof 전에 target API가 중지되지 않았습니다."
+
+python3 -B "$TIMING_HELPER" end backup-restore-09 "$stage_started"
 
 printf '\n[backup/restore 10/11] restore-target and unhealthy-service failures\n'
-"${failure_compose[@]}" up --detach --wait --wait-timeout 120 postgres
-if "${failure_compose[@]}" exec -T postgres sh -ceu '
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
+assert_target_postgres_state healthy
+target_state_before_failure="$(compose_fingerprint target)"
+dump_sha_before="$(file_sha256 "$dump_path")"
+failure_observer_before="$(failure_observer_state)"
+assert_failure_artifacts_unchanged
+missing_database_count="$("${target_compose[@]}" exec -T postgres sh -ceu '
+  exec psql -X --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --set ON_ERROR_STOP=1 \
+    --command "SELECT COUNT(*) FROM pg_database WHERE datname = '\''missing_restore_target'\''"
+')"
+[[ "$missing_database_count" == 0 ]] \
+  || fail "missing restore target database가 이미 존재합니다."
+expect_bounded_input_failure "$dump_path" \
+  "${target_compose[@]}" exec -T postgres sh -ceu '
   exec pg_restore \
     --exit-on-error \
     --single-transaction \
@@ -815,22 +927,35 @@ if "${failure_compose[@]}" exec -T postgres sh -ceu '
     --no-acl \
     --username "$POSTGRES_USER" \
     --dbname missing_restore_target
-' < "$dump_path" >/dev/null 2>&1; then
-  fail "존재하지 않는 restore target database가 성공으로 처리됐습니다."
-fi
+'
+grep -Fq 'database "missing_restore_target" does not exist' "$runtime_temp_dir/bounded-failure.log" \
+  || fail "restore failure가 실제 missing database 오류가 아닙니다."
+assert_target_postgres_state healthy
+[[ "$(compose_fingerprint target)" == "$target_state_before_failure" ]] \
+  || fail "missing database restore failure가 verified target state를 변경했습니다."
+assert_failure_artifacts_unchanged
 
-"${failure_compose[@]}" stop --timeout 30 postgres >/dev/null
-expect_failure "stopped/unhealthy postgres" \
+"${target_compose[@]}" stop --timeout 45 postgres >/dev/null
+assert_target_postgres_state exited
+target_postgres_finished_at="$(docker inspect --format '{{.State.FinishedAt}}' "$target_postgres_id")"
+expect_bounded_input_failure /dev/null \
   "${BACKUP_COMMAND[@]}" \
-    --project-name "$failure_project" \
+    --project-name "$target_project" \
     --env-file "$env_file" \
     --backup-dir "$failure_backup_dir"
-[[ "$(file_sha256 "$marker_path")" == "$marker_sha_before" ]] \
-  || fail "unhealthy service failure가 이전 source marker를 변경했습니다."
+assert_target_postgres_state exited
+[[ "$(docker inspect --format '{{.State.FinishedAt}}' "$target_postgres_id")" == "$target_postgres_finished_at" ]] \
+  || fail "stopped-service failure가 target PostgreSQL를 restart/stop했습니다."
+assert_failure_artifacts_unchanged
+
+python3 -B "$TIMING_HELPER" end backup-restore-10 "$stage_started"
 
 printf '\n[backup/restore 11/11] exact disposable resource cleanup\n'
+stage_started="$(python3 -B "$TIMING_HELPER" begin)"
 if ! cleanup_resources; then
   fail "backup/restore 검증 resource residue cleanup에 실패했습니다."
 fi
+
+python3 -B "$TIMING_HELPER" end backup-restore-11 "$stage_started"
 
 echo "Backup/Restore 검증을 통과했습니다."

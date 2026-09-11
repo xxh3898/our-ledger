@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import { noonInTimeZone, todayInTimeZone } from './dateTime.ts'
 import {
   type CurrentHousehold,
@@ -149,17 +150,15 @@ export function RefundSheet({
           <label className="amount-field">
             환불 금액
             <span>
-              <input
+              <AmountInput
                 ref={amountRef}
                 aria-label="환불 금액"
                 required
                 autoFocus
                 min="1"
                 max={summary.remainingRefundableAmount}
-                inputMode="numeric"
-                type="number"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
               /> 원
             </span>
           </label>

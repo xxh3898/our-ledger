@@ -14,12 +14,49 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: our-ledger-ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   repository:
     runs-on: ubuntu-latest
+    outputs:
+      category: ${{ steps.changes.outputs.category }}
+      run_backend: ${{ steps.changes.outputs.run_backend }}
+      run_frontend: ${{ steps.changes.outputs.run_frontend }}
+      run_full: ${{ steps.changes.outputs.run_full }}
+      docker_cache_mode: ${{ steps.docker-cache.outputs.mode }}
+      share_test_images: ${{ steps.changes.outputs.run_full != 'false' && steps.docker-cache.outputs.mode != 'disabled' }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: PR 변경 영향 분류
+        id: changes
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BASE_REF: ${{ github.base_ref }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_REF: ${{ github.ref }}
+          CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          if ! python3 -B scripts/ci_tools/change_classifier.py classify; then
+            printf '%s\n' \
+              'category=mixed/unknown' \
+              'reason=classifier-execution-failure' \
+              'run_backend=true' \
+              'run_frontend=true' \
+              'run_full=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: CI Docker cache 이벤트 경계 판정
+        id: docker-cache
+        run: python3 -B scripts/ci_tools/docker_cache.py policy
 
       - name: 저장소 구조 검사
         run: ./scripts/check-repo.sh
@@ -34,6 +71,8 @@ jobs:
         run: ./scripts/verify-compose.sh
 
   backup-docker-authority:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -44,12 +83,71 @@ jobs:
         run: ./scripts/verify-backup-docker-authority.sh
 
   backend:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_backend != 'false' }}
     uses: ./.github/workflows/backend-ci.yml
 
   frontend:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_frontend != 'false' }}
     uses: ./.github/workflows/frontend-ci.yml
 
+  test-images:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' && needs.repository.outputs.docker_cache_mode != 'disabled' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        family:
+          - api
+          - web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode }}
+      CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: CI cache runtime 준비
+        id: cache-runtime
+        continue-on-error: true
+        uses: ./.github/actions/prepare-ci-docker-cache
+
+      - name: CI cache Buildx 준비
+        id: cache-builder
+        if: ${{ steps.cache-runtime.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker-container
+          cache-binary: false
+          cleanup: true
+
+      - name: Exact-source test image 생성
+        env:
+          CI_DOCKER_CACHE_READY: ${{ steps.cache-builder.outcome == 'success' && steps.cache-runtime.outputs.ready == 'true' }}
+        run: >-
+          python3 -B scripts/ci_tools/test_image_artifact.py produce
+          '${{ matrix.family }}'
+          '${{ runner.temp }}/our-ledger-test-image-${{ matrix.family }}'
+
+      - name: Current-run test image 게시
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: our-ledger-test-image-${{ matrix.family }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-${{ matrix.family }}/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+
   production-runtime:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -60,26 +158,72 @@ jobs:
         run: ./scripts/verify-production-runtime.sh
 
   production-bootstrap:
+    needs:
+      - repository
+      - test-images
+    if: ${{ always() && !cancelled() && needs.repository.result == 'success' && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode || 'disabled' }}
+      CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
+      CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: Current-run API test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-api
+
       - name: Production Household bootstrap 검증
+        env:
+          CI_TEST_IMAGE_API_DIR: ${{ runner.temp }}/our-ledger-test-image-api
         run: ./scripts/verify-production-bootstrap.sh
 
   fresh-host-bootstrap:
+    needs:
+      - repository
+      - test-images
+    if: ${{ always() && !cancelled() && needs.repository.result == 'success' && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode || 'disabled' }}
+      CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
+      CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: Current-run API test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-api
+
+      - name: Current-run Web test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-web-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-web
+
       - name: Fresh-host bootstrap transaction 검증
+        env:
+          CI_TEST_IMAGE_API_DIR: ${{ runner.temp }}/our-ledger-test-image-api
+          CI_TEST_IMAGE_WEB_DIR: ${{ runner.temp }}/our-ledger-test-image-web
         run: ./scripts/verify-fresh-host-bootstrap.sh
 
   host-state:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -90,6 +234,8 @@ jobs:
         run: ./scripts/verify-host-state.sh
 
   fixed-bootstrap:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -100,6 +246,8 @@ jobs:
         run: ./scripts/verify-fixed-bootstrap.sh
 
   runtime-config-evolution:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -110,6 +258,8 @@ jobs:
         run: ./scripts/verify-runtime-config-evolution.sh
 
   host-deploy-transaction:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -120,16 +270,36 @@ jobs:
         run: ./scripts/verify-host-deploy-transaction.sh
 
   backup-restore:
+    needs:
+      - repository
+      - test-images
+    if: ${{ always() && !cancelled() && needs.repository.result == 'success' && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode || 'disabled' }}
+      CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
+      CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: Current-run API test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-api
+
       - name: Backup/Restore 검증
+        env:
+          CI_TEST_IMAGE_API_DIR: ${{ runner.temp }}/our-ledger-test-image-api
         run: ./scripts/verify-backup-restore.sh
 
   offsite-backup:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -140,16 +310,44 @@ jobs:
         run: ./scripts/verify-offsite-backup.sh
 
   observability:
+    needs:
+      - repository
+      - test-images
+    if: ${{ always() && !cancelled() && needs.repository.result == 'success' && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CI_DOCKER_CACHE_MODE: ${{ needs.repository.outputs.docker_cache_mode || 'disabled' }}
+      CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
+      CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
 
+      - name: Current-run API test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-api
+
+      - name: Current-run Web test image 수신
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: our-ledger-test-image-web-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/our-ledger-test-image-web
+
       - name: Observability/status 검증
+        env:
+          CI_TEST_IMAGE_API_DIR: ${{ runner.temp }}/our-ledger-test-image-api
+          CI_TEST_IMAGE_WEB_DIR: ${{ runner.temp }}/our-ledger-test-image-web
         run: ./scripts/verify-observability.sh
 
   monitor-policy:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -160,6 +358,8 @@ jobs:
         run: ./scripts/verify-monitor-policy.sh
 
   release-transport:
+    needs: repository
+    if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -168,3 +368,34 @@ jobs:
 
       - name: Release/Deploy source 검증
         run: ./scripts/verify-release-transport.sh
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - repository
+      - backend
+      - frontend
+      - test-images
+      - backup-docker-authority
+      - production-runtime
+      - production-bootstrap
+      - fresh-host-bootstrap
+      - host-state
+      - fixed-bootstrap
+      - runtime-config-evolution
+      - host-deploy-transaction
+      - backup-restore
+      - offsite-backup
+      - observability
+      - monitor-policy
+      - release-transport
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v7
+
+      - name: 선택된 검증과 생략 결과 확인
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B scripts/ci_tools/change_classifier.py gate

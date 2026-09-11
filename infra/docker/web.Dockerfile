@@ -8,6 +8,8 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/index.html frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json frontend/vite.config.ts ./
+COPY frontend/public/manifest.webmanifest ./public/manifest.webmanifest
+COPY frontend/scripts/verify-app-start-build.mjs ./scripts/verify-app-start-build.mjs
 COPY frontend/src ./src
 RUN npm run build
 

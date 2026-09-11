@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { todayInTimeZone } from './dateTime.ts'
 import { RecurringTransactionSheet } from './RecurringTransactionSheet.tsx'
+import { AmountInput } from './AmountInput.tsx'
 import {
   type Account,
   type Category,
@@ -19,6 +20,7 @@ import {
   loadRecurringTransactions,
   updateRecurringTransaction,
 } from './ledgerApi.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 function errorMessage(error: unknown) {
   if (error instanceof LedgerApiError) return error.message
@@ -387,7 +389,7 @@ function AccountSetup({
         </label>
         {ownership === 'PERSONAL' && (
           <label>
-            소유자
+            {UI_VOCABULARY.accountOwner}
             <select
               required
               value={ownerMemberId}
@@ -403,11 +405,10 @@ function AccountSetup({
         )}
         <label>
           기초 잔액
-          <input
-            inputMode="numeric"
-            type="number"
+          <AmountInput
+            allowNegative
             value={openingBalance}
-            onChange={(event) => setOpeningBalance(event.target.value)}
+            onValueChange={setOpeningBalance}
           />
         </label>
         <label>

@@ -2,7 +2,7 @@ name: 버그 보고
 description: 재현 가능한 결함과 회귀 테스트 요구를 기록합니다.
 title: "[버그] "
 labels:
-  - 버그
+  - bug
 body:
   - type: textarea
     id: symptom

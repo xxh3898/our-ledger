@@ -1,8 +1,11 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { AmountInput } from './AmountInput.tsx'
 import { dateInTimeZone, noonInTimeZone } from './dateTime.ts'
+import { QuickCategoryCreateSheet } from './QuickCategoryCreateSheet.tsx'
 import {
   type Account,
   type Category,
+  type CategoryGroup,
   type CurrentHousehold,
   type LedgerTransaction,
   LedgerApiError,
@@ -10,6 +13,7 @@ import {
   updateTransaction,
 } from './ledgerApi.ts'
 import { entryByRole, isPrimaryAccountForType } from './transactionUtils.ts'
+import { UI_VOCABULARY } from './uiVocabulary.ts'
 
 type TransactionFormState = {
   type: LedgerTransaction['type']
@@ -87,18 +91,22 @@ export function QuickEntrySheet({
   currentUserId,
   household,
   accounts,
+  groups,
   categories,
   selectedDate,
   editing,
+  onCategoryCreated,
   onRequestClose,
   onSaved,
 }: {
   currentUserId: number
   household: CurrentHousehold
   accounts: Account[]
+  groups: CategoryGroup[]
   categories: Category[]
   selectedDate: string
   editing: LedgerTransaction | null
+  onCategoryCreated: (category: Category) => void
   onRequestClose: () => void
   onSaved: () => void
 }) {
@@ -108,12 +116,30 @@ export function QuickEntrySheet({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false)
   const amountRef = useRef<HTMLInputElement>(null)
+  const categoryCreateOpenerRef = useRef<HTMLButtonElement>(null)
+  const categoryCreateOpenRef = useRef(false)
+
+  const finishClosingCategoryCreate = useCallback(() => {
+    categoryCreateOpenRef.current = false
+    setCategoryCreateOpen(false)
+    window.setTimeout(() => categoryCreateOpenerRef.current?.focus(), 0)
+  }, [])
+
+  const requestCloseCategoryCreate = useCallback(() => {
+    const ownsHistoryEntry = window.history.state?.ourLedgerQuickEntry === 'category-create'
+    if (ownsHistoryEntry) {
+      window.history.back()
+      return
+    }
+    finishClosingCategoryCreate()
+  }, [finishClosingCategoryCreate])
 
   useEffect(() => {
     amountRef.current?.focus()
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !pending) {
+      if (event.key === 'Escape' && !pending && !categoryCreateOpenRef.current) {
         event.preventDefault()
         onRequestClose()
       }
@@ -121,6 +147,17 @@ export function QuickEntrySheet({
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onRequestClose, pending])
+
+  useEffect(() => {
+    if (!categoryCreateOpen) return
+    const closeOnPopState = () => {
+      if (window.history.state?.ourLedgerQuickEntry !== 'category-create') {
+        finishClosingCategoryCreate()
+      }
+    }
+    window.addEventListener('popstate', closeOnPopState)
+    return () => window.removeEventListener('popstate', closeOnPopState)
+  }, [categoryCreateOpen, finishClosingCategoryCreate])
 
   const matchingCategories = categories.filter((category) => category.type === form.type)
   const primaryAccounts = accounts.filter((account) => isPrimaryAccountForType(form.type, account))
@@ -135,6 +172,25 @@ export function QuickEntrySheet({
 
   function change<K extends keyof TransactionFormState>(key: K, value: TransactionFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function openCategoryCreate() {
+    categoryCreateOpenRef.current = true
+    window.history.pushState(
+      {
+        ...window.history.state,
+        ourLedgerSheet: 'quick-entry',
+        ourLedgerQuickEntry: 'category-create',
+      },
+      '',
+      window.location.href,
+    )
+    setCategoryCreateOpen(true)
+  }
+
+  function acceptCreatedCategory(category: Category) {
+    change('categoryId', category.id.toString())
+    onCategoryCreated(category)
   }
 
   function selectType(type: LedgerTransaction['type']) {
@@ -186,7 +242,7 @@ export function QuickEntrySheet({
       } else if (!form.categoryId || !form.accountId) {
         throw new Error('Category와 Account를 확인해 주세요.')
       } else if (form.scope === 'PERSONAL' && !form.ownerMemberId) {
-        throw new Error('개인 거래의 Owner를 확인해 주세요.')
+        throw new Error(`개인 거래의 ${UI_VOCABULARY.transactionOwner}를 확인해 주세요.`)
       }
 
       const input = {
@@ -232,6 +288,8 @@ export function QuickEntrySheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-entry-title"
+        aria-hidden={categoryCreateOpen || undefined}
+        inert={categoryCreateOpen || undefined}
       >
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-header">
@@ -266,15 +324,13 @@ export function QuickEntrySheet({
           <label className="amount-field">
             금액
             <span>
-              <input
+              <AmountInput
                 ref={amountRef}
                 required
                 autoFocus
                 min="1"
-                inputMode="numeric"
-                type="number"
                 value={form.amount}
-                onChange={(event) => change('amount', event.target.value)}
+                onValueChange={(value) => change('amount', value)}
               /> 원
             </span>
           </label>
@@ -295,7 +351,7 @@ export function QuickEntrySheet({
           )}
           {form.type !== 'TRANSFER' && form.scope === 'PERSONAL' && (
             <label>
-              Owner
+              {UI_VOCABULARY.transactionOwner}
               <select
                 required
                 value={form.ownerMemberId}
@@ -311,7 +367,7 @@ export function QuickEntrySheet({
           )}
           {form.type === 'EXPENSE' && (
             <label>
-              Payer (선택)
+              {UI_VOCABULARY.payer} (선택)
               <select
                 value={form.payerMemberId}
                 onChange={(event) => change('payerMemberId', event.target.value)}
@@ -326,19 +382,30 @@ export function QuickEntrySheet({
             </label>
           )}
           {form.type !== 'TRANSFER' && (
-            <label>
-              Category
-              <select
-                required
-                value={form.categoryId}
-                onChange={(event) => change('categoryId', event.target.value)}
+            <div className="entry-category-field">
+              <label>
+                Category
+                <select
+                  required
+                  value={form.categoryId}
+                  onChange={(event) => change('categoryId', event.target.value)}
+                >
+                  <option value="">선택</option>
+                  {matchingCategories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                ref={categoryCreateOpenerRef}
+                className="category-create-button"
+                type="button"
+                disabled={pending}
+                onClick={openCategoryCreate}
               >
-                <option value="">선택</option>
-                {matchingCategories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-            </label>
+                카테고리 추가
+              </button>
+            </div>
           )}
           {form.type !== 'TRANSFER' && (
             <label>
@@ -416,6 +483,15 @@ export function QuickEntrySheet({
         {error && <p className="form-error" role="alert">{error}</p>}
         {success && <p className="save-success" role="status">{success}</p>}
       </section>
+      {categoryCreateOpen && form.type !== 'TRANSFER' && (
+        <QuickCategoryCreateSheet
+          type={form.type}
+          groups={groups}
+          categories={categories}
+          onCreated={acceptCreatedCategory}
+          onRequestClose={requestCloseCategoryCreate}
+        />
+      )}
     </div>
   )
 }

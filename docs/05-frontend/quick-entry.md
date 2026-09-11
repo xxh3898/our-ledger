@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.5
-last_updated: 2026-08-28
+version: 0.7
+last_updated: 2026-09-09
 related:
   - 01-product/user-flows.md
   - 02-domain/transaction.md
@@ -51,6 +51,13 @@ related:
 - 거래 유형을 바꿔 기존 Category가 유효하지 않게 되면 임의로 다른 Category를 선택하지 않고 값을 해제해 사용자가 다시 선택하게 한다.
 - 숨긴 field의 이전 값은 submit payload에 남지 않아야 한다.
 
+## 사용자 노출 용어
+
+- Transaction `Owner`는 기록 작성자나 Account 소유자가 아니라 개인 수입·소비의 귀속자이므로 UI에서 `귀속자`로 표시한다.
+- `Payer`는 지출을 실제 결제한 Member이므로 UI에서 `결제자`로 표시한다. nullable field의 label은 `결제자 (선택)`이다.
+- 반복 거래 Sheet도 동일한 용어를 사용한다.
+- `owner`, `payer`, `ownerMemberId`, `payerMemberId`는 내부 API/domain identifier로 유지하고 사용자 label로 직접 출력하지 않는다.
+
 ## 기본값
 
 - 날짜: Calendar에서 열면 선택 날짜, 그 밖의 진입에서는 오늘
@@ -75,6 +82,14 @@ Quick Entry에는 현재 거래 유형에서 최근 사용한 서로 다른 Cate
 - archive된 Category는 신규 선택에서 제외한다.
 - 선택 즉시 Quick Entry에 반영하고 picker를 닫으며 별도 확인 button을 두지 않는다.
 - Concept 단계의 emoji는 placeholder일 뿐 production Category asset 계약이 아니다.
+
+Category가 없으면 selector 옆 `카테고리 추가`로 현재 거래 유형의 Category를 생성할 수 있다.
+
+- 생성 화면은 Quick Entry 위에 중첩 Sheet로 열고, Quick Entry form을 unmount하거나 초기화하지 않는다.
+- 이름과 선택 Group은 설정의 Category 생성과 같은 `/api/v1/categories` 계약을 사용한다. 이름 공백 정규화, 길이, active 중복, Group type·active 상태, Household 경계는 server validation을 authority로 삼는다.
+- 취소하면 거래 유형, 금액, Scope/Owner/Payer, Account, 날짜, 메모를 유지한다. 생성 실패 때는 이 거래 draft와 Category 이름·Group 입력을 모두 유지한다.
+- 성공 응답의 Category를 현재 reference 목록에 반영하고 현재 거래에 자동 선택한다.
+- browser back, ESC, 닫기, backdrop은 먼저 중첩 Sheet만 닫고 Quick Entry history entry를 보존한다. 닫힌 뒤 focus는 `카테고리 추가`로 돌아간다.
 
 ## Account Picker
 
@@ -133,6 +148,7 @@ client validation은 server의 Household, ownership, 거래 유형, Account/Cate
 - 선택일 목록은 `occurredAt DESC, id DESC`의 API 순서를 그대로 표시한다. 이체는 source→destination, 카드 지출은 카드 Account를 표시하며 edit/delete는 조회한 `version`을 사용한다.
 - mutation helper는 same-origin `XSRF-TOKEN` cookie를 `X-XSRF-TOKEN` header로 보낸다. pending 동안 해당 submit/delete button을 비활성화한다.
 - 서버 validation/domain 실패 시 Account/Category/Transaction form state를 초기화하지 않고 error message를 `role=alert`로 표시한다.
+- 빠른 입력 중 현재 유형의 Category를 기존 Category create API로 추가할 수 있다. 취소·실패는 Quick Entry draft를 보존하고, 성공은 reference 목록 갱신과 새 Category 자동 선택을 함께 수행한다.
 - 성공 시 `저장했어요/수정했어요 🐾`를 500ms 표시한 뒤 Sheet를 닫고 같은 월·Scope·선택일을 갱신한다. Calendar Scope와 무관하게 현재 사용자의 PERSONAL을 신규 입력 기본값으로 사용한다.
 
 최근 Category chip·검색·Group icon grid와 Account section picker는 이 Slice에서 새 dependency나 가짜 최근 사용 data 없이 기존 native select를 유지한다. 해당 picker 정교화는 실제 최근 사용 계약과 production asset을 함께 정의하는 후속 범위다.

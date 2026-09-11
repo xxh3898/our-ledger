@@ -715,6 +715,33 @@ class ReleaseSourceContractTest(unittest.TestCase):
         self.assertNotIn("GHCR_TOKEN", command_build)
         self.assertNotIn("${GHCR_TOKEN}", ssh_invocation)
 
+    def test_deploy_uses_only_dedicated_tailscale_tag_and_exact_target(self) -> None:
+        workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        deploy = workflow_job(workflow, "deploy")
+        tailscale_step = deploy[
+            deploy.index("      - name: Connect to Tailscale") : deploy.index(
+                "      - name: Configure restricted SSH identity"
+            )
+        ]
+
+        self.assertIn("    environment: Production\n", deploy)
+        self.assertIn("      id-token: write\n", deploy)
+        self.assertIn(
+            "oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}", tailscale_step
+        )
+        self.assertIn("audience: ${{ secrets.TS_AUDIENCE }}", tailscale_step)
+        self.assertIn(
+            "hostname: our-ledger-deploy-${{ github.run_id }}-${{ github.run_attempt }}",
+            tailscale_step,
+        )
+        self.assertIn("ping: home-mini", tailscale_step)
+        self.assertEqual(
+            re.findall(r"(?m)^\s+tags:\s*(\S+)\s*$", tailscale_step),
+            ["tag:our-ledger-ci"],
+        )
+        self.assertNotIn("tag:ci", tailscale_step)
+        self.assertIn("homeserver@home-mini", deploy)
+
     def test_privileged_workflow_actions_use_exact_commit_revisions(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
 

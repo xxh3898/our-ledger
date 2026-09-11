@@ -3,6 +3,10 @@
 !frontend/index.html
 !frontend/package.json
 !frontend/package-lock.json
+!frontend/public
+!frontend/public/manifest.webmanifest
+!frontend/scripts
+!frontend/scripts/verify-app-start-build.mjs
 !frontend/tsconfig.json
 !frontend/tsconfig.app.json
 !frontend/tsconfig.node.json
