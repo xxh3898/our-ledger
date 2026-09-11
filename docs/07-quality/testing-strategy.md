@@ -1,7 +1,7 @@
 ---
 status: active
-version: 2.5
-last_updated: 2026-09-10
+version: 2.6
+last_updated: 2026-09-12
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -403,7 +403,8 @@ production 통합 테스트는 process-local HTTP JWK endpoint와 매 실행 생
 `App.test.tsx`는 identity loading/401/403을 보존하며 다음 Calendar/Quick Entry 계약을 mock HTTP 경계에서 검증한다.
 
 - Couple-first section 순서, 실제 Member 이름, header와 Calendar Scope의 self marker 부재
-- canonical root 새 앱 진입의 Household 오늘·Quick Entry 날짜와 명시적 과거 Calendar URL의 같은-URL remount 보존
+- canonical root 새 앱 진입의 Household 오늘·Quick Entry 날짜, query 없는 root의 durable 보존, `pageshow`/visible resume에서 stale in-memory 날짜의 root-only 재정규화
+- 명시적 과거 Calendar URL의 같은-URL remount·lifecycle 보존, same-session 날짜 선택, 다른 화면 왕복과 `popstate` history 보존
 - ALL/각 Member/SHARED의 월 요약·선택일 동일 적용
 - transfer-only 무지출과 future Paw 제외
 - 날짜 선택 URL/API, listener 등록 뒤 popstate의 month/Member/date 복원과 추가 history entry 없음
