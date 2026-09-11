@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.9
-last_updated: 2026-09-01
+version: 0.10
+last_updated: 2026-09-10
 related:
   - 03-data/data-retention.md
   - 07-quality/acceptance-criteria.md
@@ -125,7 +125,9 @@ marker는 source logical bundle/createdAt/schema, replicatedAt, ciphertext filen
 6. Flyway versions, core table row count, Transaction/Entry/Refund lineage, Account balance와 total asset/liability/net worth를 source fingerprint와 비교한다.
 7. composite Household FK와 unique constraint가 계속 enforced되는지 확인한다.
 8. restored V8 DB에 동일 candidate migration mode를 재실행해 idempotent exit 0과 state 불변을 확인하고, normal production API의 Flyway-disabled JPA validate/readiness를 통과한다.
-9. success/failure 뒤 source/target/failure container/network/volume과 unique image tag residue 0을 확인한다.
+9. normal target API만 중지하고 같은 healthy PostgreSQL ID와 `missing_restore_target` 부재를 확인한 뒤 실제 missing-DB restore의 nonzero/non-timeout 및 target fingerprint 불변을 검사한다.
+10. 같은 target PostgreSQL을 중지하고 ID/exited/종료 시각을 확인한 뒤 stopped-service backup 실패를 검사한다. 재시작/recreate 없이 source marker/bundle/archive와 빈 failure directory를 보존해야 한다.
+11. success/failure 뒤 source/target container/network/volume과 unique image tag residue 0을 확인한다. 세 번째 failure project는 만들지 않으며 source/target authority는 계속 분리한다.
 
 missing/unsafe path, missing project/service, stopped/unhealthy DB, collision/lock, injected pg_dump/dump fsync failure, Flyway version change/post-check failed migration, zero/truncated/corrupt archive, checksum/metadata mismatch와 restore target failure를 성공으로 처리하지 않는다. backup 성공 로그만으로 복구 가능성을 주장하지 않는다.
 

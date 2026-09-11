@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.0
-last_updated: 2026-09-01
+version: 1.1
+last_updated: 2026-09-10
 related:
   - AGENTS.md
   - ADR-008
@@ -149,7 +149,7 @@ API container healthcheck는 JDK build stage에서 컴파일한 최소 `HttpClie
 `./scripts/verify-production-runtime.sh`는 고유 Compose project, ephemeral loopback port, 합성 DB/Cloudflare 값과 disposable volume으로 다음을 검증한다.
 
 - missing/blank required env fail-closed와 rendered Compose security/network/mount 계약
-- API/Web clean image build와 runtime content/non-root 검사
+- API/Web `--no-cache --pull` clean image build와 runtime content/non-root 검사; Web content/no-Node/Nginx syntax/config 읽기는 동일 `--rm` probe에서 순차 수행
 - Nginx static/SPA/cache/API 401/local identity 401/actuator 차단
 - unmigrated DB normal startup의 schema mutation 없는 failure
 - same-candidate one-shot Flyway V1→V8/JPA validate와 idempotent rerun
@@ -161,7 +161,9 @@ Hosted Full CI는 PR exact HEAD에서 같은 script를 실행한다. 이 smoke�
 
 `./scripts/verify-production-bootstrap.sh`는 별도 고유 labeled Compose project와 합성 identity/credential만 사용해 unmigrated failure, V1→V8 migration, create/verified exact state, input/profile/state/schema/DB failure matrix, normal API no-replay, privacy와 resource residue 0을 검증한다. Hosted Full CI의 독립 `production-bootstrap` job도 actual production input/DB 없이 같은 gate를 실행한다.
 
-`./scripts/verify-backup-restore.sh`는 별도 고유 source/target/failure Compose project, 합성 credential과 disposable volume으로 candidate one-shot→actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture, restored V8 migration rerun과 exact-HEAD normal production API readiness를 비교하고 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
+Issue #125의 보조 bootstrap fixture 복제는 healthcheck가 접속하지 않는 전용 pristine/seeded DB에 한정한다. clone 전 기본 DB ACL/settings, owner/locale와 no-session을 확인하고 clone 직후 전체 schema/Flyway/row/sequence와 DB authority를 비교한다. main의 실제 migration/create/verified와 strict stdin 15개 JVM 실패는 그대로 실행하며 모든 fault 뒤 main/template 불변을 확인한다. 이 CI fixture 최적화는 production migration/bootstrap/deploy command나 runtime artifact를 변경하지 않는다. 단계별 timing과 보존 proof는 [테스트 전략](../07-quality/testing-strategy.md)을 따른다.
+
+`./scripts/verify-backup-restore.sh`는 별도 고유 source/target Compose project, 합성 credential과 disposable volume으로 candidate one-shot→actual custom dump→integrity verification→restore를 실행한다. source와 restored target의 Flyway V1~V8, financial fixture, restored V8 migration rerun과 exact-HEAD normal production API readiness를 비교하고, 정상 proof가 끝난 target에서 missing-DB와 stopped-service failure를 순차 검증한 뒤 모든 resource를 제거한다. 실제 production project/env/backup path는 사용하지 않는다.
 
 `./scripts/production-status.sh`는 exact production Compose project, Git 밖 owner-only env file과 backup directory를 입력받아 service/origin/recurring/backup/filesystem raw JSON만 출력한다. `config --quiet`, `ps`, `inspect`와 internal GET 외에 container recreate/restart, DB/backup write, file cleanup을 하지 않는다. wrong project/config authority는 fail closed하고 개별 stopped/unreachable/invalid 상태는 나머지 관측과 함께 명시한다.
 
