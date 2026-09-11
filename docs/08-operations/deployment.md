@@ -1,7 +1,7 @@
 ---
 status: active
-version: 1.1
-last_updated: 2026-09-10
+version: 1.2
+last_updated: 2026-09-11
 related:
   - AGENTS.md
   - ADR-008
@@ -179,6 +179,7 @@ Issue #125의 보조 bootstrap fixture 복제는 healthcheck가 접속하지 않
 - production concurrency는 `our-ledger-production`, `cancel-in-progress: false`다.
 - repository variable `OUR_LEDGER_DEPLOY_ENABLED`가 정확히 `true`일 때만 publish/deploy job이 실행된다. variable이 없거나 다른 값이면 validation 이후 종료하며 GHCR login/publish, Tailscale과 SSH step은 실행되지 않는다.
 - publish job만 `packages: write`, deployment history read 권한을 갖고 deploy job은 `packages: read`, Tailscale OIDC를 위한 `id-token: write`만 추가한다.
+- our-ledger deploy runner는 shared `tag:ci`와 함께 사용하지 않고 전용 `tag:our-ledger-ci` 하나만 요청한다. source는 `home-mini` target과 `TS_OAUTH_CLIENT_ID`/`TS_AUDIENCE` WIF 입력을 유지하며, #141 provisioning은 이 전용 tag에 `home-mini` TCP 22만 허용하는 control-plane authority를 생성해야 한다. 다른 repository와 HomeOps가 사용하는 shared `tag:ci`와 그 TCP 9443 권한은 이 source Gate에서 변경하지 않는다.
 - publish/deploy privileged job의 third-party action은 mutable major tag가 아니라 검증된 exact commit SHA로 pin한다.
 - API/Web/runtime-config는 `linux/arm64`, exact 40자리 `${{ github.sha }}` tag와 OCI source/revision/version label을 사용한다. `latest` 또는 caller 제공 image/tag를 사용하지 않는다.
 
