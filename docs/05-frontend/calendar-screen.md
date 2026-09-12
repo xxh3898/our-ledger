@@ -1,7 +1,7 @@
 ---
 status: active
-version: 0.7
-last_updated: 2026-09-08
+version: 0.8
+last_updated: 2026-09-12
 related:
   - 01-product/user-flows.md
   - 04-api/pagination-filtering.md
@@ -23,9 +23,9 @@ related:
 
 ## 새 앱 진입과 날짜 복원
 
-- 홈 화면 아이콘 등 manifest 기반 새 앱 실행은 canonical `start_url=/`에서 시작한다. URL에 Calendar 상태가 없으므로 Household timezone의 오늘을 선택하고 Quick Entry도 같은 날짜를 사용한다.
+- 홈 화면 아이콘 등 manifest 기반 새 앱 실행은 canonical `start_url=/`에서 시작한다. URL에 Calendar 상태가 없으므로 Household timezone의 오늘을 선택하고 Quick Entry도 같은 날짜를 사용하며, 첫 render에서 이 root를 날짜 query로 자동 치환하지 않는다.
 - `month/view/date/memberId`가 있는 명시적 Calendar URL은 과거 날짜를 포함해 그대로 복원한다. 새로고침과 뒤로가기·앞으로가기도 같은 URL 상태를 보존한다.
-- 기존 Safari tab 복원과 명시적 deep link를 새 실행으로 추측해 강제로 오늘로 바꾸지 않는다. 새 실행 경계는 manifest의 canonical root가 담당한다.
+- WebKit이 query 없는 canonical root를 복원하거나 다시 visible 상태로 전환할 때만 Calendar state를 Household 오늘로 재정규화한다. 명시적 query, 같은 session의 날짜·월·Scope 선택, 다른 화면에서 Calendar로 돌아온 state는 lifecycle event로 덮어쓰지 않는다.
 
 ## 구성
 
@@ -148,7 +148,7 @@ Slice 8은 loading에서 이전 수치를 지우고 `GET /api/v1/goals/marriage`
 - 월 요약·날짜별 상태·선택일 목록은 같은 ALL/PERSONAL/SHARED 조건으로 각각 독립 로딩하며 이전 조건 값을 남기지 않는다.
 - 무지출 Paw는 Household timezone 기준 미래가 아닌 날짜에서 순소비가 0일 때 표시한다. 수입/이체만 있는 날도 포함한다.
 - `month/view/date/memberId` URL을 정규화하고 `popstate`와 동기화한다. 월 이동 시 선택 일자를 새 월 마지막 날까지 clamp한다.
-- canonical root 진입은 Household timezone 오늘로 정규화하며 명시적 과거 날짜 URL은 새로고침에도 보존한다.
+- canonical root 진입과 root lifecycle 복원은 Household timezone 오늘로 정규화하며 명시적 과거 날짜 URL은 새로고침에도 보존한다.
 - 중앙 Paw FAB는 선택 날짜를 Quick Entry에 전달하지만 Calendar scope를 입력 기본값으로 복사하지 않는다.
 - NORMAL EXPENSE row는 Refund summary를 current Household 경계에서 읽고 partial/full 상태 및 Refund Sheet 진입을 제공한다.
 - REFUND row는 별도 sign/text, no generic edit, 2단계 logical delete를 제공한다.

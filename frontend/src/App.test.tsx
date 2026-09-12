@@ -1254,12 +1254,50 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: '8월 28일의 기록' }))
       .toBeInTheDocument()
-    expect(window.location.search).toBe('?month=2026-08&view=all&date=2026-08-28')
+    expect(window.location.search).toBe('')
 
     fireEvent.click(screen.getByRole('button', { name: '2026-08-28 빠른 입력 열기' }))
 
     const dialog = await screen.findByRole('dialog', { name: '빠른 입력' })
     expect(within(dialog).getByLabelText('날짜')).toHaveValue('2026-08-28')
+  })
+
+  it('reconciles stale Calendar state to Household today at its timezone boundary', async () => {
+    useCalendarUrl('?month=2026-08&view=all&date=2026-08-27')
+    installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '8월 27일의 기록' }))
+      .toBeInTheDocument()
+    window.history.replaceState({}, '', '/')
+    vi.setSystemTime(new Date('2026-08-28T15:30:00Z'))
+
+    fireEvent(window, new Event('pageshow'))
+
+    expect(await screen.findByRole('heading', { name: '8월 29일의 기록' }))
+      .toBeInTheDocument()
+    expect(window.location.search).toBe('')
+  })
+
+  it('reconciles canonical root on visible resume without resetting explicit URLs', async () => {
+    useCalendarUrl('?month=2026-08&view=all&date=2026-08-27')
+    installLedgerRouter()
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '8월 27일의 기록' }))
+      .toBeInTheDocument()
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.setSystemTime(new Date('2026-08-29T03:00:00Z'))
+
+    fireEvent(document, new Event('visibilitychange'))
+    expect(screen.getByRole('heading', { name: '8월 27일의 기록' })).toBeInTheDocument()
+
+    window.history.replaceState({}, '', '/')
+    fireEvent(document, new Event('visibilitychange'))
+
+    expect(await screen.findByRole('heading', { name: '8월 29일의 기록' }))
+      .toBeInTheDocument()
+    expect(window.location.search).toBe('')
   })
 
   it('preserves an explicit historical Calendar URL across a same-URL remount', async () => {
@@ -1635,6 +1673,27 @@ describe('App', () => {
         && url.includes('from=2026-08-26')
         && url.includes('to=2026-08-26')
     })).toBe(true))
+
+    fireEvent(window, new Event('pageshow'))
+    expect(screen.getByRole('heading', { name: '8월 26일의 기록' })).toBeInTheDocument()
+    expect(window.location.search).toContain('date=2026-08-26')
+  })
+
+  it('preserves the selected Calendar date after visiting another screen', async () => {
+    useCalendarUrl('?month=2026-08&view=all&date=2026-08-27')
+    installLedgerRouter()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '26일, 거래 없음, 무지출' }))
+    expect(await screen.findByRole('heading', { name: '8월 26일의 기록' })).toBeInTheDocument()
+
+    const navigation = screen.getByRole('navigation', { name: '주요 메뉴' })
+    fireEvent.click(within(navigation).getByRole('button', { name: '예산' }))
+    expect(await screen.findByRole('heading', { name: '예산' })).toBeInTheDocument()
+    fireEvent.click(within(navigation).getByRole('button', { name: /Calendar/ }))
+
+    expect(await screen.findByRole('heading', { name: '8월 26일의 기록' })).toBeInTheDocument()
+    expect(window.location.search).toContain('date=2026-08-26')
   })
 
   it('moves months with buttons, clamps the selected day, and exposes today/selection state', async () => {

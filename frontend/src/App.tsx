@@ -70,6 +70,10 @@ function screenFromSearch(search: string): WorkspaceScreen {
   return 'calendar'
 }
 
+function isCanonicalCalendarRoot() {
+  return window.location.pathname === '/' && window.location.search === ''
+}
+
 type ViewState =
   | { status: 'loading' }
   | { status: 'ready'; user: CurrentUser }
@@ -773,11 +777,30 @@ function CalendarWorkspace({
 
   useEffect(() => {
     if (activeScreen !== 'calendar') return
+    if (isCanonicalCalendarRoot()) return
     const normalizedSearch = serializeCalendarState(navigation)
     if (window.location.search !== normalizedSearch) {
       window.history.replaceState(window.history.state, '', normalizedSearch)
     }
   }, [activeScreen, navigation])
+
+  useEffect(() => {
+    const reconcileCanonicalRoot = () => {
+      if (!isCanonicalCalendarRoot()) return
+      setActiveScreen('calendar')
+      setNavigation(normalizeCalendarState('', references.household))
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') reconcileCanonicalRoot()
+    }
+
+    window.addEventListener('pageshow', reconcileCanonicalRoot)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('pageshow', reconcileCanonicalRoot)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [references.household])
 
   useEffect(() => {
     if (activeScreen !== 'budget') return
