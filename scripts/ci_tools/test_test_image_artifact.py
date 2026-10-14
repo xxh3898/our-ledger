@@ -412,7 +412,27 @@ class AdoptionTest(unittest.TestCase):
             "Architecture": "amd64",
             "Config": {"Labels": artifact.expected_labels(self.identity)},
         }
-        self.environment = {**PR, "GITHUB_JOB": "backup-restore"}
+        self.environment = {
+            **PR, "GITHUB_JOB": "backup-restore",
+            "CI_TEST_IMAGE_PRODUCER_RESULT": "success",
+            "CI_TEST_IMAGE_API_PROVENANCE": json.dumps({**self.value, "artifactId": "123"}),
+        }
+
+    def test_successful_previous_producer_can_be_reused_by_retried_consumer(self):
+        environment = {
+            **self.environment,
+            "GITHUB_RUN_ATTEMPT": "2",
+            "CI_TEST_IMAGE_PRODUCER_RESULT": "success",
+            "CI_TEST_IMAGE_API_PROVENANCE": json.dumps({**self.value, "artifactId": "123"}),
+        }
+        with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE), \
+             patch.object(artifact, "_image_exists", return_value=False), \
+             patch.object(artifact, "_load_image") as load, \
+             patch.object(artifact, "_inspect", return_value=self.inspection), \
+             patch.object(artifact, "_remove_image"), \
+             patch.object(artifact.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            artifact.consume("api", self.directory, "our-ledger-api:consumer", environment)
+        load.assert_called_once()
 
     def test_valid_consumer_loads_then_verifies_and_retags_exact_image(self):
         with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE), \
@@ -491,11 +511,17 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("retention-days: 1", producer)
         self.assertIn("compression-level: 0", producer)
         self.assertIn("if-no-files-found: error", producer)
+        self.assertIn("id: upload", producer)
+        self.assertIn("CI_UPLOADED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}", producer)
+        self.assertIn("test_image_artifact.py publish", producer)
+        self.assertLess(producer.index("id: upload"), producer.index("id: provenance"))
+        for family in ("api", "web"):
+            self.assertIn(f"{family}_provenance: ${{{{ steps.provenance.outputs.{family}_provenance }}}}", producer)
         self.assertNotIn("github-token:", producer)
         self.assertNotIn("run-id:", producer)
         self.assertNotIn("repository:", producer)
 
-    def test_consumers_download_only_named_current_run_artifacts_and_never_fallback_in_shared_mode(self):
+    def test_consumers_download_only_selected_current_run_ids_and_never_fallback_in_shared_mode(self):
         workflow = (artifact.ROOT / ".github/workflows/full-ci.yml").read_text(encoding="utf-8")
         expected = {
             "production-bootstrap": ("verify-production-bootstrap.sh", ("api",)),
@@ -511,7 +537,8 @@ class WorkflowContractTest(unittest.TestCase):
                     body.count("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"),
                     downloads,
                 )
-                self.assertEqual(body.count("-${{ github.run_attempt }}"), downloads)
+                self.assertNotIn("-${{ github.run_attempt }}", body)
+                self.assertIn("CI_TEST_IMAGE_PRODUCER_RESULT: ${{ needs.test-images.result }}", body)
                 self.assertIn("CI_TEST_IMAGE_MODE", body)
                 self.assertIn("      - test-images", body)
                 job_level = body.split("    steps:\n", 1)[0]
@@ -523,6 +550,9 @@ class WorkflowContractTest(unittest.TestCase):
                     directory = f"${{{{ runner.temp }}}}/our-ledger-test-image-{family}"
                     self.assertEqual(body.count(f"path: {directory}"), 1)
                     self.assertEqual(verification_step.count(f"{variable}: {directory}"), 1)
+                    self.assertIn(f"CI_TEST_IMAGE_{family.upper()}_PROVENANCE: ${{{{ needs.test-images.outputs.{family}_provenance }}}}", job_level)
+                    self.assertIn(f"artifact-ids: ${{{{ steps.select-{family}.outputs.artifact_id }}}}", body)
+                    self.assertLess(body.index(f"test_image_artifact.py select {family}"), body.index(f"artifact-ids: ${{{{ steps.select-{family}"))
                 for forbidden in ("github-token:", "repository:", "run-id:", "pattern:", "merge-multiple:"):
                     self.assertNotIn(forbidden, body)
             verifier = (artifact.ROOT / f"scripts/verify-{name}.sh").read_text(encoding="utf-8")
@@ -548,6 +578,140 @@ class WorkflowContractTest(unittest.TestCase):
         # 2 strongest-clean + 2 producer + 3 runtime-config; shared consumers run zero builds.
         self.assertEqual(2 + len(artifact.CONSUMERS) + 3, 7)
         self.assertEqual(sum(len(consumers) for consumers in artifact.CONSUMERS.values()), 6)
+
+
+class ProvenanceTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="our-ledger-provenance-")
+        self.addCleanup(self.temporary.cleanup)
+        self.directory = Path(self.temporary.name)
+        self.producer = identity()
+        self.value, _ = write_authority(self.directory, self.producer)
+        self.output = self.directory / "github-output"
+        self.consumer = {
+            **PR, "GITHUB_JOB": "observability", "GITHUB_OUTPUT": str(self.output),
+            "CI_TEST_IMAGE_PRODUCER_RESULT": "success",
+            "CI_TEST_IMAGE_API_PROVENANCE": json.dumps({**self.value, "artifactId": "123"}),
+        }
+
+    def select(self, family="api", environment=None):
+        with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE):
+            artifact.select_artifact(family, environment or self.consumer)
+
+    def test_publish_select_and_adopt_pipeline_preserves_all_attempt_authorities(self):
+        for producer_attempt, consumer_attempt in ((1, 1), (1, 2), (2, 2)):
+            with self.subTest(producer=producer_attempt, consumer=consumer_attempt), \
+                 tempfile.TemporaryDirectory(prefix="our-ledger-rerun-pipeline-") as temporary:
+                root = Path(temporary)
+                directory = root / "artifact"
+                directory.mkdir()
+                producer_environment = {**PR, "GITHUB_RUN_ATTEMPT": str(producer_attempt),
+                                        "GITHUB_OUTPUT": str(root / "producer-output"),
+                                        "CI_UPLOADED_ARTIFACT_ID": str(100 + producer_attempt)}
+                producer = identity(environment=producer_environment)
+                value, _ = write_authority(directory, producer)
+                inspection = {"Id": value["imageId"], "Os": "linux", "Architecture": "amd64",
+                              "Config": {"Labels": artifact.expected_labels(producer)}}
+                with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE):
+                    artifact.publish_provenance("api", directory, producer_environment)
+                    _, payload = (root / "producer-output").read_text().strip().split("=", 1)
+                    environment = {**PR, "GITHUB_JOB": "backup-restore",
+                                   "GITHUB_RUN_ATTEMPT": str(consumer_attempt),
+                                   "GITHUB_OUTPUT": str(root / "consumer-output"),
+                                   "CI_TEST_IMAGE_PRODUCER_RESULT": "success",
+                                   "CI_TEST_IMAGE_API_PROVENANCE": payload}
+                    artifact.select_artifact("api", environment)
+                    with patch.object(artifact, "_image_exists", return_value=False), \
+                         patch.object(artifact, "_load_image") as load, \
+                         patch.object(artifact, "_inspect", return_value=inspection), \
+                         patch.object(artifact, "_remove_image"), \
+                         patch.object(artifact.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+                        artifact.consume("api", directory, "our-ledger-api:test", environment)
+                    load.assert_called_once()
+                self.assertEqual((root / "consumer-output").read_text(), f"artifact_id={100 + producer_attempt}\n")
+
+    def test_first_failed_only_and_all_reruns_use_explicit_producer_attempt(self):
+        for producer_attempt, consumer_attempt in ((1, 1), (1, 2), (2, 2), (2, 3)):
+            with self.subTest(producer=producer_attempt, consumer=consumer_attempt):
+                provenance = {**self.value, "runAttempt": producer_attempt, "artifactId": str(100 + producer_attempt)}
+                environment = {**self.consumer, "GITHUB_RUN_ATTEMPT": str(consumer_attempt),
+                               "CI_TEST_IMAGE_API_PROVENANCE": json.dumps(provenance)}
+                self.select(environment=environment)
+                selected_id, producer, value = artifact.producer_provenance(identity(environment=environment), environment)
+                self.assertEqual(selected_id, str(100 + producer_attempt))
+                self.assertEqual(producer.run_attempt, producer_attempt)
+                self.assertEqual(value["runAttempt"], producer_attempt)
+        self.assertEqual(self.output.read_text().splitlines(),
+                         ["artifact_id=101", "artifact_id=101", "artifact_id=102", "artifact_id=102"])
+
+    def test_matrix_family_attempts_are_independent_of_completion_order(self):
+        web_directory = self.directory / "web"
+        web_directory.mkdir()
+        web_identity = identity("web", {**PR, "GITHUB_RUN_ATTEMPT": "2"})
+        web_value, _ = write_authority(web_directory, web_identity)
+        environment = {**self.consumer, "GITHUB_RUN_ATTEMPT": "2",
+                       "CI_TEST_IMAGE_WEB_PROVENANCE": json.dumps({**web_value, "artifactId": "456"})}
+        for families in (("api", "web"), ("web", "api")):
+            for family in families:
+                self.select(family, environment)
+        self.assertEqual(self.output.read_text().splitlines(),
+                         ["artifact_id=123", "artifact_id=456", "artifact_id=456", "artifact_id=123"])
+
+    def test_missing_failed_unknown_or_skipped_producer_is_not_a_fallback(self):
+        for result in ("", "failure", "cancelled", "skipped", "unknown"):
+            with self.subTest(result=result), self.assertRaises(artifact.ArtifactError):
+                self.select(environment={**self.consumer, "CI_TEST_IMAGE_PRODUCER_RESULT": result})
+        self.assertFalse(self.output.exists())
+
+    def test_invalid_ambiguous_or_foreign_provenance_is_rejected_before_download(self):
+        valid = {**self.value, "artifactId": "123"}
+        payloads = ["", "{", "[]", "null", "x" * (artifact.MAX_MANIFEST_BYTES + 1),
+                    '{"artifactId":"123","artifactId":"456"}', json.dumps(self.value)]
+        changes = {
+            "artifactId": ("0", "-1", "1,2", "1\n", 123, True, "9007199254740992"),
+            "runAttempt": (0, 2, True, "1"),
+            "repository": ("foreign/our-ledger",),
+            "workflowRef": (f"{artifact.REPOSITORY}/.github/workflows/deploy.yml@refs/heads/main",),
+            "workflowRunId": ("999",), "githubSha": ("f" * 40,),
+            "prHeadSha": ("f" * 40,), "prBaseSha": ("f" * 40,),
+            "checkoutSha": ("f" * 40,), "sourceTreeSha": ("f" * 40,),
+            "dockerfileSha256": ("f" * 64,), "dockerignoreSha256": ("f" * 64,),
+            "imageFamily": ("web",), "producerJob": ("foreign",),
+            "platform": ("linux/arm64",), "cacheMode": ("disabled",),
+            "extra": (True,),
+        }
+        payloads += [json.dumps({**valid, key: changed}) for key, values in changes.items() for changed in values]
+        for payload in payloads:
+            with self.subTest(payload=payload[:80]), self.assertRaises(artifact.ArtifactError):
+                self.select(environment={**self.consumer, "CI_TEST_IMAGE_API_PROVENANCE": payload})
+        self.assertFalse(self.output.exists())
+
+    def test_publish_binds_successful_upload_id_to_current_manifest(self):
+        # GitHub output transport is outside the exact-two-file artifact directory.
+        with tempfile.TemporaryDirectory(prefix="our-ledger-provenance-output-") as temporary:
+            output = Path(temporary) / "output"
+            environment = {**PR, "GITHUB_OUTPUT": str(output), "CI_UPLOADED_ARTIFACT_ID": "123"}
+            with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE):
+                artifact.publish_provenance("api", self.directory, environment)
+            name, payload = output.read_text().strip().split("=", 1)
+            self.assertEqual(name, "api_provenance")
+            self.assertEqual(json.loads(payload), {**self.value, "artifactId": "123"})
+            for changes in ({"GITHUB_JOB": "observability"}, {"GITHUB_RUN_ATTEMPT": "2"},
+                            {"CI_UPLOADED_ARTIFACT_ID": ""}, {"CI_UPLOADED_ARTIFACT_ID": "123,456"}):
+                with self.subTest(changes=changes), \
+                     patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE), \
+                     self.assertRaises(artifact.ArtifactError):
+                    artifact.publish_provenance("api", self.directory, {**environment, **changes})
+            self.assertEqual(len(output.read_text().splitlines()), 1)
+
+    def test_changed_downloaded_manifest_is_rejected_before_docker_load(self):
+        environment = {**self.consumer, "GITHUB_RUN_ATTEMPT": "2"}
+        artifact._write_manifest(self.directory / artifact.MANIFEST_NAME, {**self.value, "imageId": "sha256:" + "f" * 64})
+        with patch.object(artifact, "_git", side_effect=lambda _root, rev: HEAD if rev == "HEAD" else TREE), \
+             patch.object(artifact, "_load_image") as load, self.assertRaises(artifact.ArtifactError):
+            artifact.consume("api", self.directory, "our-ledger-api:test", environment)
+        load.assert_not_called()
+
 
 
 class ProducerTest(unittest.TestCase):

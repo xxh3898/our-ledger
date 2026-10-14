@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 import tarfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
@@ -417,7 +417,9 @@ def _string(value: object, pattern: re.Pattern[str] | None = None, *, empty: boo
     return value
 
 
-def validate_manifest(value: dict, identity: Authority, archive: Path) -> tuple[str, str]:
+def _validate_manifest_metadata(value: dict, identity: Authority) -> None:
+    if set(value) != MANIFEST_KEYS:
+        raise ArtifactError("artifact manifest schema differs")
     if type(value.get("formatVersion")) is not int or value["formatVersion"] != FORMAT_VERSION:
         raise ArtifactError("artifact manifest version differs")
     if type(value.get("runAttempt")) is not int or value["runAttempt"] != identity.run_attempt:
@@ -434,10 +436,77 @@ def validate_manifest(value: dict, identity: Authority, archive: Path) -> tuple[
     for key, item in expected.items():
         if value.get(key) != item:
             raise ArtifactError(f"artifact manifest {key} differs")
+
+
+def validate_manifest(value: dict, identity: Authority, archive: Path) -> tuple[str, str]:
+    _validate_manifest_metadata(value, identity)
     actual_size, actual_sha = _hash_file(archive, maximum=MAX_ARCHIVE_BYTES)
     if actual_size != value["archiveSize"] or actual_sha != value["archiveSha256"]:
         raise ArtifactError("artifact archive bytes differ from the manifest")
     return value["imageId"], value["imageConfigDigest"]
+
+
+def _artifact_id(value: str) -> str:
+    if not RUN_ID.fullmatch(value) or len(value) > 16 or int(value) > 2**53 - 1:
+        raise ArtifactError("published artifact ID is invalid")
+    return value
+
+
+def _output(name: str, value: str, environment: Mapping[str, str]) -> None:
+    destination = environment.get("GITHUB_OUTPUT", "")
+    if not destination:
+        raise ArtifactError("GitHub output transport is unavailable")
+    with Path(destination).open("a", encoding="utf-8") as output:
+        output.write(f"{name}={value}\n")
+
+
+def publish_provenance(
+    family: str, directory: Path, environment: Mapping[str, str], root: Path = ROOT,
+) -> None:
+    """Bind this successful upload ID to this producer's strict manifest.
+
+    The workflow maps the family-specific output through needs.test-images.
+    It is not obtained from a caller-supplied artifact name or a latest search.
+    """
+    identity = authority(family, environment, root)
+    if environment.get("GITHUB_JOB") != "test-images":
+        raise ArtifactError("only the test-images producer may publish provenance")
+    artifact_id = _artifact_id(environment.get("CI_UPLOADED_ARTIFACT_ID", ""))
+    archive, authority_file = _validate_artifact_directory(directory)
+    value = _load_strict_json(authority_file)
+    validate_manifest(value, identity, archive)
+    provenance = json.dumps({**value, "artifactId": artifact_id}, sort_keys=True, separators=(",", ":"))
+    _output(f"{family}_provenance", provenance, environment)
+
+
+def producer_provenance(identity: Authority, environment: Mapping[str, str]) -> tuple[str, Authority, dict]:
+    """Validate the producer independently from the current consumer attempt."""
+    if environment.get("GITHUB_JOB") not in CONSUMERS[identity.family]:
+        raise ArtifactError("workflow job is not an allowed image consumer")
+    if environment.get("CI_TEST_IMAGE_PRODUCER_RESULT") != "success":
+        raise ArtifactError("test-images producer did not succeed")
+    payload = environment.get(f"CI_TEST_IMAGE_{identity.family.upper()}_PROVENANCE", "")
+    if not payload or len(payload.encode()) > MAX_MANIFEST_BYTES:
+        raise ArtifactError("producer provenance is unavailable or too large")
+    try:
+        value = json.loads(payload, object_pairs_hook=_object_pairs)
+    except json.JSONDecodeError as error:
+        raise ArtifactError("producer provenance is malformed") from error
+    if type(value) is not _NoDuplicateObject or set(value) != MANIFEST_KEYS | {"artifactId"}:
+        raise ArtifactError("producer provenance schema differs")
+    artifact_id = _artifact_id(_string(value.pop("artifactId"), RUN_ID))
+    attempt = value.get("runAttempt")
+    if type(attempt) is not int or not 1 <= attempt <= identity.run_attempt:
+        raise ArtifactError("producer attempt is outside the current run boundary")
+    producer = replace(identity, run_attempt=attempt)
+    _validate_manifest_metadata(value, producer)
+    return artifact_id, producer, value
+
+
+def select_artifact(family: str, environment: Mapping[str, str], root: Path = ROOT) -> None:
+    identity = authority(family, environment, root)
+    artifact_id, _, _ = producer_provenance(identity, environment)
+    _output("artifact_id", artifact_id, environment)
 
 
 def _safe_tar_name(name: str) -> bool:
@@ -606,9 +675,12 @@ def consume(
         raise ArtifactError("workflow job is not an allowed image consumer")
     if not TARGET_TAG.fullmatch(target_reference) or target_reference.startswith("-") or "@" in target_reference:
         raise ArtifactError("consumer image tag is invalid")
+    _, producer, provenance = producer_provenance(identity, environment)
     archive, authority_file = _validate_artifact_directory(artifact_directory)
     value = _load_strict_json(authority_file)
-    expected_id, expected_config = validate_manifest(value, identity, archive)
+    if value != provenance:
+        raise ArtifactError("downloaded manifest differs from the successful producer provenance")
+    expected_id, expected_config = validate_manifest(value, producer, archive)
     canonical = canonical_reference(family, identity.checkout_sha)
     _validate_docker_archive(archive, canonical, expected_id, expected_config)
     if _image_exists(canonical, environment) or _image_exists(target_reference, environment):
@@ -644,6 +716,12 @@ def main() -> int:
             produce(sys.argv[2], Path(sys.argv[3]), os.environ)
             print(f"current-run test image artifact created: {sys.argv[2]}")
             return 0
+        if len(sys.argv) == 4 and sys.argv[1] == "publish":
+            publish_provenance(sys.argv[2], Path(sys.argv[3]), os.environ)
+            return 0
+        if len(sys.argv) == 3 and sys.argv[1] == "select":
+            select_artifact(sys.argv[2], os.environ)
+            return 0
         if len(sys.argv) == 5 and sys.argv[1] == "consume":
             consume(sys.argv[2], Path(sys.argv[3]), sys.argv[4], os.environ)
             print(f"current-run test image artifact adopted: {sys.argv[2]}")
@@ -651,7 +729,7 @@ def main() -> int:
     except (ArtifactError, OSError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
         return 1
-    print("Usage: test_image_artifact.py produce <api|web> <directory> | consume <api|web> <directory> <tag>", file=sys.stderr)
+    print("Usage: test_image_artifact.py produce|publish <api|web> <directory> | select <api|web> | consume <api|web> <directory> <tag>", file=sys.stderr)
     return 2
 
 

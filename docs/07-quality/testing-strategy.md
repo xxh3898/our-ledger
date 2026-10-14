@@ -1,7 +1,7 @@
 ---
 status: active
-version: 2.6
-last_updated: 2026-09-12
+version: 2.7
+last_updated: 2026-10-14
 related:
   - ADR-008
   - 07-quality/financial-invariants.md
@@ -583,9 +583,15 @@ Hosted acceptance는 exact head/run, event/category, 각 scope와 mode, import h
 
 Issue #124는 직접 실행된 dev 대상 Full PR/push에서만 `test-images` matrix가 API와 Web을 한 번씩 병렬 build한다. PR은 #123 GHA cache read-only, direct dev push는 같은 cache scope의 trusted writer다. API artifact는 production-bootstrap, fresh-host-bootstrap, backup-restore, observability가 사용하고 Web artifact는 fresh-host-bootstrap과 observability가 사용한다. production-runtime의 strongest-clean API/Web 2개와 runtime-config canonical/synthetic 3개는 공유하지 않으므로 direct dev Full build 수는 11개에서 7개로 줄어든다. runtime-config는 기존 build가 약 0.40~1.94초로 짧고 canonical/synthetic context·platform·task label도 달라 `NOT_SHARED_WITH_JUSTIFICATION`이다.
 
-전송은 외부 registry나 credential 없이 current workflow run의 GitHub Actions artifact를 사용한다. producer는 `docker save | gzip -1 -n` archive와 strict JSON manifest를 만들고 1일만 보존한다. upload/download action은 exact commit으로 pin하고 artifact 이름을 `github.run_attempt`로 격리하며 consumer download에는 `github-token`, `repository`, `run-id`, pattern을 전달하지 않는다. artifact 이름이나 Docker tag만으로 신뢰하지 않는다.
+전송은 외부 registry나 credential 없이 current workflow run의 GitHub Actions artifact를 사용한다. producer는 `docker save | gzip -1 -n` archive와 strict JSON manifest를 만들고 1일만 보존한다. upload/download action은 exact commit으로 pin하고 artifact 이름을 producer의 `github.run_attempt`로 격리한다. Issue #168 이후 consumer는 이름을 현재 attempt로 재계산하지 않고 성공한 producer의 family별 job output이 지정한 immutable artifact ID 하나만 다운로드한다. consumer download에는 `github-token`, `repository`, `run-id`, pattern을 전달하지 않는다. artifact 이름이나 Docker tag만으로 신뢰하지 않는다.
 
 manifest는 실제 `git rev-parse HEAD`와 `HEAD^{tree}`, GitHub run ID/attempt/event/workflow/repository, PR head/base audit SHA, family/platform, Dockerfile과 실제 적용 `.dockerignore` SHA-256, archive byte size/SHA-256, image ID와 config digest, OCI source/revision/version, cache mode를 고정한다. PR의 synthetic merge checkout은 실제 build authority이고 PR head SHA는 별도 audit 값이다. consumer는 자기 checkout SHA/tree와 모든 metadata·archive bytes를 load 전에 검증하고, docker-save 내부 config digest와 OCI image index/image ID를 연결한 뒤 load된 image ID/platform 및 canonical cleanup·OCI/family/tree label을 다시 검증하고 job-local tag로만 retag한다.
+
+producer는 upload 성공 뒤 archive/manifest를 다시 검증하고 artifact ID와 strict manifest 전체를 `api_provenance` 또는 `web_provenance`로 게시한다. [GitHub matrix output 계약](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#using-job-outputs-in-a-matrix-job)에 따라 family별로 서로 다른 output 이름을 사용한다. consumer의 provenance 입력은 `needs.test-images.outputs`에만 연결하며 producer aggregate result가 `success`여야 한다. metadata 검색, 이전 이름 추정, 임의 run ID/이름 override, 새 token 권한은 사용하지 않는다.
+
+manifest의 `runAttempt`는 artifact를 만든 producer attempt다. consumer는 현재 실행 attempt를 별도 authority로 유지하며 `1 <= producer attempt <= consumer attempt`를 요구한다. 다른 repository/workflow/run/event/source/PR head/base/tree/family는 허용하지 않는다. 최초 실행은 현재 producer 출력, 실패 Job 재실행은 재사용된 성공 producer 출력, 전체 재실행은 새 producer 출력을 사용한다. API/Web producer attempt가 달라도 각 family를 따로 검증한다. 부분 matrix 재실행에서 출력이 누락되거나 producer aggregate가 실패하면 이전 artifact로 fallback하지 않고 실패한다. 다운로드한 manifest가 job output의 manifest와 완전히 같아야 기존 archive/OCI 검증으로 진행한다. 누락·만료된 artifact ID는 download 단계에서 실패하며 여러 ID나 중복 JSON key는 선택 단계에서 거부한다.
+
+실제 GitHub 부분 재실행에서 output 보존·matrix 결합의 수용 검증은 별도 Owner 승인 Gate다. synthetic 회귀와 최초 Hosted Full CI 성공을 실제 부분 재실행 성공으로 대체하지 않는다. 기존 run 38531567272에는 이 provenance output이 없으므로 새 Source를 소급 적용하거나 기존 run을 자동 재실행하지 않는다.
 
 `CI_TEST_IMAGE_MODE=required`에서는 producer 실패, artifact 누락, extra/symlink file, duplicate/extra/malformed JSON, foreign run, stale source/tree, family/platform, Dockerfile/dockerignore, archive hash, image ID 또는 OCI label 불일치를 rebuild로 숨기지 않고 실패한다. 이는 cache 장애 시 no-cache rebuild를 허용하는 #123 fallback과 다르다. mode가 unset/`disabled`인 local/main/release verifier는 artifact 없이 기존 build를 수행하고, 알 수 없는 mode는 실패한다. main/release reusable Full과 production-runtime, runtime-config, deploy/publish source는 shared artifact를 사용하지 않는다.
 

@@ -94,6 +94,9 @@ jobs:
 
   test-images:
     needs: repository
+    outputs:
+      api_provenance: ${{ steps.provenance.outputs.api_provenance }}
+      web_provenance: ${{ steps.provenance.outputs.web_provenance }}
     if: ${{ !cancelled() && needs.repository.outputs.run_full != 'false' && needs.repository.outputs.docker_cache_mode != 'disabled' }}
     strategy:
       fail-fast: false
@@ -135,6 +138,7 @@ jobs:
           '${{ runner.temp }}/our-ledger-test-image-${{ matrix.family }}'
 
       - name: Current-run test image 게시
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: our-ledger-test-image-${{ matrix.family }}-${{ github.run_attempt }}
@@ -144,6 +148,15 @@ jobs:
           compression-level: 0
           overwrite: false
           include-hidden-files: false
+
+      - name: 게시된 family별 producer provenance 전달
+        id: provenance
+        env:
+          CI_UPLOADED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: >-
+          python3 -B scripts/ci_tools/test_image_artifact.py publish
+          '${{ matrix.family }}'
+          '${{ runner.temp }}/our-ledger-test-image-${{ matrix.family }}'
 
   production-runtime:
     needs: repository
@@ -169,15 +182,22 @@ jobs:
       CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
       CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CI_TEST_IMAGE_PRODUCER_RESULT: ${{ needs.test-images.result }}
+      CI_TEST_IMAGE_API_PROVENANCE: ${{ needs.test-images.outputs.api_provenance }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+
+      - name: 검증된 API producer artifact 선택
+        id: select-api
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select api
 
       - name: Current-run API test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-api.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-api
 
       - name: Production Household bootstrap 검증
@@ -197,22 +217,35 @@ jobs:
       CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
       CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CI_TEST_IMAGE_PRODUCER_RESULT: ${{ needs.test-images.result }}
+      CI_TEST_IMAGE_API_PROVENANCE: ${{ needs.test-images.outputs.api_provenance }}
+      CI_TEST_IMAGE_WEB_PROVENANCE: ${{ needs.test-images.outputs.web_provenance }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+
+      - name: 검증된 API producer artifact 선택
+        id: select-api
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select api
 
       - name: Current-run API test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-api.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-api
+
+      - name: 검증된 Web producer artifact 선택
+        id: select-web
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select web
 
       - name: Current-run Web test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-web-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-web.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-web
 
       - name: Fresh-host bootstrap transaction 검증
@@ -281,15 +314,22 @@ jobs:
       CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
       CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CI_TEST_IMAGE_PRODUCER_RESULT: ${{ needs.test-images.result }}
+      CI_TEST_IMAGE_API_PROVENANCE: ${{ needs.test-images.outputs.api_provenance }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+
+      - name: 검증된 API producer artifact 선택
+        id: select-api
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select api
 
       - name: Current-run API test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-api.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-api
 
       - name: Backup/Restore 검증
@@ -321,22 +361,35 @@ jobs:
       CI_TEST_IMAGE_MODE: ${{ needs.repository.outputs.share_test_images == 'true' && 'required' || 'disabled' }}
       CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       CI_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CI_TEST_IMAGE_PRODUCER_RESULT: ${{ needs.test-images.result }}
+      CI_TEST_IMAGE_API_PROVENANCE: ${{ needs.test-images.outputs.api_provenance }}
+      CI_TEST_IMAGE_WEB_PROVENANCE: ${{ needs.test-images.outputs.web_provenance }}
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v7
+
+      - name: 검증된 API producer artifact 선택
+        id: select-api
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select api
 
       - name: Current-run API test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-api-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-api.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-api
+
+      - name: 검증된 Web producer artifact 선택
+        id: select-web
+        if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
+        run: python3 -B scripts/ci_tools/test_image_artifact.py select web
 
       - name: Current-run Web test image 수신
         if: ${{ env.CI_TEST_IMAGE_MODE == 'required' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: our-ledger-test-image-web-${{ github.run_attempt }}
+          artifact-ids: ${{ steps.select-web.outputs.artifact_id }}
           path: ${{ runner.temp }}/our-ledger-test-image-web
 
       - name: Observability/status 검증
